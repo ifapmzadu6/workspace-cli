@@ -1655,13 +1655,7 @@ fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
         entries: window.entries,
     };
     let truncated = data.omitted_lines > 0;
-    let mut summary = format!("{} operation(s)", data.entries.len());
-    if truncated {
-        summary.push_str(&format!(
-            " ({} older log line(s) omitted)",
-            data.omitted_lines
-        ));
-    }
+    let summary = log_summary(&data);
     let observation = Observation {
         kind: "workspace_log".to_string(),
         scope: data.log_path.clone(),
@@ -1856,6 +1850,17 @@ fn read_summary(path: &str, lines: Option<&str>, truncated: bool) -> String {
     };
     if truncated {
         summary.push_str(" (truncated)");
+    }
+    summary
+}
+
+fn log_summary(data: &LogData) -> String {
+    let mut summary = format!("{} operation(s)", data.entries.len());
+    if data.omitted_lines > 0 {
+        summary.push_str(&format!(
+            " ({} older log line(s) omitted)",
+            data.omitted_lines
+        ));
     }
     summary
 }
@@ -6129,6 +6134,34 @@ rename to new name.txt
         assert_eq!(
             read_summary("src/main.rs", Some("3:5"), true),
             "read src/main.rs lines 3:5 (truncated)"
+        );
+    }
+
+    #[test]
+    fn log_summary_reports_omitted_lines() {
+        let data = LogData {
+            log_path: ".workspace/log.jsonl".to_string(),
+            omitted_lines: 0,
+            entries: vec![],
+        };
+        assert_eq!(log_summary(&data), "0 operation(s)");
+
+        let data = LogData {
+            log_path: ".workspace/log.jsonl".to_string(),
+            omitted_lines: 2,
+            entries: vec![LogEntry {
+                id: "op-1".to_string(),
+                timestamp_unix_ms: 1,
+                kind: "observe".to_string(),
+                op: "status".to_string(),
+                scope: ".".to_string(),
+                summary: "entry".to_string(),
+                transaction_id: None,
+            }],
+        };
+        assert_eq!(
+            log_summary(&data),
+            "1 operation(s) (2 older log line(s) omitted)"
         );
     }
 
