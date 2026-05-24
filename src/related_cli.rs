@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::env;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 
 const MAX_RELATED_CLI_STDOUT: usize = 1_000_000;
 const MAX_RELATED_CLI_STDERR: usize = 24_000;
@@ -73,7 +73,7 @@ impl RelatedCli {
         max_results: usize,
         mode: &str,
     ) -> Result<RelatedCliOutput> {
-        let mut child = Command::new(&self.bin)
+        let child = Command::new(&self.bin)
             .current_dir(repo_root)
             .arg("query")
             .arg(target)
@@ -96,53 +96,39 @@ impl RelatedCli {
             .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("failed to run related-cli at {}", self.bin.display()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| anyhow!("failed to capture related-cli stdout"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| anyhow!("failed to capture related-cli stderr"))?;
-        let stdout_reader = std::thread::spawn(move || {
-            read_output_bytes_with_limit(stdout, MAX_RELATED_CLI_STDOUT)
-        });
-        let stderr_reader = std::thread::spawn(move || {
-            read_output_bytes_with_limit(stderr, MAX_RELATED_CLI_STDERR)
-        });
-        let status = child
-            .wait()
-            .context("failed to wait for related-cli query")?;
-        let stdout = stdout_reader
-            .join()
-            .map_err(|_| anyhow!("related-cli stdout reader thread panicked"))??;
-        let stderr = stderr_reader
-            .join()
-            .map_err(|_| anyhow!("related-cli stderr reader thread panicked"))??;
+        let output = wait_for_related_cli_query(child)?;
 
-        if !status.success() {
+        if !output.status.success() {
             bail!(
                 "related-cli query failed for {}: {}",
                 target,
-                stderr.display_text().trim()
+                output.stderr.display_text().trim()
             );
         }
-        if stdout.truncated {
+        if output.stdout.truncated {
             bail!(
                 "related-cli JSON output exceeded {} bytes",
                 MAX_RELATED_CLI_STDOUT
             );
         }
 
-        serde_json::from_slice(&stdout.bytes)
+        serde_json::from_slice(&output.stdout.bytes)
             .with_context(|| "failed to parse related-cli JSON output")
     }
+}
+
+struct CapturedCommandOutput {
+    status: ExitStatus,
+    stdout: CapturedOutput,
+    stderr: CapturedOutput,
 }
 
 struct CapturedOutput {
     bytes: Vec<u8>,
     truncated: bool,
 }
+
+type CapturedOutputReader = std::thread::JoinHandle<Result<CapturedOutput>>;
 
 impl CapturedOutput {
     fn display_text(&self) -> String {
@@ -152,6 +138,48 @@ impl CapturedOutput {
         }
         text
     }
+}
+
+fn wait_for_related_cli_query(mut child: Child) -> Result<CapturedCommandOutput> {
+    let stdout_reader = capture_related_cli_stdout(&mut child)?;
+    let stderr_reader = capture_related_cli_stderr(&mut child)?;
+    let status = child
+        .wait()
+        .context("failed to wait for related-cli query")?;
+    let stdout = join_output_reader(stdout_reader, "related-cli stdout")?;
+    let stderr = join_output_reader(stderr_reader, "related-cli stderr")?;
+
+    Ok(CapturedCommandOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn capture_related_cli_stdout(child: &mut Child) -> Result<CapturedOutputReader> {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture related-cli stdout"))?;
+    Ok(std::thread::spawn(move || {
+        read_output_bytes_with_limit(stdout, MAX_RELATED_CLI_STDOUT)
+    }))
+}
+
+fn capture_related_cli_stderr(child: &mut Child) -> Result<CapturedOutputReader> {
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture related-cli stderr"))?;
+    Ok(std::thread::spawn(move || {
+        read_output_bytes_with_limit(stderr, MAX_RELATED_CLI_STDERR)
+    }))
+}
+
+fn join_output_reader(reader: CapturedOutputReader, stream_name: &str) -> Result<CapturedOutput> {
+    reader
+        .join()
+        .map_err(|_| anyhow!("{stream_name} reader thread panicked"))?
 }
 
 fn read_output_bytes_with_limit<R: Read>(
