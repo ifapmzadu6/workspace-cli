@@ -208,6 +208,30 @@ fn search_quotes_read_suggestions_for_paths_that_need_shell_quoting() {
 }
 
 #[test]
+fn search_truncates_large_match_text() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    let line = format!("needle {} tail\n", "a".repeat(3_000));
+    write_file(temp.path(), "large.txt", &line);
+
+    let search = run_workspace(temp.path(), &["search", "needle", "--json"]);
+    let text = search["data"]["matches"][0]["text"]
+        .as_str()
+        .expect("match text should be a string");
+
+    assert_eq!(search["kind"], "workspace_search");
+    assert_eq!(search["truncated"], true);
+    assert_eq!(search["data"]["truncated_match_texts"], 1);
+    assert!(
+        search["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("truncated 1 match text")
+    );
+    assert!(text.contains("[output truncated]"));
+    assert!(!text.contains("tail"));
+}
+
+#[test]
 fn read_rejects_paths_outside_workspace() {
     let workspace = TempDir::new().expect("workspace temp dir should be created");
     let outside = TempDir::new().expect("outside temp dir should be created");

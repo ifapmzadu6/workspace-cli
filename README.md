@@ -266,6 +266,7 @@ running commands
 ### `workspace search`
 
 Searches within the workspace. The initial implementation is ripgrep-based.
+Long matching lines are bounded and counted in `truncated_match_texts`.
 Future versions can combine:
 
 ```text

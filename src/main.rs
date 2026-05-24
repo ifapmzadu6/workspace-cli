@@ -22,6 +22,7 @@ const COCHANGE_INDEX_FILE: &str = ".workspace/index/cochange.json";
 const MAX_CAPTURED_OUTPUT: usize = 24_000;
 const MAX_READ_CONTENT: usize = 24_000;
 const MAX_DIFF_PATCH: usize = 48_000;
+const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Parser)]
@@ -365,6 +366,7 @@ struct StatusData {
 struct SearchData {
     query: String,
     total_matches: usize,
+    truncated_match_texts: usize,
     matches: Vec<SearchMatch>,
 }
 
@@ -751,7 +753,8 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
 }
 
 fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
-    let (matches, total_matches) = rg_search(workspace, &args.query, args.max_results)?;
+    let (matches, total_matches, truncated_match_texts) =
+        rg_search(workspace, &args.query, args.max_results)?;
     let evidence = matches
         .iter()
         .take(12)
@@ -764,10 +767,11 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
     let data = SearchData {
         query: args.query.clone(),
         total_matches,
+        truncated_match_texts,
         matches,
     };
-    let truncated = data.total_matches > data.matches.len();
-    let summary = if truncated {
+    let truncated = data.total_matches > data.matches.len() || data.truncated_match_texts > 0;
+    let mut summary = if data.total_matches > data.matches.len() {
         format!(
             "{} match(es) for {:?}, showing {}",
             data.total_matches,
@@ -777,6 +781,12 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
     } else {
         format!("{} match(es) for {:?}", data.total_matches, data.query)
     };
+    if data.truncated_match_texts > 0 {
+        summary.push_str(&format!(
+            ", truncated {} match text(s)",
+            data.truncated_match_texts
+        ));
+    }
     let next_observations = data
         .matches
         .iter()
@@ -2991,7 +3001,7 @@ fn rg_search(
     workspace: &Workspace,
     query: &str,
     max_results: usize,
-) -> Result<(Vec<SearchMatch>, usize)> {
+) -> Result<(Vec<SearchMatch>, usize, usize)> {
     let output = match Command::new("rg")
         .current_dir(&workspace.root)
         .args([
@@ -3030,6 +3040,7 @@ fn rg_search(
 
     let mut matches = Vec::new();
     let mut total_matches = 0usize;
+    let mut truncated_match_texts = 0usize;
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let value: Value = serde_json::from_str(line).context("failed to parse ripgrep JSON")?;
         if value.get("type").and_then(Value::as_str) != Some("match") {
@@ -3047,13 +3058,17 @@ fn rg_search(
             .unwrap_or("")
             .trim_start_matches("./")
             .to_string();
-        let text = data
+        let raw_text = data
             .get("lines")
             .and_then(|lines| lines.get("text"))
             .and_then(Value::as_str)
             .unwrap_or("")
             .trim_end_matches('\n')
             .to_string();
+        let (text, text_truncated) = truncate_search_match_text(&raw_text);
+        if text_truncated {
+            truncated_match_texts += 1;
+        }
         let line_number = data
             .get("line_number")
             .and_then(Value::as_u64)
@@ -3075,16 +3090,17 @@ fn rg_search(
         });
     }
 
-    Ok((matches, total_matches))
+    Ok((matches, total_matches, truncated_match_texts))
 }
 
 fn fallback_text_search(
     workspace: &Workspace,
     query: &str,
     max_results: usize,
-) -> Result<(Vec<SearchMatch>, usize)> {
+) -> Result<(Vec<SearchMatch>, usize, usize)> {
     let mut matches = Vec::new();
     let mut total_matches = 0usize;
+    let mut truncated_match_texts = 0usize;
     let mut file_paths = Vec::new();
 
     for entry in WalkDir::new(&workspace.root)
@@ -3116,16 +3132,25 @@ fn fallback_text_search(
             if matches.len() >= max_results {
                 continue;
             }
+            let (text, text_truncated) = truncate_search_match_text(line);
+            if text_truncated {
+                truncated_match_texts += 1;
+            }
             matches.push(SearchMatch {
                 path: rel_path.clone(),
                 line: (line_index + 1) as u64,
                 column: (column_index + 1) as u64,
-                text: line.to_string(),
+                text,
             });
         }
     }
 
-    Ok((matches, total_matches))
+    Ok((matches, total_matches, truncated_match_texts))
+}
+
+fn truncate_search_match_text(text: &str) -> (String, bool) {
+    let truncated = text.chars().count() > MAX_SEARCH_MATCH_TEXT;
+    (truncate_string(text, MAX_SEARCH_MATCH_TEXT), truncated)
 }
 
 fn parse_line_range(value: &str) -> Result<(usize, usize)> {
@@ -3884,10 +3909,11 @@ index 0000000..587be6b
             is_git_repo: false,
         };
 
-        let (matches, total_matches) =
+        let (matches, total_matches, truncated_match_texts) =
             fallback_text_search(&workspace, "needle", 2).expect("fallback search should work");
 
         assert_eq!(total_matches, 3);
+        assert_eq!(truncated_match_texts, 0);
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].path, "a.txt");
         assert_eq!(matches[0].line, 1);
