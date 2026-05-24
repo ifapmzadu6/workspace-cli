@@ -1097,7 +1097,7 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
         truncated_match_texts,
         matches,
     };
-    let truncated = data.total_matches > data.matches.len() || data.truncated_match_texts > 0;
+    let truncated = search_truncated(&data);
     let summary = search_summary(&data);
     let next_observations = search_next_observations(&data.matches);
     let observation = Observation {
@@ -1279,7 +1279,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
             impacted: vec![],
         }
     };
-    let seed_files_truncated = data.omitted_seed_files > 0;
+    let seed_files_truncated = impact_truncated(&data);
     let summary = impact_summary(&data);
     let evidence = impact_evidence(&data);
     let next_observations = read_next_observations(
@@ -1383,8 +1383,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
             false,
         )
     };
-    let file_list_truncated = data.omitted_files > 0;
-    let truncated = summary_truncated || patch_truncated || file_list_truncated;
+    let truncated = diff_truncated(&data, summary_truncated, patch_truncated);
     let summary = diff_summary(&data, summary_truncated, patch_truncated);
     let evidence = changed_file_evidence(&data.files, "git diff changed file");
     let next_observations =
@@ -1571,7 +1570,7 @@ fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
         omitted_lines: window.omitted_lines,
         entries: window.entries,
     };
-    let truncated = data.omitted_lines > 0;
+    let truncated = log_truncated(&data);
     let summary = log_summary(&data);
     let observation = Observation {
         kind: "workspace_log".to_string(),
@@ -1856,6 +1855,10 @@ fn impact_summary(data: &ImpactData) -> String {
     }
 }
 
+fn search_truncated(data: &SearchData) -> bool {
+    data.total_matches > data.matches.len() || data.truncated_match_texts > 0
+}
+
 fn search_summary(data: &SearchData) -> String {
     let mut summary = if data.total_matches > data.matches.len() {
         format!(
@@ -1874,6 +1877,14 @@ fn search_summary(data: &SearchData) -> String {
         ));
     }
     summary
+}
+
+fn impact_truncated(data: &ImpactData) -> bool {
+    data.omitted_seed_files > 0
+}
+
+fn diff_truncated(data: &DiffData, summary_truncated: bool, patch_truncated: bool) -> bool {
+    summary_truncated || patch_truncated || data.omitted_files > 0
 }
 
 fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool) -> String {
@@ -1940,6 +1951,10 @@ fn log_summary(data: &LogData) -> String {
         ));
     }
     summary
+}
+
+fn log_truncated(data: &LogData) -> bool {
+    data.omitted_lines > 0
 }
 
 fn transaction_patch_path(workspace: &Workspace, transaction_id: &str) -> Result<PathBuf> {
@@ -6142,6 +6157,91 @@ rename to new name.txt
             rollback_followup_observations(),
             vec!["workspace diff --summary"]
         );
+    }
+
+    #[test]
+    fn observation_truncation_helpers_report_data_limits() {
+        let search = SearchData {
+            query: "needle".to_string(),
+            total_matches: 2,
+            truncated_match_texts: 0,
+            matches: vec![SearchMatch {
+                path: "a.txt".to_string(),
+                line: 1,
+                column: 1,
+                text: "needle".to_string(),
+            }],
+        };
+        assert!(search_truncated(&search));
+
+        let search = SearchData {
+            total_matches: 1,
+            truncated_match_texts: 1,
+            ..search
+        };
+        assert!(search_truncated(&search));
+
+        let search = SearchData {
+            total_matches: 1,
+            truncated_match_texts: 0,
+            ..search
+        };
+        assert!(!search_truncated(&search));
+
+        let impact = ImpactData {
+            source: "diff".to_string(),
+            method: "cochange".to_string(),
+            ranking: "direct".to_string(),
+            relationship_source: "git history".to_string(),
+            is_repo: true,
+            seed_files: vec![],
+            seed_file_count: 2,
+            omitted_seed_files: 1,
+            commits_scanned: 0,
+            commits_matched: 0,
+            ignored_large_commits: 0,
+            max_commits: 500,
+            max_files_per_commit: 100,
+            impacted: vec![],
+        };
+        assert!(impact_truncated(&impact));
+
+        let impact = ImpactData {
+            omitted_seed_files: 0,
+            ..impact
+        };
+        assert!(!impact_truncated(&impact));
+
+        let diff = DiffData {
+            is_repo: true,
+            summary: String::new(),
+            file_count: 1,
+            files: vec!["a.txt".to_string()],
+            omitted_files: 1,
+            patch: None,
+        };
+        assert!(diff_truncated(&diff, false, false));
+        assert!(diff_truncated(&diff, true, false));
+
+        let diff = DiffData {
+            omitted_files: 0,
+            ..diff
+        };
+        assert!(diff_truncated(&diff, false, true));
+        assert!(!diff_truncated(&diff, false, false));
+
+        let log = LogData {
+            log_path: ".workspace/log.jsonl".to_string(),
+            omitted_lines: 1,
+            entries: vec![],
+        };
+        assert!(log_truncated(&log));
+
+        let log = LogData {
+            omitted_lines: 0,
+            ..log
+        };
+        assert!(!log_truncated(&log));
     }
 
     #[test]
