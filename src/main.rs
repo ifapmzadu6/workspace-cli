@@ -2806,10 +2806,7 @@ fn impact_by_related_cli(
         }
     }
 
-    let max_score = accumulators
-        .values()
-        .map(|item| item.score)
-        .fold(0.0, f64::max);
+    let max_score = max_rank_weight(accumulators.values().map(|item| item.score));
     let mut impacted = Vec::new();
     for (path, item) in accumulators {
         push_bounded_sorted(
@@ -3206,10 +3203,7 @@ fn rank_cochanges(
         }
     }
 
-    let max_weight = accumulators
-        .values()
-        .map(|item| item.weighted_cochanges)
-        .fold(0.0, f64::max);
+    let max_weight = max_rank_weight(accumulators.values().map(|item| item.weighted_cochanges));
     let mut related = Vec::new();
     for (path, item) in accumulators {
         push_bounded_sorted(
@@ -3265,12 +3259,13 @@ fn rank_cochanges_from_index(
     max_results: usize,
 ) -> CochangeRanking {
     let target = normalize_repo_path(target);
-    let max_weight = index
-        .edges
-        .iter()
-        .filter(|edge| edge.a == target || edge.b == target)
-        .map(|edge| edge.weighted_cochanges)
-        .fold(0.0, f64::max);
+    let max_weight = max_rank_weight(
+        index
+            .edges
+            .iter()
+            .filter(|edge| edge.a == target || edge.b == target)
+            .map(|edge| edge.weighted_cochanges),
+    );
     let mut related = Vec::new();
 
     for edge in &index.edges {
@@ -3298,7 +3293,7 @@ fn rank_cochanges_from_index(
 
     CochangeRanking {
         related,
-        commits_matched: index.file_commit_counts.get(&target).copied().unwrap_or(0),
+        commits_matched: indexed_file_commit_count(index, &target),
         ignored_large_commits: 0,
     }
 }
@@ -3337,7 +3332,7 @@ fn rank_cochanges_pagerank_from_index(
 
     CochangeRanking {
         related,
-        commits_matched: index.file_commit_counts.get(&target).copied().unwrap_or(0),
+        commits_matched: indexed_file_commit_count(index, &target),
         ignored_large_commits: 0,
     }
 }
@@ -3398,10 +3393,7 @@ fn rank_cochange_impact(
         }
     }
 
-    let max_weight = accumulators
-        .values()
-        .map(|item| item.weighted_cochanges)
-        .fold(0.0, f64::max);
+    let max_weight = max_rank_weight(accumulators.values().map(|item| item.weighted_cochanges));
     let mut impacted = Vec::new();
     for (path, item) in accumulators {
         push_bounded_sorted(
@@ -3463,10 +3455,7 @@ fn rank_cochange_impact_from_index(
         }
     }
 
-    let max_weight = accumulators
-        .values()
-        .map(|item| item.weighted_cochanges)
-        .fold(0.0, f64::max);
+    let max_weight = max_rank_weight(accumulators.values().map(|item| item.weighted_cochanges));
     let mut impacted = Vec::new();
     for (path, item) in accumulators {
         push_bounded_sorted(
@@ -3627,11 +3616,11 @@ fn personalized_pagerank(
         rank = next;
     }
 
-    let max_score = rank
-        .iter()
-        .filter(|(path, _)| !seed_files.contains(*path))
-        .map(|(_, score)| *score)
-        .fold(0.0, f64::max);
+    let max_score = max_rank_weight(
+        rank.iter()
+            .filter(|(path, _)| !seed_files.contains(*path))
+            .map(|(_, score)| *score),
+    );
     if max_score == 0.0 {
         return vec![];
     }
@@ -3839,8 +3828,16 @@ fn normalized_seed_file_set(seed_files: &[String]) -> BTreeSet<String> {
 fn indexed_seed_commit_count(index: &CochangeIndex, seed_files: &BTreeSet<String>) -> usize {
     seed_files
         .iter()
-        .filter_map(|file| index.file_commit_counts.get(file))
+        .map(|file| indexed_file_commit_count(index, file))
         .sum()
+}
+
+fn indexed_file_commit_count(index: &CochangeIndex, file: &str) -> usize {
+    index.file_commit_counts.get(file).copied().unwrap_or(0)
+}
+
+fn max_rank_weight(weights: impl IntoIterator<Item = f64>) -> f64 {
+    weights.into_iter().fold(0.0, f64::max)
 }
 
 fn normalized_rank_score(weight: f64, max_weight: f64) -> f64 {
@@ -6851,6 +6848,12 @@ src/b.rs
     }
 
     #[test]
+    fn max_rank_weight_returns_zero_for_empty_inputs() {
+        assert_eq!(max_rank_weight([]), 0.0);
+        assert_eq!(max_rank_weight([0.25, 1.5, 0.75]), 1.5);
+    }
+
+    #[test]
     fn seed_file_helpers_normalize_and_count_indexed_commits() {
         let seeds = vec![
             "./src/a.rs".to_string(),
@@ -6882,6 +6885,8 @@ src/b.rs
             edges: vec![],
         };
 
+        assert_eq!(indexed_file_commit_count(&index, "src/a.rs"), 2);
+        assert_eq!(indexed_file_commit_count(&index, "src/missing.rs"), 0);
         assert_eq!(indexed_seed_commit_count(&index, &seed_set), 5);
     }
 
