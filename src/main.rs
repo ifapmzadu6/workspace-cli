@@ -706,6 +706,11 @@ struct RunData {
     stderr: String,
 }
 
+struct ObservedRun {
+    data: RunData,
+    output_truncated: bool,
+}
+
 struct CapturedOutput {
     text: String,
     truncated: bool,
@@ -1396,16 +1401,15 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
     let duration_ms = start.elapsed().as_millis();
     let stdout = join_captured_output_reader(stdout_reader, "stdout")?;
     let stderr = join_captured_output_reader(stderr_reader, "stderr")?;
-    let truncated = stdout.truncated || stderr.truncated;
-    let data = RunData {
-        command: args.command.clone(),
-        cwd: workspace.root.to_string_lossy().into_owned(),
-        exit_code: status.code(),
+    let run = observed_run(
+        workspace,
+        &args.command,
+        status.code(),
         duration_ms,
-        stdout: stdout.text,
-        stderr: stderr.text,
-    };
-    let observation = run_observation(data, truncated);
+        stdout,
+        stderr,
+    );
+    let observation = run_observation(run);
 
     append_log(
         workspace,
@@ -1871,15 +1875,38 @@ fn impact_observation(workspace: &Workspace, data: ImpactData) -> Observation<Im
     }
 }
 
-fn run_observation(data: RunData, output_truncated: bool) -> Observation<RunData> {
-    let summary = run_summary(data.exit_code, data.duration_ms, output_truncated);
+fn observed_run(
+    workspace: &Workspace,
+    command: &str,
+    exit_code: Option<i32>,
+    duration_ms: u128,
+    stdout: CapturedOutput,
+    stderr: CapturedOutput,
+) -> ObservedRun {
+    let output_truncated = stdout.truncated || stderr.truncated;
+    ObservedRun {
+        data: RunData {
+            command: command.to_string(),
+            cwd: workspace.root.to_string_lossy().into_owned(),
+            exit_code,
+            duration_ms,
+            stdout: stdout.text,
+            stderr: stderr.text,
+        },
+        output_truncated,
+    }
+}
+
+fn run_observation(run: ObservedRun) -> Observation<RunData> {
+    let data = run.data;
+    let summary = run_summary(data.exit_code, data.duration_ms, run.output_truncated);
     Observation {
         kind: WORKSPACE_RUN_KIND.to_string(),
         scope: data.command.clone(),
         summary,
         data,
         evidence: vec![],
-        truncated: output_truncated,
+        truncated: run.output_truncated,
         next_observations: run_followup_observations(),
     }
 }
@@ -7687,16 +7714,31 @@ rename to new name.txt
 
     #[test]
     fn run_and_log_observation_helpers_preserve_contract() {
-        let run = RunData {
-            command: "printf ok".to_string(),
-            cwd: "/repo".to_string(),
-            exit_code: Some(0),
-            duration_ms: 42,
-            stdout: "ok".to_string(),
-            stderr: String::new(),
+        let run_workspace = Workspace {
+            root: PathBuf::from("/repo"),
+            is_git_repo: false,
         };
+        let run = observed_run(
+            &run_workspace,
+            "printf ok",
+            Some(0),
+            42,
+            CapturedOutput {
+                text: "ok".to_string(),
+                truncated: false,
+            },
+            CapturedOutput {
+                text: String::new(),
+                truncated: true,
+            },
+        );
 
-        let observation = run_observation(run, true);
+        assert_eq!(run.data.cwd, "/repo");
+        assert_eq!(run.data.stdout, "ok");
+        assert_eq!(run.data.stderr, "");
+        assert!(run.output_truncated);
+
+        let observation = run_observation(run);
         assert_eq!(observation.kind, WORKSPACE_RUN_KIND);
         assert_eq!(observation.scope, "printf ok");
         assert_eq!(
