@@ -644,6 +644,33 @@ fn diff_includes_staged_changes() {
 }
 
 #[test]
+fn diff_truncates_large_patch() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "large.txt", "old\n");
+    commit_all(root, "initial large file");
+    write_file(root, "large.txt", &format!("{}tail\n", "a".repeat(60_000)));
+
+    let diff = run_workspace(root, &["diff", "--json"]);
+    let patch = diff["data"]["patch"]
+        .as_str()
+        .expect("diff patch should be a string");
+
+    assert_eq!(diff["kind"], "workspace_diff");
+    assert_eq!(diff["truncated"], true);
+    assert!(
+        diff["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("patch truncated")
+    );
+    assert!(strings_at(&diff, &["data", "files"]).contains(&"large.txt".to_string()));
+    assert!(patch.contains("[output truncated]"));
+    assert!(!patch.contains("tail"));
+}
+
+#[test]
 fn diff_does_not_suggest_reading_deleted_files() {
     let temp = init_git_repo();
     let root = temp.path();

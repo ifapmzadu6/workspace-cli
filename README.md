@@ -291,6 +291,8 @@ Future versions can read by symbol or document section.
 
 Shows the current diff. Future versions should distinguish user-authored changes
 from agent-authored changes.
+Full patch output is bounded and marked as `truncated`; use `--summary` for a
+small file/stat-only observation.
 
 ```sh
 workspace diff

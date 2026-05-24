@@ -21,6 +21,7 @@ const INDEX_DIR: &str = ".workspace/index";
 const COCHANGE_INDEX_FILE: &str = ".workspace/index/cochange.json";
 const MAX_CAPTURED_OUTPUT: usize = 24_000;
 const MAX_READ_CONTENT: usize = 24_000;
+const MAX_DIFF_PATCH: usize = 48_000;
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Parser)]
@@ -1109,33 +1110,44 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
 }
 
 fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
-    let data = if workspace.is_git_repo {
+    let (data, truncated) = if workspace.is_git_repo {
         let summary = git_observable_diff_output(workspace, ["--stat"])?;
         let files = git_name_only_paths(&git_observable_diff_output(workspace, ["--name-only"])?);
-        let patch = if args.summary {
-            None
+        let (patch, patch_truncated) = if args.summary {
+            (None, false)
         } else {
-            Some(git_observable_diff_output(workspace, [])?)
+            let patch = git_observable_diff_output(workspace, [])?;
+            let truncated = patch.chars().count() > MAX_DIFF_PATCH;
+            (Some(truncate_string(&patch, MAX_DIFF_PATCH)), truncated)
         };
-        DiffData {
-            is_repo: true,
-            summary,
-            files,
-            patch,
-        }
+        (
+            DiffData {
+                is_repo: true,
+                summary,
+                files,
+                patch,
+            },
+            patch_truncated,
+        )
     } else {
-        DiffData {
-            is_repo: false,
-            summary: "not a git repository".to_string(),
-            files: vec![],
-            patch: None,
-        }
+        (
+            DiffData {
+                is_repo: false,
+                summary: "not a git repository".to_string(),
+                files: vec![],
+                patch: None,
+            },
+            false,
+        )
     };
-    let summary = if data.is_repo {
+    let mut summary = if data.is_repo {
         format!("{} changed file(s)", data.files.len())
     } else {
         data.summary.clone()
     };
+    if truncated {
+        summary.push_str(" (patch truncated)");
+    }
     let evidence = data
         .files
         .iter()
@@ -1158,7 +1170,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
         summary,
         data,
         evidence,
-        truncated: false,
+        truncated,
         next_observations,
     };
 
