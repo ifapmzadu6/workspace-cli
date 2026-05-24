@@ -1,10 +1,10 @@
 # workspace cli
 
-`workspace cli` は、LLMエージェントと人間が同じ操作面を通じてプロジェクト
-workspaceを読み、変更し、検証し、状態を追跡するためのCLIである。
+`workspace cli` is a CLI runtime for humans and LLM agents to read, change,
+verify, and track a project workspace through the same operation surface.
 
-狙いは「AI coding assistant」を直接作ることではない。先に作るべきものは、
-エージェントが安全かつ効率よくworkspaceを扱うためのruntimeである。
+The goal is not to build an AI coding assistant directly. The first useful
+layer is a runtime that lets agents handle a workspace safely and efficiently.
 
 ```text
 workspace_before + intent
@@ -16,14 +16,14 @@ workspace operations
 workspace_after + evidence
 ```
 
-## 現在のMVP
+## Current MVP
 
-このリポジトリにはRust製のCLI実装が入っている。バイナリ名は `workspace`。
+This repository contains a Rust CLI. The binary name is `workspace`.
 
-### インストール
+### Installation
 
-開発中は `cargo run -- <command>` で実行できる。ローカルに `workspace` として入れるなら
-以下を使う。
+During development, run commands with `cargo run -- <command>`. To install the
+local binary as `workspace`, use:
 
 ```sh
 cargo install --path .
@@ -31,7 +31,7 @@ workspace --version
 workspace --help
 ```
 
-### 基本コマンド
+### Basic Commands
 
 ```sh
 cargo run -- map
@@ -48,30 +48,30 @@ cargo run -- run "cargo test"
 cargo run -- log
 ```
 
-現在のコマンドは以下を提供する。
+The current command set provides:
 
 ```text
-workspace map       workspaceの地図を作る
-workspace status    git状態、index状態、最近の操作を見る
-workspace search    ripgrepベースで検索する
-workspace index     workspace用indexを作る
-workspace related   git履歴の同時変更から関連ファイルを見る
-workspace impact    現在の差分から影響候補ファイルを見る
-workspace read      テキストファイルまたは行範囲を読む
-workspace diff      git diffを見る
-workspace patch     patchをtransactionとして適用する
-workspace run       コマンドを実行して結果を記録する
-workspace log       操作ログを見る
-workspace rollback  workspace patchのtransactionを戻す
+workspace map       Build a map of the workspace
+workspace status    Show git state, index state, and recent operations
+workspace search    Search with ripgrep
+workspace index     Build workspace indexes
+workspace related   Find files related by Git co-change history
+workspace impact    Find likely impacted files from the current diff
+workspace read      Read a text file or line range
+workspace diff      Show the current git diff
+workspace patch     Apply a patch as a recorded transaction
+workspace run       Run a command and record the result
+workspace log       Show the operation log
+workspace rollback  Roll back a workspace patch transaction
 ```
 
-各観測コマンドは `--json` を持ち、LLM agentが扱いやすいように
-`summary`、`data`、`evidence`、`next_observations` を含む構造化JSONを返す。
-操作ログは `.workspace/log.jsonl` に保存される。
+Observation commands support `--json` and return structured output with
+`summary`, `data`, `evidence`, and `next_observations` so an LLM agent can use
+the result directly. Operation logs are stored in `.workspace/log.jsonl`.
 
-### MVPの検証
+### Validation
 
-現在の品質ゲートは以下。
+The current quality gates are:
 
 ```sh
 cargo fmt --check
@@ -80,46 +80,54 @@ cargo clippy --all-targets -- -D warnings
 cargo build
 ```
 
-単体テストに加えて、実際の `workspace` バイナリを一時workspaceで起動する統合テストを
-持っている。`map/read`、co-change index、`related/impact`、`patch/run/log/diff/rollback`
-の主要フローを検証する。
+In addition to unit tests, the repository has integration tests that run the
+real `workspace` binary inside temporary workspaces. The tests cover
+`map/read`, the co-change index, `related/impact`, and the
+`patch/run/log/diff/rollback` transaction flow.
 
-効果測定は [docs/effect-measurement.md](/Users/keisukekarijuku/git/workspace-cli/docs/effect-measurement.md)
-と `tools/measure_effect.py` にまとめている。ここでは「コマンドが動くか」ではなく、
-観測coverage、関連ファイル発見、audit/rollback evidenceがどれだけ得られるかを測る。
+Effect measurement is documented in
+[docs/effect-measurement.md](docs/effect-measurement.md) and implemented by
+`tools/measure_effect.py`. It measures observation coverage, related-file
+discovery, and audit/rollback evidence instead of only checking that commands
+run.
 
-### 履歴ベースの関連観測
+### History-Based Related-File Observation
 
-`workspace related <file> --by cochange` は、ファイル内容ではなくgit履歴を使って
-関連ファイルを推定する。同じcommitで一緒に変更されたファイルを関連ありとみなし、
-最近のcommitほど強く、変更ファイル数が多いcommitほど弱く重み付けする。
+`workspace related <file> --by cochange` estimates related files from Git
+history, not from file contents. Files changed in the same commit are treated as
+operationally related. Recent commits are weighted more strongly, and broad
+commits are down-weighted or filtered.
 
-これは「このファイルを触るなら、過去の作業ではどのファイルも一緒に触られたか」
-を観測するための機能である。
+The intent is to answer:
+
+```text
+If I touch this file, which files did past work usually touch with it?
+```
 
 ```sh
 workspace related src/config.rs --by cochange --json
 workspace related src/config.rs --max-commits 500 --max-files-per-commit 30
 ```
 
-`related` バイナリが見つかる場合、indexを使わないdirect co-change観測は
-[related-cli](https://github.com/ifapmzadu6/related-cli) を優先して使う。
-明示的に指定する場合は以下のようにする。
+If a `related` binary is available, direct on-demand co-change observation uses
+[related-cli](https://github.com/ifapmzadu6/related-cli) first. You can specify
+it explicitly:
 
 ```sh
 WORKSPACE_RELATED_BIN=/path/to/related workspace related src/config.rs --by cochange --json
 WORKSPACE_RELATED_BIN=/path/to/related workspace impact --diff --by cochange --json
 ```
 
-`WORKSPACE_RELATED_DISABLE=1` を付けると従来の内部実装だけを使う。
-`WORKSPACE_RELATED_HISTORY_BACKEND` で `related-cli` の `--history-backend` を変更でき、
-未指定時は正確性を優先して `git` を使う。
+Set `WORKSPACE_RELATED_DISABLE=1` to force the internal implementation.
+Set `WORKSPACE_RELATED_HISTORY_BACKEND` to pass a different
+`related-cli --history-backend` value. When unset, `workspace` uses `git` for
+exact history semantics.
 
-大規模リフォーマットやlockfile更新のような広すぎるcommitはノイズになりやすいので、
-`--max-files-per-commit` を超えるcommitは関連スコアから除外する。
+Large formatting commits, dependency updates, lockfile churn, and initial import
+commits can add noise. Use `--max-files-per-commit` to exclude broad commits.
 
-履歴が大きいworkspaceでは、先にco-change graphを `.workspace/index/cochange.json`
-として保存できる。
+For larger repositories, you can first persist a co-change graph at
+`.workspace/index/cochange.json`.
 
 ```sh
 workspace index status
@@ -129,16 +137,16 @@ workspace related src/config.rs --by cochange --use-index
 workspace related src/config.rs --by cochange --rank pagerank
 ```
 
-`workspace index status` は、保存済みindexが存在するか、現在のgit HEADに対して
-freshかstaleかを返す。
+`workspace index status` reports whether the saved index exists and whether it
+is fresh for the current Git `HEAD`.
 
-`--use-index` と `--rank pagerank` は保存済みco-change graphを使い、seedファイルから関連グラフを
-伝播して候補を返す。直接一緒に変更されたファイルだけでなく、その先につながる
-ファイルも観測対象にできる。
+`--use-index` and `--rank pagerank` use the saved co-change graph to propagate
+from seed files through the graph. This can surface files that were not directly
+changed with the seed file, but are connected through related history.
 
-`workspace impact --diff --by cochange` は、現在のgit差分に含まれるファイルをseedにして、
-履歴上よく一緒に変更されてきた周辺ファイルを返す。これは、変更後に追加で読むべき
-ファイルや、検証対象になりそうなテスト・ドキュメントを見つけるための観測である。
+`workspace impact --diff --by cochange` uses the current Git diff as seed files
+and returns nearby files from history. This helps decide what to read next and
+which tests or documents may need verification.
 
 ```sh
 workspace impact --diff --by cochange --json
@@ -147,18 +155,18 @@ workspace impact --diff --by cochange --use-index
 workspace impact --diff --by cochange --rank pagerank
 ```
 
-## 背景
+## Background
 
-LLM単体の基本的な入出力は、promptを読んでtextを返すことに近い。
+A bare LLM interaction is close to:
 
 ```text
 input:  prompt
 output: text
 ```
 
-しかし、Codexのような開発エージェントの強さは、会話だけではなくworkspaceを
-持っていることにある。ファイルを読める。検索できる。編集できる。コマンドを
-実行できる。テスト結果を観測できる。差分を見て、失敗したらやり直せる。
+A development agent such as Codex is stronger because it also has a workspace.
+It can read files, search, edit, run commands, observe test results, inspect
+diffs, and roll back work when needed.
 
 ```text
 input:
@@ -177,14 +185,15 @@ output:
   verified state changes
 ```
 
-この差は大きい。LLMが同じでも、workspace操作がうまいほど実用性能は上がる。
-探索、編集、検証、rollbackが速く正確なら、モデルの推論力をより現実の作業に
-変換できる。
+That difference matters. With the same model, better workspace operations can
+make practical performance better. Faster and more accurate exploration,
+editing, verification, and rollback turn model reasoning into real work more
+reliably.
 
-## コンセプト
+## Concept
 
-`workspace cli` は、workspaceをただのファイルツリーではなく、状態を持つ作業
-環境として扱う。
+`workspace cli` treats a workspace as a stateful working environment, not just a
+file tree.
 
 ```text
 Workspace =
@@ -198,8 +207,8 @@ Workspace =
   operation log
 ```
 
-エージェントは生のshellやファイルシステムを直接乱暴に触るのではなく、
-workspace向けの明示的な操作を使う。
+Agents should not have to manipulate raw shell and filesystem operations without
+structure. They should use explicit workspace operations:
 
 ```text
 read
@@ -211,18 +220,18 @@ log
 rollback
 ```
 
-これにより、人間にもエージェントにも扱いやすい共通のインターフェースを作る。
+The result is a shared interface that is useful to both humans and agents.
 
-## 基本方針
+## Design Principles
 
-- AIエージェント専用ではなく、人間がCLIとして使っても自然な設計にする。
-- ファイル編集はできるだけpatch/transaction中心にする。
-- すべての変更にdiff、操作ログ、検証結果を紐づける。
-- workspaceの「観測」と「変更」を分ける。
-- 最初はlocal git repositoryだけを対象にする。
-- 賢いagentより先に、賢いworkspace操作面を作る。
+- Keep the CLI natural for humans, not only for AI agents.
+- Prefer patch and transaction based edits.
+- Attach diffs, operation logs, and verification results to changes.
+- Separate observation from mutation.
+- Start with local Git repositories.
+- Build a smarter workspace operation surface before building a smarter agent.
 
-## 最小コマンド案
+## Minimal Command Model
 
 ```sh
 workspace status
@@ -237,7 +246,7 @@ workspace rollback <change-id>
 
 ### `workspace status`
 
-現在のworkspace状態を要約する。
+Summarizes the current workspace state:
 
 ```text
 branch
@@ -249,306 +258,251 @@ running commands
 
 ### `workspace search`
 
-workspace内を検索する。初期実装ではripgrep相当でよい。
-
-将来的には、以下を組み合わせる。
+Searches within the workspace. The initial implementation is ripgrep-based.
+Future versions can combine:
 
 ```text
 text search
 symbol search
 semantic search
 dependency search
-doc section search
 ```
 
 ### `workspace read`
 
-ファイルまたは範囲を読む。
+Reads a file or range:
 
 ```sh
 workspace read src/main.rs
 workspace read src/main.rs --lines 40:120
 ```
 
-将来的には、symbol単位やsection単位の読み取りを提供する。
-
-```sh
-workspace read-symbol ConfigToml
-workspace read-section README.md "Installation"
-```
+Future versions can read by symbol or document section.
 
 ### `workspace diff`
 
-現在の差分を表示する。将来的には、ユーザー由来の変更とエージェント由来の変更を
-区別できるようにする。
+Shows the current diff. Future versions should distinguish user-authored changes
+from agent-authored changes.
 
-```text
-user changes
-agent changes
-generated files
-test artifacts
+```sh
+workspace diff
+workspace diff --summary
 ```
 
 ### `workspace patch`
 
-patchをtransactionとして適用する。
+Applies a patch as a transaction:
 
-```text
-validate
-apply
-record
-show diff
-allow rollback
+```sh
+workspace patch fix.diff
 ```
 
-直接的な `write_file` よりも、まずはpatch中心にする。レビュー、追跡、rollbackが
-しやすいため。
+Patch-first mutation is easier to review, track, and roll back than direct file
+writes.
 
 ### `workspace run`
 
-コマンドを実行して、出力、終了コード、実行時間を記録する。
+Runs a command and records stdout, stderr, exit code, and duration.
 
-```text
-command
-cwd
-env summary
-exit code
-stdout
-stderr
-duration
+```sh
+workspace run "cargo test"
+workspace run "npm test"
 ```
 
-将来的には、変更箇所から関連テストを推定して実行する。
+Future versions can infer relevant tests from changed files or symbols.
 
 ### `workspace log`
 
-workspaceに対して行った操作履歴を見る。
-
-```text
-read operations
-patch operations
-commands
-test results
-rollback points
-```
-
-これはエージェントの記憶ではなく、workspace側に残る監査可能な履歴である。
-
-### `workspace rollback`
-
-特定の変更を戻す。git resetのような大きい操作ではなく、workspace cliが適用した
-transaction単位で戻すことを目指す。
-
-## 抽象モデル
-
-中心になる型や概念はこのあたり。
-
-```text
-WorkspaceState
-WorkspaceOp
-WorkspaceObservation
-WorkspaceTransaction
-WorkspaceLog
-```
-
-### WorkspaceState
-
-ある時点のworkspace状態。
-
-```text
-root path
-git branch
-git status
-known files
-index metadata
-operation history
-```
-
-### WorkspaceOp
-
-workspaceに対する操作。
-
-```text
-ReadFile
-Search
-ApplyPatch
-RunCommand
-GetDiff
-CreateRollbackPoint
-Rollback
-```
-
-### WorkspaceObservation
-
-操作の結果として得られる観測。
-
-```text
-file content
-search results
-command output
-test failure
-diff summary
-```
-
-### WorkspaceTransaction
-
-ひとまとまりの変更。patch適用、生成ファイル、関連コマンド、検証結果をまとめる。
-
-```text
-id
-description
-operations
-files_changed
-diff
-verification
-created_at
-```
-
-## エージェントとの関係
-
-LLMエージェントは、workspace cliをtoolとして使う。
-
-```text
-User intent
-  |
-  v
-Agent
-  |
-  v
-workspace cli
-  |
-  v
-Workspace
-```
-
-このとき、LLMに全ファイルを詰め込むのではなく、必要な観測だけを取得させる。
-
-```text
-search -> read -> patch -> run -> diff -> report
-```
-
-つまり、コンテキストを増やすのではなく、workspaceへのアクセス効率を上げる。
-
-## MVP
-
-最初のMVPは、以下に絞る。
-
-```text
-local git repository only
-text files only
-read/search/diff
-patch apply
-command run
-operation log
-basic rollback
-```
-
-高度なsymbol indexやsemantic searchは後回しにする。
-
-MVPで重要なのは、AIが使う以前に、人間が触っても便利なこと。
+Shows operations performed against the workspace.
 
 ```sh
-workspace status
-workspace search "TODO"
-workspace read README.md
-workspace patch /tmp/change.patch
-workspace run "npm test"
-workspace diff
 workspace log
 ```
 
-## 将来の拡張
+This is not agent memory. It is an auditable history stored on the workspace
+side.
 
-### Symbol index
+### `workspace rollback`
 
-Tree-sitterやlanguage serverを使って、関数、型、クラス、参照関係を読めるように
-する。
+Rolls back a specific change. The goal is transaction-level rollback for changes
+applied by `workspace cli`, not broad operations such as `git reset`.
 
-```sh
-workspace symbols
-workspace read-symbol UserSession
-workspace references UserSession
+## Abstract Model
+
+Core concepts:
+
+```rust
+struct WorkspaceState {
+    root: PathBuf,
+    git: GitState,
+    files: FileIndex,
+    operations: Vec<OperationLog>,
+}
 ```
 
-### Document operations
+A snapshot of workspace state.
 
-Markdownやdocsをsection単位で扱う。
-
-```sh
-workspace doc sections README.md
-workspace doc read-section README.md "Usage"
-workspace doc replace-section README.md "Usage" usage.md
+```rust
+enum WorkspaceOperation {
+    Read(Path),
+    Search(Query),
+    ApplyPatch(Patch),
+    Run(Command),
+    Rollback(TransactionId),
+}
 ```
 
-### Relevant test selection
+An operation against the workspace.
 
-変更されたファイルやsymbolから、走らせるべきテストを推定する。
-
-```sh
-workspace test relevant
-workspace test run-relevant
+```rust
+struct Observation {
+    summary: String,
+    evidence: Vec<Evidence>,
+    next_observations: Vec<SuggestedAction>,
+}
 ```
 
-### MCP server
+An observation produced by an operation.
 
-CLIだけでなく、MCP serverとしても提供する。
+```rust
+struct Transaction {
+    id: TransactionId,
+    patch: Patch,
+    verification: Vec<CommandResult>,
+    created_at: DateTime,
+}
+```
+
+A grouped change that can include a patch, generated files, related commands,
+and verification results.
+
+## Relationship To Agents
+
+An LLM agent uses `workspace cli` as a tool:
 
 ```text
-workspace.search
-workspace.read
-workspace.apply_patch
-workspace.run
-workspace.diff
-workspace.rollback
+User intent
+  -> agent chooses workspace operations
+  -> workspace cli returns observations
+  -> agent decides next operation
+  -> patch/run/verify
+  -> workspace_after + evidence
 ```
 
-これにより、Codex、Claude、Cursor、その他のagentから同じworkspace操作面を使える。
+The agent should fetch only the observations it needs instead of loading every
+file into context.
 
-### Transaction UI
+The goal is not to increase context size. The goal is to improve access
+efficiency to the workspace.
 
-差分、検証結果、rollback pointを見やすくするTUIまたはweb UIを追加する。
+## MVP Scope
 
-## 非目標
-
-- 最初からフル機能のAI coding agentを作らない。
-- 最初からIDEを作らない。
-- 最初からクラウド同期を作らない。
-- 最初から全言語対応の高度なコード理解を作らない。
-- 生のshellを完全に置き換えようとしない。
-
-## 重要な問い
-
-- workspace操作の最小プリミティブは何か。
-- patch transactionの単位をどう切るべきか。
-- 人間が行った変更とagentが行った変更をどう区別するか。
-- operation logはgitとどう住み分けるか。
-- command実行の安全性と自由度をどう設計するか。
-- workspace indexはいつ更新するべきか。
-- CLI、SDK、MCP serverの責務をどう分けるか。
-
-## 直近の実装メモ
-
-最初はRustかGoが向いていそうだが、MVPならTypeScriptでもよい。
-
-優先順位は、実装言語よりもデータモデルである。
+The first MVP focuses on:
 
 ```text
-1. workspace root detection
-2. git status/diff integration
-3. read/search command
-4. patch apply with transaction log
-5. run command with captured output
-6. rollback support
-7. JSON output mode for agents
+status
+search
+read
+diff
+patch
+run
+log
+rollback
 ```
 
-CLIは人間向けの表示とagent向けのJSON出力を分ける。
+Advanced symbol indexes and semantic search can come later.
+
+The key MVP requirement is that the CLI is useful to a human before it is useful
+to an AI.
+
+## Future Extensions
+
+### Symbol Index
+
+Use Tree-sitter or language servers to expose functions, types, classes, and
+reference relationships.
+
+```sh
+workspace symbols src/main.rs
+workspace references WorkspaceState
+```
+
+### Document Index
+
+Handle Markdown and docs by section.
+
+```sh
+workspace docs map
+workspace docs read README.md#installation
+```
+
+### Test Selection
+
+Infer which tests should run from changed files or symbols.
+
+```sh
+workspace tests suggest
+workspace tests run-related
+```
+
+### MCP Server
+
+Expose the same operation surface as an MCP server, not only as a CLI.
+
+```text
+workspace-cli
+workspace-mcp
+workspace-sdk
+```
+
+This would let Codex, Claude, Cursor, and other agents use the same workspace
+operation surface.
+
+### UI
+
+Add a TUI or web UI that makes diffs, verification results, and rollback points
+easy to inspect.
+
+## Non-Goals
+
+- Do not start by building a full AI coding agent.
+- Do not start by building an IDE.
+- Do not start with cloud sync.
+- Do not start with advanced code intelligence for every language.
+- Do not try to fully replace the raw shell.
+
+## Open Questions
+
+- What are the minimal primitives for workspace operations?
+- How should patch transaction boundaries be chosen?
+- How should user-authored changes and agent-authored changes be distinguished?
+- How should the operation log relate to Git history?
+- How should command execution balance safety and freedom?
+- When should workspace indexes be refreshed?
+- How should responsibilities be split across CLI, SDK, and MCP server?
+
+## Implementation Notes
+
+Rust and Go are good candidates for this kind of CLI, though TypeScript can work
+for an MVP.
+
+The data model matters more than the implementation language.
+
+```text
+workspace operation
+  -> structured result
+  -> evidence
+  -> suggested next operation
+```
+
+The CLI should separate human-readable output from JSON output for agents.
 
 ```sh
 workspace status
 workspace status --json
 ```
 
-## 一文で言うと
+## In One Sentence
 
-`workspace cli` は、LLMエージェントと人間のための、観測可能で戻せるworkspace操作面である。
+`workspace cli` is an observable and reversible workspace operation surface for
+LLM agents and humans.
