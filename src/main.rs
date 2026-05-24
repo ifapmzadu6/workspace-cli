@@ -1169,7 +1169,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
 }
 
 fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
-    let patch_path = workspace.resolve_path(&args.patch_file);
+    let patch_path = workspace.resolve_existing_workspace_path(&args.patch_file)?;
     let patch_content = fs::read_to_string(&patch_path)
         .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
     let files_changed = extract_patch_files(&patch_content);

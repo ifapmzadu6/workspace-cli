@@ -555,6 +555,52 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn patch_rejects_patch_files_outside_workspace() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    let outside = TempDir::new().expect("outside temp dir should be created");
+
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+    write_file(
+        outside.path(),
+        "change.patch",
+        "\
+diff --git a/note.txt b/note.txt
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-hello
++hello workspace
+",
+    );
+
+    let stderr = run_workspace_failure(
+        root,
+        &[
+            "patch",
+            "--description",
+            "update note",
+            outside
+                .path()
+                .join("change.patch")
+                .to_str()
+                .expect("path should be utf-8"),
+            "--json",
+        ],
+    );
+
+    assert!(
+        stderr.contains("outside workspace root"),
+        "unexpected stderr: {stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello\n"
+    );
+}
+
+#[test]
 fn patch_reports_files_from_binary_patch_headers() {
     let temp = init_git_repo();
     let root = temp.path();
