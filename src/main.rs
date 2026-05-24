@@ -649,6 +649,11 @@ struct ImpactFile {
     sample_commits: Vec<String>,
 }
 
+struct ObservedRelated {
+    target: String,
+    data: RelatedData,
+}
+
 #[derive(Default)]
 struct RelatedCliImpactAccumulator {
     score: f64,
@@ -1173,20 +1178,20 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
 }
 
 fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
-    let target = workspace_arg_path(workspace, &args.path)?;
-    let data = observed_related(workspace, &target, &args)?;
-    let observation = related_observation(workspace, &target, data);
+    let related = observed_related_args(workspace, &args)?;
+    let observation = related_observation(workspace, &related.target, related.data);
 
-    append_observation_log(workspace, LOG_OP_RELATED, &target, &observation.summary);
+    append_observation_log(
+        workspace,
+        LOG_OP_RELATED,
+        &related.target,
+        &observation.summary,
+    );
     output_observation(args.json, &observation, print_related)
 }
 
 fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
-    if !args.diff {
-        bail!("workspace impact currently supports only --diff as its source");
-    }
-
-    let data = observed_impact(workspace, &args)?;
+    let data = observed_impact_args(workspace, &args)?;
     let observation = impact_observation(workspace, data);
 
     append_observation_log(
@@ -1928,6 +1933,12 @@ fn observed_related(
     }
 }
 
+fn observed_related_args(workspace: &Workspace, args: &RelatedArgs) -> Result<ObservedRelated> {
+    let target = workspace_arg_path(workspace, &args.path)?;
+    let data = observed_related(workspace, &target, args)?;
+    Ok(ObservedRelated { target, data })
+}
+
 fn related_observation(
     workspace: &Workspace,
     target: &str,
@@ -1948,6 +1959,14 @@ fn related_observation(
         truncated: false,
         next_observations,
     }
+}
+
+fn observed_impact_args(workspace: &Workspace, args: &ImpactArgs) -> Result<ImpactData> {
+    if !args.diff {
+        bail!("workspace impact currently supports only --diff as its source");
+    }
+
+    observed_impact(workspace, args)
 }
 
 fn observed_impact(workspace: &Workspace, args: &ImpactArgs) -> Result<ImpactData> {
@@ -6971,6 +6990,12 @@ rename to new name.txt
         assert_eq!(related.max_files_per_commit, 40);
         assert!(related.related.is_empty());
 
+        let observed_related = observed_related_args(&workspace, &related_args)
+            .expect("related args should be observed");
+        assert_eq!(observed_related.target, "src/main.rs");
+        assert_eq!(observed_related.data.target, "src/main.rs");
+        assert_eq!(observed_related.data.ranking, RANK_PAGERANK);
+
         let impact_args = ImpactArgs {
             json: true,
             diff: true,
@@ -6982,7 +7007,7 @@ rename to new name.txt
             use_index: true,
         };
         let impact =
-            observed_impact(&workspace, &impact_args).expect("impact data should be built");
+            observed_impact_args(&workspace, &impact_args).expect("impact data should be built");
         assert_eq!(impact.source, IMPACT_SOURCE_DIFF);
         assert_eq!(impact.method, RELATED_METHOD_COCHANGE);
         assert_eq!(impact.ranking, RANK_DIRECT);
@@ -6994,6 +7019,25 @@ rename to new name.txt
         assert_eq!(impact.max_commits, 500);
         assert_eq!(impact.max_files_per_commit, 80);
         assert!(impact.impacted.is_empty());
+
+        let invalid_impact_args = ImpactArgs {
+            json: true,
+            diff: false,
+            by: RelatedMethod::Cochange,
+            max_commits: 500,
+            max_files_per_commit: 80,
+            max_results: 9,
+            rank: RankingMethod::Direct,
+            use_index: true,
+        };
+        let error = match observed_impact_args(&workspace, &invalid_impact_args) {
+            Ok(_) => panic!("impact without --diff should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.to_string(),
+            "workspace impact currently supports only --diff as its source"
+        );
     }
 
     #[test]
