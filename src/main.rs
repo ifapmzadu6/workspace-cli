@@ -747,6 +747,33 @@ struct BoundedFileList {
     omitted_files: usize,
 }
 
+struct BoundedPathAccumulator {
+    paths: Vec<String>,
+    total_count: usize,
+    max_paths: usize,
+}
+
+impl BoundedPathAccumulator {
+    fn new(max_paths: usize) -> Self {
+        Self {
+            paths: Vec::new(),
+            total_count: 0,
+            max_paths,
+        }
+    }
+
+    fn push(&mut self, path: String) {
+        self.total_count += 1;
+        if self.paths.len() < self.max_paths {
+            self.paths.push(path);
+        }
+    }
+
+    fn omitted_count(&self) -> usize {
+        self.total_count.saturating_sub(self.paths.len())
+    }
+}
+
 #[derive(Serialize)]
 struct RollbackData {
     transaction_id: String,
@@ -3899,37 +3926,29 @@ fn git_summary(workspace: &Workspace) -> Result<GitSummary> {
         .ok()
         .map(|branch| branch.trim().to_string())
         .filter(|branch| !branch.is_empty());
-    let mut dirty_files = Vec::new();
-    let mut untracked_files = Vec::new();
-    let mut dirty_file_count = 0usize;
-    let mut untracked_file_count = 0usize;
+    let mut dirty_files = BoundedPathAccumulator::new(MAX_GIT_STATUS_FILES);
+    let mut untracked_files = BoundedPathAccumulator::new(MAX_GIT_STATUS_FILES);
 
     stream_git_status_entries(workspace, |code, path| {
         if path == LOG_DIR || path.starts_with(&format!("{LOG_DIR}/")) {
             return;
         }
         if code == "??" {
-            untracked_file_count += 1;
-            if untracked_files.len() < MAX_GIT_STATUS_FILES {
-                untracked_files.push(path);
-            }
+            untracked_files.push(path);
         } else {
-            dirty_file_count += 1;
-            if dirty_files.len() < MAX_GIT_STATUS_FILES {
-                dirty_files.push(path);
-            }
+            dirty_files.push(path);
         }
     })?;
 
     Ok(GitSummary {
         is_repo: true,
         branch,
-        dirty_file_count,
-        untracked_file_count,
-        omitted_dirty_files: dirty_file_count.saturating_sub(dirty_files.len()),
-        omitted_untracked_files: untracked_file_count.saturating_sub(untracked_files.len()),
-        dirty_files,
-        untracked_files,
+        dirty_file_count: dirty_files.total_count,
+        untracked_file_count: untracked_files.total_count,
+        omitted_dirty_files: dirty_files.omitted_count(),
+        omitted_untracked_files: untracked_files.omitted_count(),
+        dirty_files: dirty_files.paths,
+        untracked_files: untracked_files.paths,
     })
 }
 
@@ -5675,6 +5694,18 @@ mod tests {
         assert_eq!(paths.files, vec!["src/a.rs", "src/b.rs"]);
         assert_eq!(paths.total_files, 3);
         assert_eq!(paths.omitted_files, 1);
+    }
+
+    #[test]
+    fn bounded_path_accumulator_counts_omitted_paths() {
+        let mut paths = BoundedPathAccumulator::new(2);
+        paths.push("src/a.rs".to_string());
+        paths.push("src/b.rs".to_string());
+        paths.push("src/c.rs".to_string());
+
+        assert_eq!(paths.total_count, 3);
+        assert_eq!(paths.paths, vec!["src/a.rs", "src/b.rs"]);
+        assert_eq!(paths.omitted_count(), 1);
     }
 
     #[test]
