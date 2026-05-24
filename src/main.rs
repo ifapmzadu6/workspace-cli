@@ -33,6 +33,7 @@ const MAX_DIFF_SUMMARY: usize = 12_000;
 const MAX_DIFF_PATCH: usize = 48_000;
 const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
 const MAX_RG_JSON_LINE_BYTES: usize = 64_000;
+const MAX_PATCH_LINE_BYTES: usize = 64_000;
 const MAX_SAMPLE_COMMITS: usize = 5;
 const MAX_LOG_LINE_BYTES: usize = 64_000;
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -4319,22 +4320,38 @@ fn extract_patch_files_from_path(path: &Path) -> Result<Vec<String>> {
 
 fn extract_patch_files_from_reader<R: Read>(reader: R) -> Result<Vec<String>> {
     let mut reader = BufReader::new(reader);
-    let mut line = String::new();
     let mut files = BTreeSet::new();
+    let mut line_number = 1usize;
 
-    loop {
-        line.clear();
-        let bytes_read = reader
-            .read_line(&mut line)
-            .context("failed to read patch")?;
-        if bytes_read == 0 {
-            break;
+    while let Some(line) =
+        read_bounded_output_line(&mut reader, line_number, MAX_PATCH_LINE_BYTES, "patch")?
+    {
+        line_number += 1;
+        if !patch_line_has_file_header_prefix(&line.bytes) {
+            continue;
         }
-        let line = line.trim_end_matches('\n').trim_end_matches('\r');
+        if line.exceeded {
+            bail!(
+                "patch file header line {} exceeded {} bytes",
+                line.line_number,
+                MAX_PATCH_LINE_BYTES
+            );
+        }
+        let line = std::str::from_utf8(&line.bytes).with_context(|| {
+            format!("patch header line {} is not valid UTF-8", line.line_number)
+        })?;
         collect_patch_file_line(line, &mut files);
     }
 
     Ok(files.into_iter().collect())
+}
+
+fn patch_line_has_file_header_prefix(line: &[u8]) -> bool {
+    line.starts_with(b"+++ ")
+        || line.starts_with(b"--- ")
+        || line.starts_with(b"rename from ")
+        || line.starts_with(b"rename to ")
+        || line.starts_with(b"diff --git ")
 }
 
 fn collect_patch_file_line(line: &str, files: &mut BTreeSet<String>) {
@@ -5312,6 +5329,35 @@ rename to new name.txt
             .expect("patch reader should parse");
 
         assert_eq!(files, vec!["new name.txt", "old name.txt", "src/a.rs"]);
+    }
+
+    #[test]
+    fn extract_patch_files_skips_oversized_body_lines() {
+        let patch = format!(
+            "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-{}\n+new\n",
+            "x".repeat(MAX_PATCH_LINE_BYTES + 1)
+        );
+
+        let files = extract_patch_files_from_reader(std::io::Cursor::new(patch))
+            .expect("patch reader should parse");
+
+        assert_eq!(files, vec!["a.txt"]);
+    }
+
+    #[test]
+    fn extract_patch_files_rejects_oversized_header_lines() {
+        let patch = format!("+++ b/{}\n", "x".repeat(MAX_PATCH_LINE_BYTES + 1));
+
+        let Err(error) = extract_patch_files_from_reader(std::io::Cursor::new(patch)) else {
+            panic!("oversized patch header should fail");
+        };
+        let error = format!("{error:#}");
+
+        assert!(
+            error.contains("patch file header line 1"),
+            "unexpected error: {error}"
+        );
+        assert!(error.contains("exceeded"), "unexpected error: {error}");
     }
 
     #[test]
