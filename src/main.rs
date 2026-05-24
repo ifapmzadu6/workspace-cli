@@ -1115,15 +1115,7 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
 fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
     let (matches, total_matches, truncated_match_texts) =
         rg_search(workspace, &args.query, args.max_results)?;
-    let evidence = matches
-        .iter()
-        .take(MAX_EVIDENCE_ITEMS)
-        .map(|m| Evidence {
-            path: m.path.clone(),
-            lines: Some(m.line.to_string()),
-            reason: "text match".to_string(),
-        })
-        .collect::<Vec<_>>();
+    let evidence = search_evidence(&matches);
     let data = SearchData {
         query: args.query.clone(),
         total_matches,
@@ -1147,12 +1139,7 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
             data.truncated_match_texts
         ));
     }
-    let next_observations = data
-        .matches
-        .iter()
-        .take(MAX_NEXT_OBSERVATIONS)
-        .map(|m| workspace_read_lines_command(&m.path, m.line, m.line))
-        .collect();
+    let next_observations = search_next_observations(&data.matches);
     let observation = Observation {
         kind: "workspace_search".to_string(),
         scope: workspace.root.to_string_lossy().into_owned(),
@@ -1821,6 +1808,26 @@ where
         .filter(|path| workspace.resolve_path(Path::new(path)).is_file())
         .take(MAX_NEXT_OBSERVATIONS)
         .map(workspace_read_command)
+        .collect()
+}
+
+fn search_evidence(matches: &[SearchMatch]) -> Vec<Evidence> {
+    matches
+        .iter()
+        .take(MAX_EVIDENCE_ITEMS)
+        .map(|item| Evidence {
+            path: item.path.clone(),
+            lines: Some(item.line.to_string()),
+            reason: "text match".to_string(),
+        })
+        .collect()
+}
+
+fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
+    matches
+        .iter()
+        .take(MAX_NEXT_OBSERVATIONS)
+        .map(|item| workspace_read_lines_command(&item.path, item.line, item.line))
         .collect()
 }
 
@@ -5960,6 +5967,29 @@ rename to new name.txt
                 "workspace read file_3.txt",
             ]
         );
+    }
+
+    #[test]
+    fn search_observation_helpers_are_bounded() {
+        let matches = (0..(MAX_EVIDENCE_ITEMS + 1))
+            .map(|index| SearchMatch {
+                path: format!("file_{index:02}.txt"),
+                line: index as u64 + 1,
+                column: 1,
+                text: "match".to_string(),
+            })
+            .collect::<Vec<_>>();
+
+        let evidence = search_evidence(&matches);
+        let next = search_next_observations(&matches);
+
+        assert_eq!(evidence.len(), MAX_EVIDENCE_ITEMS);
+        assert_eq!(evidence[0].path, "file_00.txt");
+        assert_eq!(evidence[0].lines.as_deref(), Some("1"));
+        assert_eq!(evidence[0].reason, "text match");
+        assert_eq!(next.len(), MAX_NEXT_OBSERVATIONS);
+        assert_eq!(next[0], "workspace read file_00.txt --lines 1:1");
+        assert_eq!(next[4], "workspace read file_04.txt --lines 5:5");
     }
 
     #[test]
