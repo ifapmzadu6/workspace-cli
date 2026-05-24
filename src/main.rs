@@ -1117,10 +1117,7 @@ fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
 }
 
 fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
-    let git = git_summary(workspace)?;
-    let index_status = cochange_index_status(workspace);
-    let recent_operations = read_status_recent_operations(workspace, 10);
-    let data = status_data(workspace, git, index_status, recent_operations);
+    let data = observed_status(workspace)?;
     let observation = status_observation(data);
 
     append_observation_log(
@@ -1784,6 +1781,13 @@ fn read_status_recent_operations(workspace: &Workspace, limit: usize) -> StatusR
             error: Some(format!("{error:#}")),
         },
     }
+}
+
+fn observed_status(workspace: &Workspace) -> Result<StatusData> {
+    let git = git_summary(workspace)?;
+    let index_status = cochange_index_status(workspace);
+    let recent_operations = read_status_recent_operations(workspace, 10);
+    Ok(status_data(workspace, git, index_status, recent_operations))
 }
 
 fn status_data(
@@ -7329,6 +7333,25 @@ rename to new name.txt
                 .as_deref()
                 .is_some_and(|error| error.contains("not a file"))
         );
+    }
+
+    #[test]
+    fn observed_status_reports_non_repo_index_state() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let data = observed_status(&workspace).expect("status data should be observed");
+
+        assert_eq!(data.root, temp.path().to_string_lossy().into_owned());
+        assert!(!data.git.is_repo);
+        assert_eq!(data.git.dirty_file_count, 0);
+        assert_eq!(data.index_status.status, INDEX_STATUS_NOT_GIT_REPO);
+        assert!(!data.index_status.is_repo);
+        assert!(data.recent_operations.is_empty());
+        assert_eq!(data.recent_operations_omitted, 0);
     }
 
     #[test]
