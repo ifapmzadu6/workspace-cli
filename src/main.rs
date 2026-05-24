@@ -80,6 +80,12 @@ const LOG_OP_PATCH: &str = "patch";
 const LOG_OP_RUN: &str = "run";
 const LOG_OP_ROLLBACK: &str = "rollback";
 const IMPACT_SOURCE_DIFF: &str = "diff";
+const RELATED_METHOD_COCHANGE: &str = "cochange";
+const RANK_DIRECT: &str = "direct";
+const RANK_PAGERANK: &str = "pagerank";
+const RELATIONSHIP_SOURCE_COCHANGE_INDEX: &str = "cochange-index";
+const RELATIONSHIP_SOURCE_GIT_LOG: &str = "git-log";
+const RELATIONSHIP_SOURCE_RELATED_CLI: &str = "related-cli";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -271,7 +277,7 @@ enum RelatedMethod {
 impl RelatedMethod {
     fn as_str(&self) -> &'static str {
         match self {
-            Self::Cochange => "cochange",
+            Self::Cochange => RELATED_METHOD_COCHANGE,
         }
     }
 }
@@ -285,8 +291,8 @@ enum RankingMethod {
 impl RankingMethod {
     fn as_str(self) -> &'static str {
         match self {
-            Self::Direct => "direct",
-            Self::Pagerank => "pagerank",
+            Self::Direct => RANK_DIRECT,
+            Self::Pagerank => RANK_PAGERANK,
         }
     }
 }
@@ -2541,9 +2547,9 @@ fn related_by_cochange(
         };
         return Ok(RelatedData {
             target: target.to_string(),
-            method: "cochange".to_string(),
+            method: RELATED_METHOD_COCHANGE.to_string(),
             ranking: rank.as_str().to_string(),
-            relationship_source: "cochange-index".to_string(),
+            relationship_source: RELATIONSHIP_SOURCE_COCHANGE_INDEX.to_string(),
             is_repo: true,
             commits_scanned: index.commits_scanned,
             commits_matched: ranking.commits_matched,
@@ -2558,9 +2564,9 @@ fn related_by_cochange(
     let ranking = rank_cochanges(&commits, target, max_files_per_commit, max_results);
     Ok(RelatedData {
         target: target.to_string(),
-        method: "cochange".to_string(),
+        method: RELATED_METHOD_COCHANGE.to_string(),
         ranking: rank.as_str().to_string(),
-        relationship_source: "git-log".to_string(),
+        relationship_source: RELATIONSHIP_SOURCE_GIT_LOG.to_string(),
         is_repo: true,
         commits_scanned: commits.len(),
         commits_matched: ranking.commits_matched,
@@ -2587,9 +2593,9 @@ fn related_data_from_related_cli(
         .unwrap_or(0);
     RelatedData {
         target: target.to_string(),
-        method: "cochange".to_string(),
+        method: RELATED_METHOD_COCHANGE.to_string(),
         ranking: rank.as_str().to_string(),
-        relationship_source: format!("related-cli:{}", output.mode),
+        relationship_source: format!("{RELATIONSHIP_SOURCE_RELATED_CLI}:{}", output.mode),
         is_repo: true,
         commits_scanned: 0,
         commits_matched,
@@ -2935,9 +2941,9 @@ fn impact_by_cochange(
         };
         return Ok(ImpactData {
             source: IMPACT_SOURCE_DIFF.to_string(),
-            method: "cochange".to_string(),
+            method: RELATED_METHOD_COCHANGE.to_string(),
             ranking: rank.as_str().to_string(),
-            relationship_source: "cochange-index".to_string(),
+            relationship_source: RELATIONSHIP_SOURCE_COCHANGE_INDEX.to_string(),
             is_repo: true,
             seed_files: observed_seed_files,
             seed_file_count,
@@ -2956,9 +2962,9 @@ fn impact_by_cochange(
 
     Ok(ImpactData {
         source: IMPACT_SOURCE_DIFF.to_string(),
-        method: "cochange".to_string(),
+        method: RELATED_METHOD_COCHANGE.to_string(),
         ranking: rank.as_str().to_string(),
-        relationship_source: "git-log".to_string(),
+        relationship_source: RELATIONSHIP_SOURCE_GIT_LOG.to_string(),
         is_repo: true,
         seed_files: observed_seed_files,
         seed_file_count,
@@ -3028,9 +3034,12 @@ fn impact_by_related_cli(
 
     Ok(Some(ImpactData {
         source: IMPACT_SOURCE_DIFF.to_string(),
-        method: "cochange".to_string(),
+        method: RELATED_METHOD_COCHANGE.to_string(),
         ranking: rank.as_str().to_string(),
-        relationship_source: format!("related-cli:{}:aggregate", rank.as_str()),
+        relationship_source: format!(
+            "{RELATIONSHIP_SOURCE_RELATED_CLI}:{}:aggregate",
+            rank.as_str()
+        ),
         is_repo: true,
         seed_files: observed_seed_files,
         seed_file_count,
@@ -3816,7 +3825,7 @@ fn related_evidence(data: &RelatedData) -> Vec<Evidence> {
         .map(|file| Evidence {
             path: file.path.clone(),
             lines: None,
-            reason: if data.ranking == "pagerank" && file.cochanged_commits == 0 {
+            reason: if data.ranking == RANK_PAGERANK && file.cochanged_commits == 0 {
                 format!(
                     "reached from {} through the co-change graph; pagerank score {:.3}",
                     data.target, file.score
@@ -3840,7 +3849,7 @@ fn impact_evidence(data: &ImpactData) -> Vec<Evidence> {
         .map(|file| Evidence {
             path: file.path.clone(),
             lines: None,
-            reason: if data.ranking == "pagerank" && file.cochanged_commits == 0 {
+            reason: if data.ranking == RANK_PAGERANK && file.cochanged_commits == 0 {
                 format!(
                     "reached from seed file(s) {} through the co-change graph; pagerank score {:.3}",
                     join_or_none(&file.seed_files),
@@ -3860,9 +3869,9 @@ fn impact_evidence(data: &ImpactData) -> Vec<Evidence> {
 
 fn relationship_source(use_index: bool) -> &'static str {
     if use_index {
-        "cochange-index"
+        RELATIONSHIP_SOURCE_COCHANGE_INDEX
     } else {
-        "git-log"
+        RELATIONSHIP_SOURCE_GIT_LOG
     }
 }
 
@@ -6278,6 +6287,28 @@ rename to new name.txt
     }
 
     #[test]
+    fn relationship_label_constants_match_json_contract() {
+        assert_eq!(RELATED_METHOD_COCHANGE, "cochange");
+        assert_eq!([RANK_DIRECT, RANK_PAGERANK], ["direct", "pagerank"]);
+        assert_eq!(
+            [
+                RELATIONSHIP_SOURCE_COCHANGE_INDEX,
+                RELATIONSHIP_SOURCE_GIT_LOG,
+                RELATIONSHIP_SOURCE_RELATED_CLI,
+            ],
+            ["cochange-index", "git-log", "related-cli"]
+        );
+        assert_eq!(RelatedMethod::Cochange.as_str(), RELATED_METHOD_COCHANGE);
+        assert_eq!(RankingMethod::Direct.as_str(), RANK_DIRECT);
+        assert_eq!(RankingMethod::Pagerank.as_str(), RANK_PAGERANK);
+        assert_eq!(
+            relationship_source(true),
+            RELATIONSHIP_SOURCE_COCHANGE_INDEX
+        );
+        assert_eq!(relationship_source(false), RELATIONSHIP_SOURCE_GIT_LOG);
+    }
+
+    #[test]
     fn observation_truncation_helpers_report_data_limits() {
         let search = SearchData {
             query: "needle".to_string(),
@@ -6308,8 +6339,8 @@ rename to new name.txt
 
         let impact = ImpactData {
             source: IMPACT_SOURCE_DIFF.to_string(),
-            method: "cochange".to_string(),
-            ranking: "direct".to_string(),
+            method: RELATED_METHOD_COCHANGE.to_string(),
+            ranking: RANK_DIRECT.to_string(),
             relationship_source: "git history".to_string(),
             is_repo: true,
             seed_files: vec![],
@@ -6561,8 +6592,8 @@ rename to new name.txt
     fn related_summary_reports_repo_state() {
         let data = RelatedData {
             target: "src/main.rs".to_string(),
-            method: "cochange".to_string(),
-            ranking: "direct".to_string(),
+            method: RELATED_METHOD_COCHANGE.to_string(),
+            ranking: RANK_DIRECT.to_string(),
             relationship_source: "git history".to_string(),
             is_repo: true,
             commits_scanned: 3,
@@ -6595,8 +6626,8 @@ rename to new name.txt
     fn impact_summary_reports_seed_truncation() {
         let data = ImpactData {
             source: IMPACT_SOURCE_DIFF.to_string(),
-            method: "cochange".to_string(),
-            ranking: "direct".to_string(),
+            method: RELATED_METHOD_COCHANGE.to_string(),
+            ranking: RANK_DIRECT.to_string(),
             relationship_source: "git history".to_string(),
             is_repo: true,
             seed_files: vec!["src/main.rs".to_string()],
