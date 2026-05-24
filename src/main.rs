@@ -3997,9 +3997,9 @@ fn fallback_text_search(
     let mut matches = Vec::new();
     let mut total_matches = 0usize;
     let mut truncated_match_texts = 0usize;
-    let mut file_paths = Vec::new();
 
     for entry in WalkDir::new(&workspace.root)
+        .sort_by_file_name()
         .into_iter()
         .filter_entry(|entry| entry.path() == workspace.root || should_descend(entry.path(), false))
     {
@@ -4007,18 +4007,14 @@ fn fallback_text_search(
         if !entry.file_type().is_file() {
             continue;
         }
-        file_paths.push(entry.into_path());
-    }
-    file_paths.sort();
-
-    for path in file_paths {
-        let rel_path = workspace.relative(&path);
+        let path = entry.path();
+        let rel_path = workspace.relative(path);
         if !should_include_repo_file(&rel_path) {
             continue;
         }
 
         let remaining_results = max_results.saturating_sub(matches.len());
-        let Ok(file_result) = fallback_text_search_file(&path, &rel_path, query, remaining_results)
+        let Ok(file_result) = fallback_text_search_file(path, &rel_path, query, remaining_results)
         else {
             continue;
         };
@@ -5581,9 +5577,9 @@ rename to new name.txt
     #[test]
     fn fallback_text_search_counts_all_matching_lines() {
         let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::write(temp.path().join("b.txt"), "needle three\n").expect("file should be written");
         fs::write(temp.path().join("a.txt"), "needle one\nneedle two\n")
             .expect("file should be written");
-        fs::write(temp.path().join("b.txt"), "needle three\n").expect("file should be written");
         fs::create_dir(temp.path().join(".workspace")).expect("workspace dir should be created");
         fs::write(temp.path().join(".workspace/log.jsonl"), "needle ignored\n")
             .expect("log should be written");
