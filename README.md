@@ -308,8 +308,10 @@ Future versions can read by symbol or document section.
 
 Shows the current diff. Future versions should distinguish user-authored changes
 from agent-authored changes.
-Full patch and stat output are bounded and marked as `truncated`; use
-`--summary` for a smaller file/stat-only observation.
+Full patch, stat output, and changed-file lists are bounded and marked as
+`truncated`; use `--summary` for a smaller file/stat-only observation.
+The full changed-file count remains available as `file_count`, with omitted
+files reported separately.
 
 ```sh
 workspace diff

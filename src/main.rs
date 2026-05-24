@@ -34,6 +34,7 @@ const MAX_DIFF_PATCH: usize = 48_000;
 const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
 const MAX_RG_JSON_LINE_BYTES: usize = 64_000;
 const MAX_PATCH_LINE_BYTES: usize = 64_000;
+const MAX_GIT_OUTPUT_LINE_BYTES: usize = 64_000;
 const MAX_SAMPLE_COMMITS: usize = 5;
 const MAX_LOG_LINE_BYTES: usize = 64_000;
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -537,7 +538,9 @@ struct ReadContent {
 struct DiffData {
     is_repo: bool,
     summary: String,
+    file_count: usize,
     files: Vec<String>,
+    omitted_files: usize,
     patch: Option<String>,
 }
 
@@ -662,6 +665,12 @@ struct BoundedOutputLine {
     line_number: usize,
     bytes: Vec<u8>,
     exceeded: bool,
+}
+
+struct BoundedFileList {
+    files: Vec<String>,
+    total_files: usize,
+    omitted_files: usize,
 }
 
 #[derive(Serialize)]
@@ -1338,7 +1347,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
             git_observable_diff_output_bounded(workspace, ["--stat"], MAX_DIFF_SUMMARY)?;
         let summary_truncated = summary_output.truncated;
         let summary = summary_output.text;
-        let files = git_observable_diff_name_only(workspace)?;
+        let diff_files = git_observable_diff_name_only(workspace, MAX_CHANGED_FILES)?;
         let (patch, patch_truncated) = if args.summary {
             (None, false)
         } else {
@@ -1349,7 +1358,9 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
             DiffData {
                 is_repo: true,
                 summary,
-                files,
+                file_count: diff_files.total_files,
+                files: diff_files.files,
+                omitted_files: diff_files.omitted_files,
                 patch,
             },
             summary_truncated,
@@ -1360,16 +1371,19 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
             DiffData {
                 is_repo: false,
                 summary: "not a git repository".to_string(),
+                file_count: 0,
                 files: vec![],
+                omitted_files: 0,
                 patch: None,
             },
             false,
             false,
         )
     };
-    let truncated = summary_truncated || patch_truncated;
+    let file_list_truncated = data.omitted_files > 0;
+    let truncated = summary_truncated || patch_truncated || file_list_truncated;
     let mut summary = if data.is_repo {
-        format!("{} changed file(s)", data.files.len())
+        format!("{} changed file(s)", data.file_count)
     } else {
         data.summary.clone()
     };
@@ -1379,6 +1393,9 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
         summary.push_str(" (summary truncated)");
     } else if patch_truncated {
         summary.push_str(" (patch truncated)");
+    }
+    if file_list_truncated {
+        summary.push_str(" (files truncated)");
     }
     let evidence = data
         .files
@@ -2873,6 +2890,45 @@ where
     Ok(paths)
 }
 
+fn git_output_name_only_limited<I, S>(
+    workspace: &Workspace,
+    args: I,
+    max_files: usize,
+) -> Result<BoundedFileList>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut child = Command::new("git")
+        .current_dir(&workspace.root)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to run git")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git stderr"))?;
+    let stderr_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+
+    let paths_result = read_git_name_only_paths_limited(stdout, max_files);
+    let status = child.wait().context("failed to wait for git")?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("git stderr reader thread panicked"))??;
+    let paths = paths_result?;
+    if !status.success() {
+        bail!("git failed: {}", stderr.text.trim());
+    }
+    Ok(paths)
+}
+
 fn read_git_name_only_paths<R: Read>(reader: R) -> Result<Vec<String>> {
     let mut reader = BufReader::new(reader);
     let mut line = Vec::new();
@@ -2900,6 +2956,45 @@ fn read_git_name_only_paths<R: Read>(reader: R) -> Result<Vec<String>> {
     }
 
     Ok(paths)
+}
+
+fn read_git_name_only_paths_limited<R: Read>(
+    reader: R,
+    max_files: usize,
+) -> Result<BoundedFileList> {
+    let mut reader = BufReader::new(reader);
+    let mut line_number = 1usize;
+    let mut files = Vec::new();
+    let mut total_files = 0usize;
+
+    while let Some(line) = read_bounded_output_line(
+        &mut reader,
+        line_number,
+        MAX_GIT_OUTPUT_LINE_BYTES,
+        "git name-only output",
+    )? {
+        line_number += 1;
+        if line.exceeded {
+            bail!(
+                "git name-only output line {} exceeded {} bytes",
+                line.line_number,
+                MAX_GIT_OUTPUT_LINE_BYTES
+            );
+        }
+        let line = String::from_utf8_lossy(&line.bytes);
+        if let Some(path) = git_name_only_path(&line) {
+            total_files += 1;
+            if files.len() < max_files {
+                files.push(path);
+            }
+        }
+    }
+
+    Ok(BoundedFileList {
+        omitted_files: total_files.saturating_sub(files.len()),
+        files,
+        total_files,
+    })
 }
 
 #[cfg(test)]
@@ -4581,14 +4676,17 @@ where
     Ok(output.text)
 }
 
-fn git_observable_diff_name_only(workspace: &Workspace) -> Result<Vec<String>> {
+fn git_observable_diff_name_only(
+    workspace: &Workspace,
+    max_files: usize,
+) -> Result<BoundedFileList> {
     let mut args = vec!["diff"];
     if git_current_head(workspace)?.is_some() {
         args.push("HEAD");
     }
     args.push("--name-only");
     args.extend(["--", ".", ":(exclude).workspace/**"]);
-    git_output_name_only(workspace, args)
+    git_output_name_only_limited(workspace, args, max_files)
 }
 
 fn git_observable_diff_output_bounded<const N: usize>(
@@ -5259,6 +5357,19 @@ mod tests {
                 .expect("name-only output should parse");
 
         assert_eq!(paths, vec!["src/a.rs", "src/tab\tname.txt"]);
+    }
+
+    #[test]
+    fn reads_limited_git_name_only_paths_and_counts_omitted() {
+        let paths = read_git_name_only_paths_limited(
+            std::io::Cursor::new("src/a.rs\nsrc/b.rs\nsrc/c.rs\n"),
+            2,
+        )
+        .expect("name-only output should parse");
+
+        assert_eq!(paths.files, vec!["src/a.rs", "src/b.rs"]);
+        assert_eq!(paths.total_files, 3);
+        assert_eq!(paths.omitted_files, 1);
     }
 
     #[test]

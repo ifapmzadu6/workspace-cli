@@ -1176,6 +1176,37 @@ fn diff_truncates_large_summary_stat() {
 }
 
 #[test]
+fn diff_truncates_large_file_lists() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    for index in 0..90 {
+        write_file(root, &format!("many/file_{index:03}.txt"), "old\n");
+    }
+    commit_all(root, "initial many files");
+    for index in 0..90 {
+        write_file(root, &format!("many/file_{index:03}.txt"), "new\n");
+    }
+
+    let diff = run_workspace(root, &["diff", "--summary", "--json"]);
+    let files = diff["data"]["files"]
+        .as_array()
+        .expect("diff files should be an array");
+
+    assert_eq!(diff["kind"], "workspace_diff");
+    assert_eq!(diff["truncated"], true);
+    assert_eq!(diff["data"]["file_count"], 90);
+    assert_eq!(diff["data"]["omitted_files"], 10);
+    assert_eq!(files.len(), 80);
+    assert!(
+        diff["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("files truncated")
+    );
+}
+
+#[test]
 fn diff_does_not_suggest_reading_deleted_files() {
     let temp = init_git_repo();
     let root = temp.path();
