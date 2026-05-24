@@ -2878,11 +2878,11 @@ fn collect_git_name_only<const N: usize>(
     args: [&str; N],
     files: &mut BTreeSet<String>,
 ) -> Result<()> {
-    for path in git_output_name_only(workspace, args)? {
+    stream_git_name_only_paths(workspace, args, |path| {
         if should_include_repo_file(&path) {
             files.insert(path);
         }
-    }
+    })?;
     Ok(())
 }
 
@@ -2960,10 +2960,11 @@ fn read_git_log_name_only<R: Read>(reader: R) -> Result<Vec<GitCommitFiles>> {
     Ok(state.finish())
 }
 
-fn git_output_name_only<I, S>(workspace: &Workspace, args: I) -> Result<Vec<String>>
+fn stream_git_name_only_paths<I, S, F>(workspace: &Workspace, args: I, mut on_path: F) -> Result<()>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
+    F: FnMut(String),
 {
     let mut child = Command::new("git")
         .current_dir(&workspace.root)
@@ -2983,16 +2984,16 @@ where
     let stderr_reader =
         std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
 
-    let paths_result = read_git_name_only_paths(stdout);
+    let paths_result = stream_git_name_only_paths_from_reader(stdout, &mut on_path);
     let status = child.wait().context("failed to wait for git")?;
     let stderr = stderr_reader
         .join()
         .map_err(|_| anyhow!("git stderr reader thread panicked"))??;
-    let paths = paths_result?;
+    paths_result?;
     if !status.success() {
         bail!("git failed: {}", stderr.text.trim());
     }
-    Ok(paths)
+    Ok(())
 }
 
 fn git_output_name_only_limited<I, S>(
@@ -3034,6 +3035,7 @@ where
     Ok(paths)
 }
 
+#[cfg(test)]
 fn read_git_name_only_paths<R: Read>(reader: R) -> Result<Vec<String>> {
     read_git_name_only_paths_limited(reader, usize::MAX).map(|paths| paths.files)
 }
@@ -3075,6 +3077,36 @@ fn read_git_name_only_paths_limited<R: Read>(
         files,
         total_files,
     })
+}
+
+fn stream_git_name_only_paths_from_reader<R: Read, F>(reader: R, on_path: &mut F) -> Result<()>
+where
+    F: FnMut(String),
+{
+    let mut reader = BufReader::new(reader);
+    let mut line_number = 1usize;
+
+    while let Some(line) = read_bounded_output_line(
+        &mut reader,
+        line_number,
+        MAX_GIT_OUTPUT_LINE_BYTES,
+        "git name-only output",
+    )? {
+        line_number += 1;
+        if line.exceeded {
+            bail!(
+                "git name-only output line {} exceeded {} bytes",
+                line.line_number,
+                MAX_GIT_OUTPUT_LINE_BYTES
+            );
+        }
+        let line = String::from_utf8_lossy(&line.bytes);
+        if let Some(path) = git_name_only_path(&line) {
+            on_path(path);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -5428,6 +5460,18 @@ mod tests {
         let paths =
             read_git_name_only_paths(std::io::Cursor::new("src/a.rs\n\"src/tab\\tname.txt\"\n"))
                 .expect("name-only output should parse");
+
+        assert_eq!(paths, vec!["src/a.rs", "src/tab\tname.txt"]);
+    }
+
+    #[test]
+    fn streams_git_name_only_paths_incrementally() {
+        let mut paths = Vec::new();
+        stream_git_name_only_paths_from_reader(
+            std::io::Cursor::new("\nsrc/a.rs\n\"src/tab\\tname.txt\"\n"),
+            &mut |path| paths.push(path),
+        )
+        .expect("name-only output should stream");
 
         assert_eq!(paths, vec!["src/a.rs", "src/tab\tname.txt"]);
     }
