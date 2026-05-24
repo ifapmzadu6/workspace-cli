@@ -4195,12 +4195,37 @@ fn run_git_apply<const N: usize>(
         command.arg(arg);
     }
     command.arg(patch_path);
-    let output = command.output().context("failed to run git apply")?;
-    if !output.status.success() {
-        bail!(
-            "git apply failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to run git apply")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git apply stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git apply stderr"))?;
+    let stdout_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stdout, MAX_CAPTURED_OUTPUT));
+    let stderr_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+    let status = child.wait().context("failed to wait for git apply")?;
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| anyhow!("git apply stdout reader thread panicked"))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("git apply stderr reader thread panicked"))??;
+    if !status.success() {
+        let message = if stderr.text.trim().is_empty() {
+            stdout.text.trim()
+        } else {
+            stderr.text.trim()
+        };
+        bail!("git apply failed: {message}");
     }
     Ok(())
 }
