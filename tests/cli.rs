@@ -739,6 +739,36 @@ fn log_parse_errors_include_line_number() {
 }
 
 #[test]
+fn status_reports_operation_log_parse_errors() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "README.md", "# demo\n");
+    commit_all(root, "initial commit");
+    write_file(
+        root,
+        ".workspace/log.jsonl",
+        "{\"id\":\"ok\",\"timestamp_unix_ms\":1,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"ok\",\"transaction_id\":null}\nnot json\n",
+    );
+
+    let status = run_workspace(root, &["status", "--json"]);
+    let error = status["data"]["recent_operations_error"]
+        .as_str()
+        .expect("status should expose the log parse error");
+
+    assert_eq!(status["kind"], "workspace_status");
+    assert!(
+        status["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("operation log unreadable")
+    );
+    assert!(
+        error.contains("failed to parse operation log") && error.contains("line 2"),
+        "unexpected recent operations error: {error}"
+    );
+}
+
+#[test]
 fn log_limit_ignores_corrupt_entries_outside_requested_window() {
     let temp = init_git_repo();
     let root = temp.path();

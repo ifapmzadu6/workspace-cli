@@ -355,6 +355,8 @@ struct StatusData {
     git: GitSummary,
     index_status: IndexStatusData,
     recent_operations: Vec<LogEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recent_operations_error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -700,20 +702,30 @@ fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
 fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
     let git = git_summary(workspace)?;
     let index_status = cochange_index_status(workspace);
-    let recent_operations = read_log(workspace, 10).unwrap_or_default();
+    let (recent_operations, recent_operations_error) = match read_log(workspace, 10) {
+        Ok(entries) => (entries, None),
+        Err(error) => (Vec::new(), Some(format!("{error:#}"))),
+    };
     let data = StatusData {
         root: workspace.root.to_string_lossy().into_owned(),
         git,
         index_status,
         recent_operations,
+        recent_operations_error,
     };
     let summary = if data.git.is_repo {
+        let log_note = if data.recent_operations_error.is_some() {
+            ", operation log unreadable"
+        } else {
+            ""
+        };
         format!(
-            "branch {}, {} dirty file(s), {} untracked file(s), index {}",
+            "branch {}, {} dirty file(s), {} untracked file(s), index {}{}",
             data.git.branch.as_deref().unwrap_or("unknown"),
             data.git.dirty_files.len(),
             data.git.untracked_files.len(),
-            data.index_status.status
+            data.index_status.status,
+            log_note
         )
     } else {
         "not a git repository".to_string()
@@ -3375,6 +3387,9 @@ fn print_status(observation: &Observation<StatusData>) -> Result<()> {
                 entry.id, entry.kind, entry.op, entry.summary
             );
         }
+    }
+    if let Some(error) = &data.recent_operations_error {
+        println!("  recent operations error: {error}");
     }
     Ok(())
 }
