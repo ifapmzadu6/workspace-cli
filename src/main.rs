@@ -1082,19 +1082,7 @@ impl Workspace {
 
 fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
     let map = build_map(workspace, args.depth, args.include_hidden)?;
-    let truncated = map_truncated(&map);
-    let summary = map_summary(&map, truncated);
-    let evidence = map_evidence(&map);
-    let next_observations = map_next_observations(&map);
-    let observation = Observation {
-        kind: WORKSPACE_MAP_KIND.to_string(),
-        scope: map.root.clone(),
-        summary,
-        data: map,
-        evidence,
-        truncated,
-        next_observations,
-    };
+    let observation = map_observation(map);
 
     append_observation_log(
         workspace,
@@ -1121,17 +1109,7 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
         recent_operations_omitted,
         recent_operations_error,
     };
-    let truncated = status_truncated(&data);
-    let summary = status_summary(&data, truncated);
-    let observation = Observation {
-        kind: WORKSPACE_STATUS_KIND.to_string(),
-        scope: data.root.clone(),
-        summary,
-        data,
-        evidence: vec![],
-        truncated,
-        next_observations: status_next_observations(),
-    };
+    let observation = status_observation(data);
 
     append_observation_log(
         workspace,
@@ -1161,16 +1139,7 @@ fn cmd_index(workspace: &Workspace, args: IndexArgs) -> Result<()> {
 
 fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> {
     let data = cochange_index_status(workspace);
-    let summary = index_status_summary(&data);
-    let observation = Observation {
-        kind: WORKSPACE_INDEX_STATUS_KIND.to_string(),
-        scope: data.path.clone(),
-        summary,
-        data,
-        evidence: vec![],
-        truncated: false,
-        next_observations: index_status_next_observations(),
-    };
+    let observation = index_status_observation(data);
 
     append_observation_log(
         workspace,
@@ -1195,29 +1164,8 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
     write_cochange_index(&index_path, &index)
         .with_context(|| format!("failed to write index {}", index_path.display()))?;
 
-    let data = IndexCochangeData {
-        path: workspace.relative(&index_path),
-        version: index.version,
-        generated_at_unix_ms: index.generated_at_unix_ms,
-        head: index.head.clone(),
-        max_commits: index.max_commits,
-        max_files_per_commit: index.max_files_per_commit,
-        commits_scanned: index.commits_scanned,
-        commits_indexed: index.commits_indexed,
-        ignored_large_commits: index.ignored_large_commits,
-        file_count: index.file_commit_counts.len(),
-        edge_count: index.edges.len(),
-    };
-    let summary = index_cochange_summary(&data);
-    let observation = Observation {
-        kind: WORKSPACE_INDEX_COCHANGE_KIND.to_string(),
-        scope: data.path.clone(),
-        summary,
-        data,
-        evidence: vec![],
-        truncated: false,
-        next_observations: index_cochange_next_observations(),
-    };
+    let data = index_cochange_data(workspace, &index_path, &index);
+    let observation = index_cochange_observation(data);
 
     append_log(
         workspace,
@@ -1816,6 +1764,82 @@ fn diff_observation(
         evidence,
         truncated,
         next_observations,
+    }
+}
+
+fn map_observation(map: WorkspaceMap) -> Observation<WorkspaceMap> {
+    let truncated = map_truncated(&map);
+    let summary = map_summary(&map, truncated);
+    let evidence = map_evidence(&map);
+    let next_observations = map_next_observations(&map);
+    Observation {
+        kind: WORKSPACE_MAP_KIND.to_string(),
+        scope: map.root.clone(),
+        summary,
+        data: map,
+        evidence,
+        truncated,
+        next_observations,
+    }
+}
+
+fn status_observation(data: StatusData) -> Observation<StatusData> {
+    let truncated = status_truncated(&data);
+    let summary = status_summary(&data, truncated);
+    Observation {
+        kind: WORKSPACE_STATUS_KIND.to_string(),
+        scope: data.root.clone(),
+        summary,
+        data,
+        evidence: vec![],
+        truncated,
+        next_observations: status_next_observations(),
+    }
+}
+
+fn index_status_observation(data: IndexStatusData) -> Observation<IndexStatusData> {
+    let summary = index_status_summary(&data);
+    Observation {
+        kind: WORKSPACE_INDEX_STATUS_KIND.to_string(),
+        scope: data.path.clone(),
+        summary,
+        data,
+        evidence: vec![],
+        truncated: false,
+        next_observations: index_status_next_observations(),
+    }
+}
+
+fn index_cochange_data(
+    workspace: &Workspace,
+    index_path: &Path,
+    index: &CochangeIndex,
+) -> IndexCochangeData {
+    IndexCochangeData {
+        path: workspace.relative(index_path),
+        version: index.version,
+        generated_at_unix_ms: index.generated_at_unix_ms,
+        head: index.head.clone(),
+        max_commits: index.max_commits,
+        max_files_per_commit: index.max_files_per_commit,
+        commits_scanned: index.commits_scanned,
+        commits_indexed: index.commits_indexed,
+        ignored_large_commits: index.ignored_large_commits,
+        file_count: index.file_commit_counts.len(),
+        edge_count: index.edges.len(),
+    }
+}
+
+fn index_cochange_observation(data: IndexCochangeData) -> Observation<IndexCochangeData> {
+    let summary = index_cochange_summary(&data);
+    Observation {
+        kind: WORKSPACE_INDEX_COCHANGE_KIND.to_string(),
+        scope: data.path.clone(),
+        summary,
+        data,
+        evidence: vec![],
+        truncated: false,
+        next_observations: index_cochange_next_observations(),
     }
 }
 
@@ -6856,6 +6880,52 @@ rename to new name.txt
     }
 
     #[test]
+    fn map_observation_helper_preserves_contract() {
+        let mut map = test_workspace_map();
+        map.structure.docs = vec!["README.md".to_string()];
+        map.structure.entrypoints = vec!["src/main.rs".to_string()];
+        map.important_files = vec![
+            ImportantFile {
+                path: "README.md".to_string(),
+                reason: IMPORTANT_REASON_PRIMARY_PROJECT_DOCUMENTATION.to_string(),
+            },
+            ImportantFile {
+                path: "src/main.rs".to_string(),
+                reason: IMPORTANT_REASON_LIKELY_ENTRYPOINT.to_string(),
+            },
+        ];
+        map.commands
+            .insert("test".to_string(), "cargo test".to_string());
+
+        let observation = map_observation(map);
+        assert_eq!(observation.kind, WORKSPACE_MAP_KIND);
+        assert_eq!(observation.scope, "/repo");
+        assert_eq!(
+            observation.summary,
+            "3 file(s), languages: Rust, TypeScript"
+        );
+        assert!(!observation.truncated);
+        assert_eq!(observation.evidence.len(), 2);
+        assert_eq!(
+            observation.evidence[0].reason,
+            IMPORTANT_REASON_PRIMARY_PROJECT_DOCUMENTATION
+        );
+        assert_eq!(
+            observation.next_observations,
+            vec![
+                "workspace read README.md",
+                "workspace read src/main.rs",
+                WORKSPACE_DIFF_SUMMARY_COMMAND,
+                WORKSPACE_INDEX_STATUS_COMMAND,
+                WORKSPACE_INDEX_COCHANGE_COMMAND,
+                WORKSPACE_IMPACT_COCHANGE_COMMAND,
+                "workspace related src/main.rs --by cochange",
+                "workspace run 'cargo test'",
+            ]
+        );
+    }
+
+    #[test]
     fn status_summary_reports_log_notes_and_truncation() {
         let mut data = test_status_data();
         assert!(!status_truncated(&data));
@@ -6889,6 +6959,23 @@ rename to new name.txt
     }
 
     #[test]
+    fn status_observation_helper_preserves_contract() {
+        let mut data = test_status_data();
+        data.recent_operations_omitted = 1;
+
+        let observation = status_observation(data);
+        assert_eq!(observation.kind, WORKSPACE_STATUS_KIND);
+        assert_eq!(observation.scope, "/repo");
+        assert_eq!(
+            observation.summary,
+            "branch main, 2 dirty file(s), 1 untracked file(s), index fresh, recent operations truncated (status truncated)"
+        );
+        assert!(observation.truncated);
+        assert!(observation.evidence.is_empty());
+        assert_eq!(observation.next_observations, status_next_observations());
+    }
+
+    #[test]
     fn index_status_summary_reports_known_statuses() {
         for (status, expected) in [
             (INDEX_STATUS_FRESH, "co-change index is fresh"),
@@ -6903,6 +6990,22 @@ rename to new name.txt
                 expected
             );
         }
+    }
+
+    #[test]
+    fn index_status_observation_helper_preserves_contract() {
+        let data = test_index_status_data(INDEX_STATUS_STALE);
+
+        let observation = index_status_observation(data);
+        assert_eq!(observation.kind, WORKSPACE_INDEX_STATUS_KIND);
+        assert_eq!(observation.scope, ".workspace/index/cochange.json");
+        assert_eq!(observation.summary, "co-change index is stale");
+        assert!(!observation.truncated);
+        assert!(observation.evidence.is_empty());
+        assert_eq!(
+            observation.next_observations,
+            index_status_next_observations()
+        );
     }
 
     #[test]
@@ -6924,6 +7027,56 @@ rename to new name.txt
         assert_eq!(
             index_cochange_summary(&data),
             "indexed 2 co-change edge(s) from 4 commit(s)"
+        );
+    }
+
+    #[test]
+    fn index_cochange_helpers_preserve_contract() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: true,
+        };
+        let index_path = temp.path().join(COCHANGE_INDEX_FILE);
+        let index = CochangeIndex {
+            version: 1,
+            generated_at_unix_ms: 123,
+            head: Some("abc123".to_string()),
+            max_commits: 500,
+            max_files_per_commit: 100,
+            commits_scanned: 5,
+            commits_indexed: 4,
+            ignored_large_commits: 1,
+            file_commit_counts: BTreeMap::from([
+                ("src/main.rs".to_string(), 2),
+                ("tests/cli.rs".to_string(), 1),
+            ]),
+            edges: vec![CochangeEdge {
+                a: "src/main.rs".to_string(),
+                b: "tests/cli.rs".to_string(),
+                cochanged_commits: 1,
+                weighted_cochanges: 1.0,
+                sample_commits: vec!["abc123".to_string()],
+            }],
+        };
+
+        let data = index_cochange_data(&workspace, &index_path, &index);
+        assert_eq!(data.path, COCHANGE_INDEX_FILE);
+        assert_eq!(data.file_count, 2);
+        assert_eq!(data.edge_count, 1);
+
+        let observation = index_cochange_observation(data);
+        assert_eq!(observation.kind, WORKSPACE_INDEX_COCHANGE_KIND);
+        assert_eq!(observation.scope, COCHANGE_INDEX_FILE);
+        assert_eq!(
+            observation.summary,
+            "indexed 1 co-change edge(s) from 4 commit(s)"
+        );
+        assert!(!observation.truncated);
+        assert!(observation.evidence.is_empty());
+        assert_eq!(
+            observation.next_observations,
+            index_cochange_next_observations()
         );
     }
 
