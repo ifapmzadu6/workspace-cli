@@ -1023,15 +1023,8 @@ impl Workspace {
 
 fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
     let map = build_map(workspace, args.depth, args.include_hidden)?;
-    let truncated = map.omitted.any() || map.git.omitted_files();
-    let mut summary = format!(
-        "{} file(s), languages: {}",
-        map.stats.file_count,
-        join_or_none(&map.stack.languages)
-    );
-    if truncated {
-        summary.push_str(" (map truncated)");
-    }
+    let truncated = map_truncated(&map);
+    let summary = map_summary(&map, truncated);
     let evidence = map_evidence(&map);
     let next_observations = map_next_observations(&map);
     let observation = Observation {
@@ -1723,6 +1716,22 @@ fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
         .take(MAX_NEXT_OBSERVATIONS)
         .map(|item| workspace_read_lines_command(&item.path, item.line, item.line))
         .collect()
+}
+
+fn map_truncated(map: &WorkspaceMap) -> bool {
+    map.omitted.any() || map.git.omitted_files()
+}
+
+fn map_summary(map: &WorkspaceMap, truncated: bool) -> String {
+    let mut summary = format!(
+        "{} file(s), languages: {}",
+        map.stats.file_count,
+        join_or_none(&map.stack.languages)
+    );
+    if truncated {
+        summary.push_str(" (map truncated)");
+    }
+    summary
 }
 
 fn status_truncated(data: &StatusData) -> bool {
@@ -6097,6 +6106,60 @@ rename to new name.txt
             recent_operations_omitted: 0,
             recent_operations_error: None,
         }
+    }
+
+    fn test_workspace_map() -> WorkspaceMap {
+        WorkspaceMap {
+            root: "/repo".to_string(),
+            git: test_git_summary(true),
+            stack: StackSummary {
+                languages: vec!["Rust".to_string(), "TypeScript".to_string()],
+                package_managers: vec![],
+                frameworks: vec![],
+            },
+            structure: StructureSummary {
+                directories: vec![],
+                entrypoints: vec![],
+                tests: vec![],
+                configs: vec![],
+                docs: vec![],
+            },
+            commands: BTreeMap::new(),
+            stats: WorkspaceStats {
+                file_count: 3,
+                directory_count: 1,
+                large_files: vec![],
+            },
+            important_files: vec![],
+            recent_files: vec![],
+            omitted: MapOmittedCounts::default(),
+        }
+    }
+
+    #[test]
+    fn map_summary_reports_languages_and_truncation() {
+        let mut map = test_workspace_map();
+        assert!(!map_truncated(&map));
+        assert_eq!(
+            map_summary(&map, map_truncated(&map)),
+            "3 file(s), languages: Rust, TypeScript"
+        );
+
+        map.omitted.docs = 1;
+        assert!(map_truncated(&map));
+        assert_eq!(
+            map_summary(&map, map_truncated(&map)),
+            "3 file(s), languages: Rust, TypeScript (map truncated)"
+        );
+
+        map.omitted.docs = 0;
+        map.git.omitted_dirty_files = 1;
+        assert!(map_truncated(&map));
+        map.stack.languages.clear();
+        assert_eq!(
+            map_summary(&map, map_truncated(&map)),
+            "3 file(s), languages: none (map truncated)"
+        );
     }
 
     #[test]
