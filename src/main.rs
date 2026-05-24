@@ -1145,25 +1145,8 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
 fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
     let (matches, total_matches, truncated_match_texts) =
         rg_search(workspace, &args.query, args.max_results)?;
-    let evidence = search_evidence(&matches);
-    let data = SearchData {
-        query: args.query.clone(),
-        total_matches,
-        truncated_match_texts,
-        matches,
-    };
-    let truncated = search_truncated(&data);
-    let summary = search_summary(&data);
-    let next_observations = search_next_observations(&data.matches);
-    let observation = Observation {
-        kind: WORKSPACE_SEARCH_KIND.to_string(),
-        scope: workspace.root.to_string_lossy().into_owned(),
-        summary,
-        data,
-        evidence,
-        truncated,
-        next_observations,
-    };
+    let data = search_data(&args.query, matches, total_matches, truncated_match_texts);
+    let observation = search_observation(workspace, data);
 
     append_observation_log(workspace, LOG_OP_SEARCH, &args.query, &observation.summary);
     output_observation(args.json, &observation, print_search)
@@ -1360,18 +1343,7 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
         lines: line_label.clone(),
         content: read_content.content,
     };
-    let summary = read_summary(&data.path, data.lines.as_deref(), read_content.truncated);
-    let evidence = read_evidence(&data);
-    let next_observations = read_followup_observations(&data.path);
-    let observation = Observation {
-        kind: WORKSPACE_READ_KIND.to_string(),
-        scope: data.path.clone(),
-        summary,
-        data,
-        evidence,
-        truncated: read_content.truncated,
-        next_observations,
-    };
+    let observation = read_observation(data, read_content.truncated);
 
     append_observation_log(workspace, LOG_OP_READ, &rel_path, &observation.summary);
     output_observation(args.json, &observation, print_read)
@@ -1416,20 +1388,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
             false,
         )
     };
-    let truncated = diff_truncated(&data, summary_truncated, patch_truncated);
-    let summary = diff_summary(&data, summary_truncated, patch_truncated);
-    let evidence = changed_file_evidence(&data.files, EVIDENCE_REASON_GIT_DIFF_CHANGED_FILE);
-    let next_observations =
-        read_next_observations(workspace, data.files.iter().map(String::as_str));
-    let observation = Observation {
-        kind: WORKSPACE_DIFF_KIND.to_string(),
-        scope: workspace.root.to_string_lossy().into_owned(),
-        summary,
-        data,
-        evidence,
-        truncated,
-        next_observations,
-    };
+    let observation = diff_observation(workspace, data, summary_truncated, patch_truncated);
 
     append_observation_log(
         workspace,
@@ -1770,6 +1729,36 @@ fn search_evidence(matches: &[SearchMatch]) -> Vec<Evidence> {
         .collect()
 }
 
+fn search_data(
+    query: &str,
+    matches: Vec<SearchMatch>,
+    total_matches: usize,
+    truncated_match_texts: usize,
+) -> SearchData {
+    SearchData {
+        query: query.to_string(),
+        total_matches,
+        truncated_match_texts,
+        matches,
+    }
+}
+
+fn search_observation(workspace: &Workspace, data: SearchData) -> Observation<SearchData> {
+    let summary = search_summary(&data);
+    let evidence = search_evidence(&data.matches);
+    let truncated = search_truncated(&data);
+    let next_observations = search_next_observations(&data.matches);
+    Observation {
+        kind: WORKSPACE_SEARCH_KIND.to_string(),
+        scope: workspace.root.to_string_lossy().into_owned(),
+        summary,
+        data,
+        evidence,
+        truncated,
+        next_observations,
+    }
+}
+
 fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
     matches
         .iter()
@@ -1786,11 +1775,48 @@ fn read_evidence(data: &ReadData) -> Vec<Evidence> {
     }]
 }
 
+fn read_observation(data: ReadData, content_truncated: bool) -> Observation<ReadData> {
+    let summary = read_summary(&data.path, data.lines.as_deref(), content_truncated);
+    let evidence = read_evidence(&data);
+    let next_observations = read_followup_observations(&data.path);
+    Observation {
+        kind: WORKSPACE_READ_KIND.to_string(),
+        scope: data.path.clone(),
+        summary,
+        data,
+        evidence,
+        truncated: content_truncated,
+        next_observations,
+    }
+}
+
 fn read_followup_observations(path: &str) -> Vec<String> {
     vec![
         format!("workspace search {}", shell_hint(path)),
         WORKSPACE_DIFF_SUMMARY_COMMAND.to_string(),
     ]
+}
+
+fn diff_observation(
+    workspace: &Workspace,
+    data: DiffData,
+    summary_truncated: bool,
+    patch_truncated: bool,
+) -> Observation<DiffData> {
+    let summary = diff_summary(&data, summary_truncated, patch_truncated);
+    let evidence = changed_file_evidence(&data.files, EVIDENCE_REASON_GIT_DIFF_CHANGED_FILE);
+    let truncated = diff_truncated(&data, summary_truncated, patch_truncated);
+    let next_observations =
+        read_next_observations(workspace, data.files.iter().map(String::as_str));
+    Observation {
+        kind: WORKSPACE_DIFF_KIND.to_string(),
+        scope: workspace.root.to_string_lossy().into_owned(),
+        summary,
+        data,
+        evidence,
+        truncated,
+        next_observations,
+    }
 }
 
 fn static_observation_commands(commands: &[&str]) -> Vec<String> {
@@ -6345,6 +6371,24 @@ rename to new name.txt
         assert_eq!(evidence[0].lines.as_deref(), Some("3:5"));
         assert_eq!(evidence[0].reason, EVIDENCE_REASON_REQUESTED_FILE_CONTENT);
 
+        let observation = read_observation(data, true);
+        assert_eq!(observation.kind, WORKSPACE_READ_KIND);
+        assert_eq!(observation.scope, "src/main.rs");
+        assert_eq!(
+            observation.summary,
+            "read src/main.rs lines 3:5 (truncated)"
+        );
+        assert!(observation.truncated);
+        assert_eq!(observation.evidence.len(), 1);
+        assert_eq!(
+            observation.evidence[0].reason,
+            EVIDENCE_REASON_REQUESTED_FILE_CONTENT
+        );
+        assert_eq!(
+            observation.next_observations,
+            read_followup_observations("src/main.rs")
+        );
+
         assert_eq!(
             read_followup_observations("path with spaces.txt"),
             vec![
@@ -6665,6 +6709,11 @@ rename to new name.txt
 
     #[test]
     fn search_observation_helpers_are_bounded() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
         let matches = (0..(MAX_EVIDENCE_ITEMS + 1))
             .map(|index| SearchMatch {
                 path: format!("file_{index:02}.txt"),
@@ -6684,6 +6733,26 @@ rename to new name.txt
         assert_eq!(next.len(), MAX_NEXT_OBSERVATIONS);
         assert_eq!(next[0], "workspace read file_00.txt --lines 1:1");
         assert_eq!(next[4], "workspace read file_04.txt --lines 5:5");
+
+        let data = search_data("needle", matches, MAX_EVIDENCE_ITEMS + 2, 1);
+        let observation = search_observation(&workspace, data);
+        assert_eq!(observation.kind, WORKSPACE_SEARCH_KIND);
+        assert_eq!(
+            observation.scope,
+            temp.path().to_string_lossy().into_owned()
+        );
+        assert_eq!(
+            observation.summary,
+            format!(
+                "{} match(es) for \"needle\", showing {}, truncated 1 match text(s)",
+                MAX_EVIDENCE_ITEMS + 2,
+                MAX_EVIDENCE_ITEMS + 1
+            )
+        );
+        assert!(observation.truncated);
+        assert_eq!(observation.evidence.len(), MAX_EVIDENCE_ITEMS);
+        assert_eq!(observation.evidence[0].reason, EVIDENCE_REASON_TEXT_MATCH);
+        assert_eq!(observation.next_observations.len(), MAX_NEXT_OBSERVATIONS);
     }
 
     fn test_git_summary(is_repo: bool) -> GitSummary {
@@ -6999,6 +7068,44 @@ rename to new name.txt
         };
 
         assert_eq!(diff_summary(&data, false, false), "not a git repository");
+    }
+
+    #[test]
+    fn diff_observation_helper_preserves_contract() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::create_dir(temp.path().join("src")).expect("src directory should be created");
+        fs::write(temp.path().join("src/main.rs"), "fn main() {}\n")
+            .expect("source file should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: true,
+        };
+        let data = DiffData {
+            is_repo: true,
+            summary: "ignored for repositories".to_string(),
+            file_count: 2,
+            files: vec!["src/main.rs".to_string(), "missing.rs".to_string()],
+            omitted_files: 1,
+            patch: None,
+        };
+
+        let observation = diff_observation(&workspace, data, false, false);
+        assert_eq!(observation.kind, WORKSPACE_DIFF_KIND);
+        assert_eq!(
+            observation.scope,
+            temp.path().to_string_lossy().into_owned()
+        );
+        assert_eq!(observation.summary, "2 changed file(s) (files truncated)");
+        assert!(observation.truncated);
+        assert_eq!(observation.evidence.len(), 2);
+        assert_eq!(
+            observation.evidence[0].reason,
+            EVIDENCE_REASON_GIT_DIFF_CHANGED_FILE
+        );
+        assert_eq!(
+            observation.next_observations,
+            vec!["workspace read src/main.rs"]
+        );
     }
 
     #[test]
