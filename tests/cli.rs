@@ -765,6 +765,75 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn patch_and_rollback_truncate_large_file_lists() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    for index in 0..90 {
+        write_file(root, &format!("many/file_{index:03}.txt"), "old\n");
+    }
+    commit_all(root, "initial many files");
+
+    let mut patch_content = String::new();
+    for index in 0..90 {
+        patch_content.push_str(&format!(
+            "\
+diff --git a/many/file_{index:03}.txt b/many/file_{index:03}.txt
+--- a/many/file_{index:03}.txt
++++ b/many/file_{index:03}.txt
+@@ -1 +1 @@
+-old
++new
+"
+        ));
+    }
+    write_file(root, "many.patch", &patch_content);
+
+    let patch = run_workspace(root, &["patch", "many.patch", "--json"]);
+    let transaction_id = patch["data"]["transaction_id"]
+        .as_str()
+        .expect("transaction id should be a string")
+        .to_string();
+
+    assert_eq!(patch["kind"], "workspace_patch");
+    assert_eq!(patch["truncated"], true);
+    assert_eq!(patch["data"]["file_count"], 90);
+    assert_eq!(patch["data"]["omitted_files"], 10);
+    assert_eq!(
+        patch["data"]["files_changed"]
+            .as_array()
+            .expect("files changed should be an array")
+            .len(),
+        80
+    );
+    assert!(
+        patch["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("files truncated")
+    );
+
+    let rollback = run_workspace(root, &["rollback", &transaction_id, "--json"]);
+    assert_eq!(rollback["kind"], "workspace_rollback");
+    assert_eq!(rollback["truncated"], true);
+    assert_eq!(rollback["data"]["file_count"], 90);
+    assert_eq!(rollback["data"]["omitted_files"], 10);
+    assert_eq!(
+        rollback["data"]["files_changed"]
+            .as_array()
+            .expect("rollback files changed should be an array")
+            .len(),
+        80
+    );
+    assert!(
+        rollback["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("files truncated")
+    );
+}
+
+#[test]
 fn diff_excludes_workspace_metadata_changes() {
     let temp = init_git_repo();
     let root = temp.path();

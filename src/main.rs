@@ -22,6 +22,7 @@ const INDEX_DIR: &str = ".workspace/index";
 const COCHANGE_INDEX_FILE: &str = ".workspace/index/cochange.json";
 const MAX_CAPTURED_OUTPUT: usize = 24_000;
 const MAX_READ_CONTENT: usize = 24_000;
+const MAX_CHANGED_FILES: usize = 80;
 const MAX_GIT_STATUS_FILES: usize = 80;
 const MAX_MAP_LIST_ITEMS: usize = 80;
 const MAX_MAP_LARGE_FILES: usize = 40;
@@ -494,7 +495,9 @@ struct PatchData {
     transaction_id: String,
     patch_file: String,
     stored_patch: String,
+    file_count: usize,
     files_changed: Vec<String>,
+    omitted_files: usize,
 }
 
 #[derive(Serialize)]
@@ -529,7 +532,9 @@ struct RollbackData {
     transaction_id: String,
     rollback_transaction_id: String,
     stored_patch: String,
+    file_count: usize,
     files_changed: Vec<String>,
+    omitted_files: usize,
 }
 
 #[derive(Serialize)]
@@ -1233,17 +1238,24 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         return Err(error);
     }
 
+    let mut observed_files_changed = files_changed.clone();
+    let omitted_files = truncate_vec(&mut observed_files_changed, MAX_CHANGED_FILES);
     let data = PatchData {
         transaction_id: transaction_id.clone(),
         patch_file: workspace.relative(&patch_path),
         stored_patch: workspace.relative(&stored_patch),
-        files_changed: files_changed.clone(),
+        file_count: files_changed.len(),
+        files_changed: observed_files_changed,
+        omitted_files,
     };
-    let summary = format!(
+    let truncated = data.omitted_files > 0;
+    let mut summary = format!(
         "applied patch transaction {} touching {} file(s)",
-        data.transaction_id,
-        data.files_changed.len()
+        data.transaction_id, data.file_count
     );
+    if truncated {
+        summary.push_str(" (files truncated)");
+    }
     let observation = Observation {
         kind: "workspace_patch".to_string(),
         scope: data.patch_file.clone(),
@@ -1251,13 +1263,14 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         data,
         evidence: files_changed
             .iter()
+            .take(MAX_CHANGED_FILES)
             .map(|path| Evidence {
                 path: path.clone(),
                 lines: None,
                 reason: "patch file target".to_string(),
             })
             .collect(),
-        truncated: false,
+        truncated,
         next_observations: vec![
             "workspace diff --summary".to_string(),
             format!("workspace rollback {}", transaction_id),
@@ -1370,17 +1383,24 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
     run_git_apply(workspace, &stored_patch, ["--reverse"])?;
 
     let rollback_transaction_id = new_id("rb");
+    let mut observed_files_changed = files_changed.clone();
+    let omitted_files = truncate_vec(&mut observed_files_changed, MAX_CHANGED_FILES);
     let data = RollbackData {
         transaction_id: args.transaction_id.clone(),
         rollback_transaction_id: rollback_transaction_id.clone(),
         stored_patch: workspace.relative(&stored_patch),
-        files_changed: files_changed.clone(),
+        file_count: files_changed.len(),
+        files_changed: observed_files_changed,
+        omitted_files,
     };
-    let summary = format!(
+    let truncated = data.omitted_files > 0;
+    let mut summary = format!(
         "rolled back transaction {} touching {} file(s)",
-        data.transaction_id,
-        data.files_changed.len()
+        data.transaction_id, data.file_count
     );
+    if truncated {
+        summary.push_str(" (files truncated)");
+    }
     let observation = Observation {
         kind: "workspace_rollback".to_string(),
         scope: data.transaction_id.clone(),
@@ -1388,13 +1408,14 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         data,
         evidence: files_changed
             .iter()
+            .take(MAX_CHANGED_FILES)
             .map(|path| Evidence {
                 path: path.clone(),
                 lines: None,
                 reason: "rollback target".to_string(),
             })
             .collect(),
-        truncated: false,
+        truncated,
         next_observations: vec!["workspace diff --summary".to_string()],
     };
 
@@ -3795,6 +3816,9 @@ fn print_patch(observation: &Observation<PatchData>) -> Result<()> {
     println!("{}", observation.summary);
     println!("  transaction: {}", observation.data.transaction_id);
     print_list("files", &observation.data.files_changed);
+    if observation.data.omitted_files > 0 {
+        println!("    ... {} more file(s)", observation.data.omitted_files);
+    }
     Ok(())
 }
 
@@ -3837,6 +3861,9 @@ fn print_rollback(observation: &Observation<RollbackData>) -> Result<()> {
         observation.data.rollback_transaction_id
     );
     print_list("files", &observation.data.files_changed);
+    if observation.data.omitted_files > 0 {
+        println!("    ... {} more file(s)", observation.data.omitted_files);
+    }
     Ok(())
 }
 

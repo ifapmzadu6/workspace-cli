@@ -322,6 +322,9 @@ workspace patch fix.diff
 
 Patch-first mutation is easier to review, track, and roll back than direct file
 writes.
+Large changed-file lists are bounded in patch and rollback observations. The
+total count remains available as `file_count`, with omitted files reported
+separately.
 
 ### `workspace run`
 
