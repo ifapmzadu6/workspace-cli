@@ -37,6 +37,7 @@ const MAX_PATCH_LINE_BYTES: usize = 64_000;
 const MAX_GIT_OUTPUT_LINE_BYTES: usize = 64_000;
 const MAX_SAMPLE_COMMITS: usize = 5;
 const MAX_LOG_LINE_BYTES: usize = 64_000;
+const MAX_PACKAGE_JSON_BYTES: u64 = 1_000_000;
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -2129,8 +2130,12 @@ fn file_contains_needles(path: &Path, needles: &[(&[u8], &str)]) -> Result<Vec<b
     Ok(matched)
 }
 
-fn read_json_file(path: &Path) -> Result<Value> {
+fn read_json_file_bounded(path: &Path, max_bytes: u64) -> Result<Value> {
     let file = fs::File::open(path)?;
+    let bytes = file.metadata()?.len();
+    if bytes > max_bytes {
+        bail!("JSON file {} exceeded {} bytes", path.display(), max_bytes);
+    }
     serde_json::from_reader(BufReader::new(file)).context("failed to parse JSON")
 }
 
@@ -2148,7 +2153,7 @@ fn detect_commands(
 
     if signals.named_files.contains("package.json") {
         let package_json = workspace.root.join("package.json");
-        if let Ok(value) = read_json_file(&package_json)
+        if let Ok(value) = read_json_file_bounded(&package_json, MAX_PACKAGE_JSON_BYTES)
             && let Some(scripts) = value.get("scripts").and_then(Value::as_object)
         {
             for (name, value) in scripts {
@@ -5885,6 +5890,43 @@ not json
             detect_package_json_frameworks(&package_json).expect("frameworks should be detected");
 
         assert_eq!(frameworks, vec!["react"]);
+    }
+
+    #[test]
+    fn rejects_oversized_json_before_parsing() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let path = temp.path().join("package.json");
+        let file = fs::File::create(&path).expect("package.json should be created");
+        file.set_len(MAX_PACKAGE_JSON_BYTES + 1)
+            .expect("package.json size should be set");
+
+        let Err(error) = read_json_file_bounded(&path, MAX_PACKAGE_JSON_BYTES) else {
+            panic!("oversized JSON should fail before parsing");
+        };
+        let error = format!("{error:#}");
+
+        assert!(error.contains("JSON file"), "unexpected error: {error}");
+        assert!(error.contains("exceeded"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn detect_commands_skips_oversized_package_json() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = temp.path();
+        let package_json = root.join("package.json");
+        let file = fs::File::create(&package_json).expect("package.json should be created");
+        file.set_len(MAX_PACKAGE_JSON_BYTES + 1)
+            .expect("package.json size should be set");
+        let workspace = Workspace {
+            root: root.to_path_buf(),
+            is_git_repo: false,
+        };
+        let mut signals = MapSignals::default();
+        signals.named_files.insert("package.json".to_string());
+
+        let commands = detect_commands(&workspace, &signals).expect("commands should be detected");
+
+        assert!(commands.is_empty());
     }
 
     #[test]
