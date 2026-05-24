@@ -3180,6 +3180,10 @@ fn rank_cochanges(
     let mut ignored_large_commits = 0;
 
     for (rank, commit) in commits.iter().enumerate() {
+        if !commit_mentions_normalized_path(commit, &target) {
+            continue;
+        }
+
         let files = commit
             .files
             .iter()
@@ -3187,9 +3191,6 @@ fn rank_cochanges(
             .filter(|file| !file.is_empty())
             .collect::<BTreeSet<_>>();
 
-        if !files.contains(&target) {
-            continue;
-        }
         commits_matched += 1;
 
         if files.len() > max_files_per_commit.max(1) {
@@ -3244,6 +3245,14 @@ fn rank_cochanges(
         commits_matched,
         ignored_large_commits,
     }
+}
+
+fn commit_mentions_normalized_path(commit: &GitCommitFiles, target: &str) -> bool {
+    !target.is_empty()
+        && commit
+            .files
+            .iter()
+            .any(|file| normalize_repo_path(file) == target)
 }
 
 fn rank_cochanges_from_index(
@@ -6333,6 +6342,24 @@ src/b.rs
 
         assert_eq!(ranking.commits_matched, 1);
         assert_eq!(ranking.ignored_large_commits, 1);
+        assert!(ranking.related.is_empty());
+    }
+
+    #[test]
+    fn ignores_unmatched_large_cochange_commits_without_counting_them() {
+        let commits = vec![GitCommitFiles {
+            hash: "aaaaaaaaaaaa".to_string(),
+            files: vec![
+                "src/other.rs".to_string(),
+                "src/b.rs".to_string(),
+                "src/c.rs".to_string(),
+            ],
+        }];
+
+        let ranking = rank_cochanges(&commits, "src/a.rs", 2, 10);
+
+        assert_eq!(ranking.commits_matched, 0);
+        assert_eq!(ranking.ignored_large_commits, 0);
         assert!(ranking.related.is_empty());
     }
 
