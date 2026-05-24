@@ -1102,8 +1102,8 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
 
 fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     let data = if workspace.is_git_repo {
-        let summary = git_output(workspace, ["diff", "--stat"])?;
-        let files = git_output(workspace, ["diff", "--name-only"])?
+        let summary = git_observable_diff_output(workspace, ["--stat"])?;
+        let files = git_observable_diff_output(workspace, ["--name-only"])?
             .lines()
             .filter(|line| !line.trim().is_empty())
             .map(ToOwned::to_owned)
@@ -1111,7 +1111,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
         let patch = if args.summary {
             None
         } else {
-            Some(git_output(workspace, ["diff"])?)
+            Some(git_observable_diff_output(workspace, [])?)
         };
         DiffData {
             is_repo: true,
@@ -3291,6 +3291,16 @@ where
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn git_observable_diff_output<const N: usize>(
+    workspace: &Workspace,
+    extra_args: [&str; N],
+) -> Result<String> {
+    let mut args = vec!["diff"];
+    args.extend(extra_args);
+    args.extend(["--", ".", ":(exclude).workspace/**"]);
+    git_output(workspace, args)
 }
 
 fn shell_command(command: &str) -> Command {

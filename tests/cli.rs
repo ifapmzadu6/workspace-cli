@@ -470,6 +470,29 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn diff_excludes_workspace_metadata_changes() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    write_file(root, ".workspace/log.jsonl", "old\n");
+    commit_all(root, "initial note and metadata");
+    write_file(root, "note.txt", "hello workspace\n");
+    write_file(root, ".workspace/log.jsonl", "new\n");
+
+    let diff = run_workspace(root, &["diff", "--json"]);
+    let files = strings_at(&diff, &["data", "files"]);
+    let patch = diff["data"]["patch"]
+        .as_str()
+        .expect("diff patch should be a string");
+
+    assert_eq!(diff["kind"], "workspace_diff");
+    assert_eq!(files, vec!["note.txt".to_string()]);
+    assert!(patch.contains("diff --git a/note.txt b/note.txt"));
+    assert!(!patch.contains(".workspace/log.jsonl"));
+}
+
+#[test]
 fn patch_does_not_apply_when_transaction_storage_fails() {
     let temp = init_git_repo();
     let root = temp.path();
