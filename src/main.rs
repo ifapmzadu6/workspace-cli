@@ -1460,22 +1460,7 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         &stored_patch,
         &files_changed,
     );
-    let truncated = transaction_files_truncated(data.omitted_files);
-    let summary = transaction_file_summary(
-        "applied patch",
-        &data.transaction_id,
-        data.file_count,
-        data.omitted_files,
-    );
-    let observation = Observation {
-        kind: WORKSPACE_PATCH_KIND.to_string(),
-        scope: data.patch_file.clone(),
-        summary,
-        data,
-        evidence: changed_file_evidence(&files_changed, "patch file target"),
-        truncated,
-        next_observations: patch_followup_observations(&transaction_id),
-    };
+    let observation = patch_observation(data, &files_changed);
 
     append_log(
         workspace,
@@ -1633,22 +1618,7 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         &stored_patch,
         &files_changed,
     );
-    let truncated = transaction_files_truncated(data.omitted_files);
-    let summary = transaction_file_summary(
-        "rolled back",
-        &data.transaction_id,
-        data.file_count,
-        data.omitted_files,
-    );
-    let observation = Observation {
-        kind: WORKSPACE_ROLLBACK_KIND.to_string(),
-        scope: data.transaction_id.clone(),
-        summary,
-        data,
-        evidence: changed_file_evidence(&files_changed, "rollback target"),
-        truncated,
-        next_observations: rollback_followup_observations(),
-    };
+    let observation = rollback_observation(data, &files_changed);
 
     append_log(
         workspace,
@@ -1693,6 +1663,26 @@ fn patch_data(
     }
 }
 
+fn patch_observation(data: PatchData, files_changed: &[String]) -> Observation<PatchData> {
+    let summary = transaction_file_summary(
+        "applied patch",
+        &data.transaction_id,
+        data.file_count,
+        data.omitted_files,
+    );
+    let next_observations = patch_followup_observations(&data.transaction_id);
+    let truncated = transaction_files_truncated(data.omitted_files);
+    Observation {
+        kind: WORKSPACE_PATCH_KIND.to_string(),
+        scope: data.patch_file.clone(),
+        summary,
+        data,
+        evidence: changed_file_evidence(files_changed, "patch file target"),
+        truncated,
+        next_observations,
+    }
+}
+
 fn rollback_data(
     workspace: &Workspace,
     transaction_id: &str,
@@ -1708,6 +1698,25 @@ fn rollback_data(
         file_count: files_changed.len(),
         files_changed: observed_files.files,
         omitted_files: observed_files.omitted_files,
+    }
+}
+
+fn rollback_observation(data: RollbackData, files_changed: &[String]) -> Observation<RollbackData> {
+    let summary = transaction_file_summary(
+        "rolled back",
+        &data.transaction_id,
+        data.file_count,
+        data.omitted_files,
+    );
+    let truncated = transaction_files_truncated(data.omitted_files);
+    Observation {
+        kind: WORKSPACE_ROLLBACK_KIND.to_string(),
+        scope: data.transaction_id.clone(),
+        summary,
+        data,
+        evidence: changed_file_evidence(files_changed, "rollback target"),
+        truncated,
+        next_observations: rollback_followup_observations(),
     }
 }
 
@@ -6213,6 +6222,58 @@ rename to new name.txt
         assert_eq!(data.file_count, MAX_CHANGED_FILES + 1);
         assert_eq!(data.files_changed.len(), MAX_CHANGED_FILES);
         assert_eq!(data.omitted_files, 1);
+    }
+
+    #[test]
+    fn transaction_observation_helpers_preserve_contract() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: true,
+        };
+        let patch_path = temp.path().join("change.patch");
+        let stored_patch = temp.path().join(TRANSACTION_DIR).join("tx-1.patch");
+        let files = (0..(MAX_CHANGED_FILES + 1))
+            .map(|index| format!("file_{index:03}.txt"))
+            .collect::<Vec<_>>();
+
+        let data = patch_data(&workspace, "tx-1", &patch_path, &stored_patch, &files);
+        let observation = patch_observation(data, &files);
+        assert_eq!(observation.kind, WORKSPACE_PATCH_KIND);
+        assert_eq!(observation.scope, "change.patch");
+        assert_eq!(
+            observation.summary,
+            format!(
+                "applied patch transaction tx-1 touching {} file(s) (files truncated)",
+                MAX_CHANGED_FILES + 1
+            )
+        );
+        assert!(observation.truncated);
+        assert_eq!(observation.evidence.len(), MAX_CHANGED_FILES);
+        assert_eq!(observation.evidence[0].reason, "patch file target");
+        assert_eq!(
+            observation.next_observations,
+            patch_followup_observations("tx-1")
+        );
+
+        let data = rollback_data(&workspace, "tx-1", "rb-1", &stored_patch, &files);
+        let observation = rollback_observation(data, &files);
+        assert_eq!(observation.kind, WORKSPACE_ROLLBACK_KIND);
+        assert_eq!(observation.scope, "tx-1");
+        assert_eq!(
+            observation.summary,
+            format!(
+                "rolled back transaction tx-1 touching {} file(s) (files truncated)",
+                MAX_CHANGED_FILES + 1
+            )
+        );
+        assert!(observation.truncated);
+        assert_eq!(observation.evidence.len(), MAX_CHANGED_FILES);
+        assert_eq!(observation.evidence[0].reason, "rollback target");
+        assert_eq!(
+            observation.next_observations,
+            rollback_followup_observations()
+        );
     }
 
     #[test]
