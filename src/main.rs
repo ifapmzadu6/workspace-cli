@@ -1535,6 +1535,7 @@ fn detect_stack(workspace: &Workspace, files: &[String]) -> Result<StackSummary>
 }
 
 fn detect_structure(files: &[String], directories: Vec<String>) -> StructureSummary {
+    let file_set = files.iter().map(String::as_str).collect::<BTreeSet<_>>();
     let entrypoint_names = [
         "src/main.rs",
         "src/lib.rs",
@@ -1558,22 +1559,30 @@ fn detect_structure(files: &[String], directories: Vec<String>) -> StructureSumm
         ".env.example",
     ];
 
-    let entrypoints = files
+    let entrypoints = entrypoint_names
         .iter()
-        .filter(|path| entrypoint_names.contains(&path.as_str()))
-        .cloned()
+        .filter(|path| file_set.contains(**path))
+        .map(|path| (*path).to_string())
         .collect::<Vec<_>>();
-    let tests = files
+    let mut tests = files
         .iter()
         .filter(|path| is_test_file(path))
         .cloned()
         .collect::<Vec<_>>();
-    let configs = files
+    tests.sort();
+    let mut configs = config_names
         .iter()
-        .filter(|path| config_names.contains(&path.as_str()) || path.ends_with(".config.js"))
+        .filter(|path| file_set.contains(**path))
+        .map(|path| (*path).to_string())
+        .collect::<Vec<_>>();
+    let mut config_extras = files
+        .iter()
+        .filter(|path| path.ends_with(".config.js") && !config_names.contains(&path.as_str()))
         .cloned()
         .collect::<Vec<_>>();
-    let docs = files
+    config_extras.sort();
+    configs.extend(config_extras);
+    let mut docs = files
         .iter()
         .filter(|path| {
             let lower = path.to_lowercase();
@@ -1581,6 +1590,9 @@ fn detect_structure(files: &[String], directories: Vec<String>) -> StructureSumm
         })
         .cloned()
         .collect::<Vec<_>>();
+    docs.sort();
+    let mut directories = directories;
+    directories.sort();
 
     StructureSummary {
         directories,
@@ -3976,6 +3988,27 @@ not json
         assert!(!should_include_repo_file("src/../outside.rs"));
         assert!(!should_include_repo_file("/tmp/outside.rs"));
         assert!(!should_include_repo_file("src//main.rs"));
+    }
+
+    #[test]
+    fn detects_structure_in_stable_priority_order() {
+        let files = vec![
+            "tests/z_test.rs".to_string(),
+            "index.js".to_string(),
+            "README.md".to_string(),
+            "vite.config.js".to_string(),
+            "src/main.rs".to_string(),
+            "tests/a_test.rs".to_string(),
+            "Cargo.toml".to_string(),
+            "docs/guide.md".to_string(),
+        ];
+        let structure = detect_structure(&files, vec!["z".to_string(), "a".to_string()]);
+
+        assert_eq!(structure.directories, vec!["a", "z"]);
+        assert_eq!(structure.entrypoints, vec!["src/main.rs", "index.js"]);
+        assert_eq!(structure.configs, vec!["Cargo.toml", "vite.config.js"]);
+        assert_eq!(structure.tests, vec!["tests/a_test.rs", "tests/z_test.rs"]);
+        assert_eq!(structure.docs, vec!["README.md", "docs/guide.md"]);
     }
 
     #[test]
