@@ -662,6 +662,45 @@ struct GitCommitFiles {
 }
 
 #[derive(Default)]
+struct GitLogNameOnlyState {
+    commits: Vec<GitCommitFiles>,
+    current_hash: Option<String>,
+    current_files: BTreeSet<String>,
+}
+
+impl GitLogNameOnlyState {
+    fn push_line(&mut self, line: &str) {
+        if let Some(hash) = line.strip_prefix("commit:") {
+            self.push_current_commit();
+            self.current_hash = Some(hash.trim().to_string());
+            return;
+        }
+
+        if let Some(path) = git_name_only_path(line)
+            && should_include_repo_file(&path)
+        {
+            self.current_files.insert(path);
+        }
+    }
+
+    fn finish(mut self) -> Vec<GitCommitFiles> {
+        self.push_current_commit();
+        self.commits
+    }
+
+    fn push_current_commit(&mut self) {
+        if let Some(hash) = self.current_hash.take() {
+            self.commits.push(GitCommitFiles {
+                hash,
+                files: std::mem::take(&mut self.current_files)
+                    .into_iter()
+                    .collect(),
+            });
+        }
+    }
+}
+
+#[derive(Default)]
 struct CochangeAccumulator {
     cochanged_commits: usize,
     weighted_cochanges: f64,
@@ -2389,17 +2428,40 @@ fn git_recent_name_only_commits(
     workspace: &Workspace,
     max_commits: usize,
 ) -> Result<Vec<GitCommitFiles>> {
-    let log = git_output(
-        workspace,
-        vec![
+    let mut child = Command::new("git")
+        .current_dir(&workspace.root)
+        .args([
             "log".to_string(),
             "--format=commit:%H".to_string(),
             "--name-only".to_string(),
             format!("--max-count={}", max_commits.max(1)),
             "--".to_string(),
-        ],
-    )?;
-    Ok(parse_git_log_name_only(&log))
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to run git log")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git log stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git log stderr"))?;
+    let stderr_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+
+    let commits_result = read_git_log_name_only(stdout);
+    let status = child.wait().context("failed to wait for git log")?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("git log stderr reader thread panicked"))??;
+    let commits = commits_result?;
+    if !status.success() {
+        bail!("git log failed: {}", stderr.text.trim());
+    }
+    Ok(commits)
 }
 
 fn git_changed_files(workspace: &Workspace) -> Result<Vec<String>> {
@@ -2468,40 +2530,40 @@ fn normalize_lexical_path(path: &Path) -> PathBuf {
     normalized
 }
 
+#[cfg(test)]
 fn parse_git_log_name_only(output: &str) -> Vec<GitCommitFiles> {
-    let mut commits = Vec::new();
-    let mut current_hash: Option<String> = None;
-    let mut current_files = BTreeSet::new();
-
+    let mut state = GitLogNameOnlyState::default();
     for line in output.lines() {
-        if let Some(hash) = line.strip_prefix("commit:") {
-            push_commit(&mut commits, &mut current_hash, &mut current_files);
-            current_hash = Some(hash.trim().to_string());
-            continue;
-        }
-
-        if let Some(path) = git_name_only_path(line)
-            && should_include_repo_file(&path)
-        {
-            current_files.insert(path);
-        }
+        state.push_line(line);
     }
-
-    push_commit(&mut commits, &mut current_hash, &mut current_files);
-    commits
+    state.finish()
 }
 
-fn push_commit(
-    commits: &mut Vec<GitCommitFiles>,
-    current_hash: &mut Option<String>,
-    current_files: &mut BTreeSet<String>,
-) {
-    if let Some(hash) = current_hash.take() {
-        commits.push(GitCommitFiles {
-            hash,
-            files: std::mem::take(current_files).into_iter().collect(),
-        });
+fn read_git_log_name_only<R: Read>(reader: R) -> Result<Vec<GitCommitFiles>> {
+    let mut reader = BufReader::new(reader);
+    let mut line = Vec::new();
+    let mut state = GitLogNameOnlyState::default();
+
+    loop {
+        line.clear();
+        let bytes_read = reader
+            .read_until(b'\n', &mut line)
+            .context("failed to read git log output")?;
+        if bytes_read == 0 {
+            break;
+        }
+        while line
+            .last()
+            .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
+        {
+            line.pop();
+        }
+
+        let line = String::from_utf8_lossy(&line);
+        state.push_line(&line);
     }
+
+    Ok(state.finish())
 }
 
 fn git_name_only_paths(output: &str) -> Vec<String> {
@@ -4926,6 +4988,26 @@ src/c.rs
         assert_eq!(commits[0].hash, "aaaaaaaaaaaa");
         assert_eq!(commits[0].files, vec!["src/a.rs", "src/b.rs"]);
         assert_eq!(commits[1].files, vec!["src/a.rs", "src/c.rs"]);
+    }
+
+    #[test]
+    fn reads_git_log_name_only_incrementally() {
+        let log = "\
+commit:aaaaaaaaaaaa
+\"src/tab\\tname.rs\"
+src/a.rs
+
+commit:bbbbbbbbbbbb
+.git/config
+src/b.rs
+";
+        let commits =
+            read_git_log_name_only(std::io::Cursor::new(log)).expect("git log should parse");
+
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].hash, "aaaaaaaaaaaa");
+        assert_eq!(commits[0].files, vec!["src/a.rs", "src/tab\tname.rs"]);
+        assert_eq!(commits[1].files, vec!["src/b.rs"]);
     }
 
     #[test]
