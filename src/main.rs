@@ -2407,21 +2407,11 @@ fn git_changed_files(workspace: &Workspace) -> Result<Vec<String>> {
     collect_git_name_only(workspace, ["diff", "--name-only"], &mut files)?;
     collect_git_name_only(workspace, ["diff", "--cached", "--name-only"], &mut files)?;
 
-    let status = git_output(
-        workspace,
-        ["status", "--porcelain", "--untracked-files=all"],
-    )?;
-    for line in status.lines() {
-        if line.len() < 4 {
-            continue;
-        }
-        if &line[..2] == "??"
-            && let Some(path) = git_status_path(&line[3..])
-            && should_include_repo_file(&path)
-        {
+    stream_git_status_entries(workspace, |code, path| {
+        if code == "??" && should_include_repo_file(&path) {
             files.insert(path);
         }
-    }
+    })?;
 
     Ok(files.into_iter().collect())
 }
@@ -3198,25 +3188,14 @@ fn git_summary(workspace: &Workspace) -> Result<GitSummary> {
         .ok()
         .map(|branch| branch.trim().to_string())
         .filter(|branch| !branch.is_empty());
-    let status = git_output(
-        workspace,
-        ["status", "--porcelain", "--untracked-files=all"],
-    )?;
     let mut dirty_files = Vec::new();
     let mut untracked_files = Vec::new();
     let mut dirty_file_count = 0usize;
     let mut untracked_file_count = 0usize;
 
-    for line in status.lines() {
-        if line.len() < 4 {
-            continue;
-        }
-        let code = &line[..2];
-        let Some(path) = git_status_path(&line[3..]) else {
-            continue;
-        };
+    stream_git_status_entries(workspace, |code, path| {
         if path == LOG_DIR || path.starts_with(&format!("{LOG_DIR}/")) {
-            continue;
+            return;
         }
         if code == "??" {
             untracked_file_count += 1;
@@ -3229,7 +3208,7 @@ fn git_summary(workspace: &Workspace) -> Result<GitSummary> {
                 dirty_files.push(path);
             }
         }
-    }
+    })?;
 
     Ok(GitSummary {
         is_repo: true,
@@ -3241,6 +3220,77 @@ fn git_summary(workspace: &Workspace) -> Result<GitSummary> {
         dirty_files,
         untracked_files,
     })
+}
+
+fn stream_git_status_entries<F>(workspace: &Workspace, mut handle: F) -> Result<()>
+where
+    F: FnMut(&str, String),
+{
+    let mut child = Command::new("git")
+        .current_dir(&workspace.root)
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to run git status")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git status stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git status stderr"))?;
+    let stderr_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+
+    let read_result = read_git_status_stdout(stdout, &mut handle);
+    let status = child.wait().context("failed to wait for git status")?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("git status stderr reader thread panicked"))??;
+    read_result?;
+    if !status.success() {
+        bail!("git status failed: {}", stderr.text.trim());
+    }
+    Ok(())
+}
+
+fn read_git_status_stdout<R, F>(reader: R, handle: &mut F) -> Result<()>
+where
+    R: Read,
+    F: FnMut(&str, String),
+{
+    let mut reader = BufReader::new(reader);
+    let mut line = Vec::new();
+
+    loop {
+        line.clear();
+        let bytes_read = reader
+            .read_until(b'\n', &mut line)
+            .context("failed to read git status output")?;
+        if bytes_read == 0 {
+            break;
+        }
+        while line
+            .last()
+            .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
+        {
+            line.pop();
+        }
+
+        let line = String::from_utf8_lossy(&line);
+        if line.len() < 4 {
+            continue;
+        }
+        let code = &line[..2];
+        let Some(path) = git_status_path(&line[3..]) else {
+            continue;
+        };
+        handle(code, path);
+    }
+
+    Ok(())
 }
 
 fn rg_search(
@@ -4618,6 +4668,24 @@ mod tests {
         assert_eq!(
             git_status_path("\"old\\tname.txt\" -> \"new\\tname.txt\"").unwrap(),
             "new\tname.txt"
+        );
+    }
+
+    #[test]
+    fn reads_git_status_stdout_entries_incrementally() {
+        let mut entries = Vec::new();
+        read_git_status_stdout(
+            std::io::Cursor::new(" M \"src/tab\\tname.txt\"\n?? new/file.rs\n"),
+            &mut |code, path| entries.push((code.to_string(), path)),
+        )
+        .expect("status stdout should parse");
+
+        assert_eq!(
+            entries,
+            vec![
+                (" M".to_string(), "src/tab\tname.txt".to_string()),
+                ("??".to_string(), "new/file.rs".to_string()),
+            ]
         );
     }
 
