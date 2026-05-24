@@ -1331,21 +1331,16 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
         content: read_content.content,
     };
     let summary = read_summary(&data.path, data.lines.as_deref(), read_content.truncated);
+    let evidence = read_evidence(&data);
+    let next_observations = read_followup_observations(&data.path);
     let observation = Observation {
         kind: "workspace_read".to_string(),
         scope: data.path.clone(),
         summary,
         data,
-        evidence: vec![Evidence {
-            path: rel_path.clone(),
-            lines: line_label,
-            reason: "requested file content".to_string(),
-        }],
+        evidence,
         truncated: read_content.truncated,
-        next_observations: vec![
-            format!("workspace search {}", shell_hint(&rel_path)),
-            "workspace diff --summary".to_string(),
-        ],
+        next_observations,
     };
 
     append_observation_log(workspace, "read", &rel_path, &observation.summary);
@@ -1394,15 +1389,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     let file_list_truncated = data.omitted_files > 0;
     let truncated = summary_truncated || patch_truncated || file_list_truncated;
     let summary = diff_summary(&data, summary_truncated, patch_truncated);
-    let evidence = data
-        .files
-        .iter()
-        .map(|path| Evidence {
-            path: path.clone(),
-            lines: None,
-            reason: "git diff changed file".to_string(),
-        })
-        .collect();
+    let evidence = changed_file_evidence(&data.files, "git diff changed file");
     let next_observations =
         read_next_observations(workspace, data.files.iter().map(String::as_str));
     let observation = Observation {
@@ -1716,6 +1703,21 @@ fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
         .take(MAX_NEXT_OBSERVATIONS)
         .map(|item| workspace_read_lines_command(&item.path, item.line, item.line))
         .collect()
+}
+
+fn read_evidence(data: &ReadData) -> Vec<Evidence> {
+    vec![Evidence {
+        path: data.path.clone(),
+        lines: data.lines.clone(),
+        reason: "requested file content".to_string(),
+    }]
+}
+
+fn read_followup_observations(path: &str) -> Vec<String> {
+    vec![
+        format!("workspace search {}", shell_hint(path)),
+        "workspace diff --summary".to_string(),
+    ]
 }
 
 fn map_truncated(map: &WorkspaceMap) -> bool {
@@ -6035,6 +6037,29 @@ rename to new name.txt
                 "workspace read file_1.txt",
                 "workspace read file_2.txt",
                 "workspace read file_3.txt",
+            ]
+        );
+    }
+
+    #[test]
+    fn read_observation_helpers_report_requested_content() {
+        let data = ReadData {
+            path: "src/main.rs".to_string(),
+            lines: Some("3:5".to_string()),
+            content: "content".to_string(),
+        };
+
+        let evidence = read_evidence(&data);
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].path, "src/main.rs");
+        assert_eq!(evidence[0].lines.as_deref(), Some("3:5"));
+        assert_eq!(evidence[0].reason, "requested file content");
+
+        assert_eq!(
+            read_followup_observations("path with spaces.txt"),
+            vec![
+                "workspace search 'path with spaces.txt'",
+                "workspace diff --summary"
             ]
         );
     }
