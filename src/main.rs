@@ -79,6 +79,7 @@ const LOG_OP_DIFF: &str = "diff";
 const LOG_OP_PATCH: &str = "patch";
 const LOG_OP_RUN: &str = "run";
 const LOG_OP_ROLLBACK: &str = "rollback";
+const IMPACT_SOURCE_DIFF: &str = "diff";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -1292,7 +1293,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
         )?
     } else {
         ImpactData {
-            source: "diff".to_string(),
+            source: IMPACT_SOURCE_DIFF.to_string(),
             method: args.by.as_str().to_string(),
             ranking: args.rank.as_str().to_string(),
             relationship_source: relationship_source(uses_cochange_index(
@@ -2933,7 +2934,7 @@ fn impact_by_cochange(
             }
         };
         return Ok(ImpactData {
-            source: "diff".to_string(),
+            source: IMPACT_SOURCE_DIFF.to_string(),
             method: "cochange".to_string(),
             ranking: rank.as_str().to_string(),
             relationship_source: "cochange-index".to_string(),
@@ -2954,7 +2955,7 @@ fn impact_by_cochange(
     let ranking = rank_cochange_impact(&commits, &seed_files, max_files_per_commit, max_results);
 
     Ok(ImpactData {
-        source: "diff".to_string(),
+        source: IMPACT_SOURCE_DIFF.to_string(),
         method: "cochange".to_string(),
         ranking: rank.as_str().to_string(),
         relationship_source: "git-log".to_string(),
@@ -3026,7 +3027,7 @@ fn impact_by_related_cli(
     }
 
     Ok(Some(ImpactData {
-        source: "diff".to_string(),
+        source: IMPACT_SOURCE_DIFF.to_string(),
         method: "cochange".to_string(),
         ranking: rank.as_str().to_string(),
         relationship_source: format!("related-cli:{}:aggregate", rank.as_str()),
@@ -6272,6 +6273,11 @@ rename to new name.txt
     }
 
     #[test]
+    fn impact_source_constant_matches_json_contract() {
+        assert_eq!(IMPACT_SOURCE_DIFF, "diff");
+    }
+
+    #[test]
     fn observation_truncation_helpers_report_data_limits() {
         let search = SearchData {
             query: "needle".to_string(),
@@ -6301,7 +6307,7 @@ rename to new name.txt
         assert!(!search_truncated(&search));
 
         let impact = ImpactData {
-            source: "diff".to_string(),
+            source: IMPACT_SOURCE_DIFF.to_string(),
             method: "cochange".to_string(),
             ranking: "direct".to_string(),
             relationship_source: "git history".to_string(),
@@ -6588,7 +6594,7 @@ rename to new name.txt
     #[test]
     fn impact_summary_reports_seed_truncation() {
         let data = ImpactData {
-            source: "diff".to_string(),
+            source: IMPACT_SOURCE_DIFF.to_string(),
             method: "cochange".to_string(),
             ranking: "direct".to_string(),
             relationship_source: "git history".to_string(),
