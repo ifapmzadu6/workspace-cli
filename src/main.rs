@@ -4298,17 +4298,66 @@ fn fallback_scan_query(line: &mut FallbackLineSearch, bytes: &[u8], query: &[u8]
         return;
     }
 
-    let mut scan = Vec::with_capacity(line.scan_tail.len() + bytes.len());
-    scan.extend_from_slice(&line.scan_tail);
-    scan.extend_from_slice(bytes);
-    if let Some(index) = scan.windows(query.len()).position(|window| window == query) {
+    if let Some(index) = find_query_with_tail(&line.scan_tail, bytes, query) {
         line.matched = true;
         line.match_column =
             line.byte_offset.saturating_sub(line.scan_tail.len()) as u64 + index as u64 + 1;
     }
 
-    let tail_len = query.len().saturating_sub(1).min(scan.len());
-    line.scan_tail = scan[scan.len() - tail_len..].to_vec();
+    replace_scan_tail(&mut line.scan_tail, bytes, query.len().saturating_sub(1));
+}
+
+fn find_query_with_tail(tail: &[u8], bytes: &[u8], query: &[u8]) -> Option<usize> {
+    if query.is_empty() || query.len() > tail.len() + bytes.len() {
+        return None;
+    }
+
+    let boundary_start = tail.len().saturating_sub(query.len().saturating_sub(1));
+    for start in boundary_start..tail.len() {
+        if start + query.len() <= tail.len() || start + query.len() > tail.len() + bytes.len() {
+            continue;
+        }
+        if query_matches_virtual_window(tail, bytes, start, query) {
+            return Some(start);
+        }
+    }
+
+    bytes
+        .windows(query.len())
+        .position(|window| window == query)
+        .map(|index| tail.len() + index)
+}
+
+fn query_matches_virtual_window(tail: &[u8], bytes: &[u8], start: usize, query: &[u8]) -> bool {
+    query.iter().enumerate().all(|(offset, expected)| {
+        let index = start + offset;
+        let actual = if index < tail.len() {
+            tail[index]
+        } else {
+            bytes[index - tail.len()]
+        };
+        actual == *expected
+    })
+}
+
+fn replace_scan_tail(tail: &mut Vec<u8>, bytes: &[u8], max_tail_len: usize) {
+    if max_tail_len == 0 {
+        tail.clear();
+        return;
+    }
+
+    if bytes.len() >= max_tail_len {
+        tail.clear();
+        tail.extend_from_slice(&bytes[bytes.len() - max_tail_len..]);
+        return;
+    }
+
+    let old_tail_len = tail.len();
+    let old_bytes_to_keep = max_tail_len.saturating_sub(bytes.len());
+    if old_tail_len > old_bytes_to_keep {
+        tail.drain(..old_tail_len - old_bytes_to_keep);
+    }
+    tail.extend_from_slice(bytes);
 }
 
 fn fallback_append_display_bytes(line: &mut FallbackLineSearch, bytes: &[u8]) -> Result<()> {
@@ -5809,6 +5858,22 @@ rename to new name.txt
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].line, 1);
         assert_eq!(matches[0].column, 8191);
+    }
+
+    #[test]
+    fn fallback_query_scan_matches_across_segments() {
+        let mut line = FallbackLineSearch::new(1);
+        fallback_scan_query(&mut line, b"abc", b"cde");
+        line.byte_offset += 3;
+
+        assert!(!line.matched);
+        assert_eq!(line.scan_tail, b"bc");
+
+        fallback_scan_query(&mut line, b"def", b"cde");
+
+        assert!(line.matched);
+        assert_eq!(line.match_column, 3);
+        assert_eq!(line.scan_tail, b"ef");
     }
 
     #[test]
