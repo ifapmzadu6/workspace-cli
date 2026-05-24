@@ -22,6 +22,8 @@ const INDEX_DIR: &str = ".workspace/index";
 const COCHANGE_INDEX_FILE: &str = ".workspace/index/cochange.json";
 const MAX_CAPTURED_OUTPUT: usize = 24_000;
 const MAX_READ_CONTENT: usize = 24_000;
+const MAX_LOG_SCOPE: usize = 2_000;
+const MAX_LOG_SUMMARY: usize = 2_000;
 const MAX_CHANGED_FILES: usize = 80;
 const MAX_GIT_STATUS_FILES: usize = 80;
 const MAX_MAP_LIST_ITEMS: usize = 80;
@@ -3512,8 +3514,8 @@ fn append_log(
         timestamp_unix_ms: now_ms(),
         kind: kind.to_string(),
         op: op.to_string(),
-        scope: scope.to_string(),
-        summary: summary.to_string(),
+        scope: truncate_inline(scope, MAX_LOG_SCOPE),
+        summary: truncate_inline(summary, MAX_LOG_SUMMARY),
         transaction_id: transaction_id.map(ToOwned::to_owned),
     };
     let line = serde_json::to_string(&entry)?;
@@ -3931,6 +3933,15 @@ fn truncate_string(value: &str, max_chars: usize) -> String {
     }
     let mut truncated = value.chars().take(max_chars).collect::<String>();
     truncated.push_str("\n[output truncated]\n");
+    truncated
+}
+
+fn truncate_inline(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut truncated = value.chars().take(max_chars).collect::<String>();
+    truncated.push_str(" [truncated]");
     truncated
 }
 

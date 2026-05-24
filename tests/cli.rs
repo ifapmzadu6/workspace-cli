@@ -1368,6 +1368,67 @@ fn run_marks_large_output_as_truncated() {
 }
 
 #[test]
+fn operation_log_truncates_large_scope_and_summary() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+    write_file(
+        root,
+        "change.patch",
+        "\
+diff --git a/note.txt b/note.txt
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-hello
++hello workspace
+",
+    );
+
+    let long_description = format!("{}tail", "d".repeat(3_000));
+    let patch = run_workspace(
+        root,
+        &[
+            "patch",
+            "--description",
+            long_description.as_str(),
+            "change.patch",
+            "--json",
+        ],
+    );
+    assert_eq!(patch["kind"], "workspace_patch");
+
+    let patch_log = run_workspace(root, &["log", "--limit", "1", "--json"]);
+    let patch_entries = patch_log["data"]["entries"]
+        .as_array()
+        .expect("patch log entries should be an array");
+    let patch_summary = patch_entries[0]["summary"]
+        .as_str()
+        .expect("patch log summary should be a string");
+    assert_eq!(patch_entries[0]["op"], "patch");
+    assert!(patch_summary.contains("[truncated]"));
+    assert!(!patch_summary.contains("tail"));
+    assert!(patch_summary.chars().count() < 2_100);
+
+    let long_command = format!("printf ok # {}", "x".repeat(3_000));
+    let run = run_workspace(root, &["run", long_command.as_str(), "--json"]);
+    assert_eq!(run["kind"], "workspace_run");
+
+    let run_log = run_workspace(root, &["log", "--limit", "1", "--json"]);
+    let run_entries = run_log["data"]["entries"]
+        .as_array()
+        .expect("run log entries should be an array");
+    let run_scope = run_entries[0]["scope"]
+        .as_str()
+        .expect("run log scope should be a string");
+    assert_eq!(run_entries[0]["op"], "run");
+    assert!(run_scope.contains("[truncated]"));
+    assert!(run_scope.chars().count() < 2_100);
+}
+
+#[test]
 fn run_does_not_execute_when_operation_log_is_not_writable() {
     let temp = TempDir::new().expect("temp dir should be created");
     fs::create_dir_all(temp.path().join(".workspace/log.jsonl"))

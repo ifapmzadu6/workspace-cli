@@ -345,6 +345,8 @@ Future versions can infer relevant tests from changed files or symbols.
 ### `workspace log`
 
 Shows operations performed against the workspace.
+Log entry `scope` and `summary` fields are bounded so long commands or manual
+descriptions do not make later status/log observations unwieldy.
 
 ```sh
 workspace log
