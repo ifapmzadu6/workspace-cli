@@ -1342,30 +1342,7 @@ fn copy_file_contents(source_file: fs::File, temp_file: fs::File, temp_path: &Pa
 
 fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
     ensure_log_writable(workspace)?;
-    let start = Instant::now();
-    let mut command = shell_command(&args.command);
-    let mut child = command
-        .current_dir(&workspace.root)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to run command {:?}", args.command))?;
-    let stdout_reader = capture_child_stdout(&mut child, "command stdout", MAX_CAPTURED_OUTPUT)?;
-    let stderr_reader = capture_child_stderr(&mut child, "command stderr", MAX_CAPTURED_OUTPUT)?;
-    let status = child
-        .wait()
-        .with_context(|| format!("failed to wait for command {:?}", args.command))?;
-    let duration_ms = start.elapsed().as_millis();
-    let stdout = join_captured_output_reader(stdout_reader, "stdout")?;
-    let stderr = join_captured_output_reader(stderr_reader, "stderr")?;
-    let run = observed_run(
-        workspace,
-        &args.command,
-        status.code(),
-        duration_ms,
-        stdout,
-        stderr,
-    );
+    let run = execute_run_command(workspace, &args.command)?;
     let observation = run_observation(run);
 
     append_log(
@@ -1377,6 +1354,33 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
         None,
     )?;
     output_observation(args.json, &observation, print_run)
+}
+
+fn execute_run_command(workspace: &Workspace, command_text: &str) -> Result<ObservedRun> {
+    let start = Instant::now();
+    let mut command = shell_command(command_text);
+    let mut child = command
+        .current_dir(&workspace.root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to run command {command_text:?}"))?;
+    let stdout_reader = capture_child_stdout(&mut child, "command stdout", MAX_CAPTURED_OUTPUT)?;
+    let stderr_reader = capture_child_stderr(&mut child, "command stderr", MAX_CAPTURED_OUTPUT)?;
+    let status = child
+        .wait()
+        .with_context(|| format!("failed to wait for command {command_text:?}"))?;
+    let duration_ms = start.elapsed().as_millis();
+    let stdout = join_captured_output_reader(stdout_reader, "stdout")?;
+    let stderr = join_captured_output_reader(stderr_reader, "stderr")?;
+    Ok(observed_run(
+        workspace,
+        command_text,
+        status.code(),
+        duration_ms,
+        stdout,
+        stderr,
+    ))
 }
 
 fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
@@ -7819,6 +7823,28 @@ rename to new name.txt
             log_summary(&data),
             "1 operation(s) (2 older log line(s) omitted)"
         );
+    }
+
+    #[test]
+    fn execute_run_command_captures_output_without_failing_nonzero_exit() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        #[cfg(windows)]
+        let command = "powershell -NoProfile -Command \"[Console]::Out.Write('out'); [Console]::Error.Write('err'); exit 7\"";
+        #[cfg(not(windows))]
+        let command = "printf out; printf err >&2; exit 7";
+
+        let run = execute_run_command(&workspace, command).expect("command should be observed");
+
+        assert_eq!(run.data.command, command);
+        assert_eq!(run.data.cwd, temp.path().to_string_lossy());
+        assert_eq!(run.data.exit_code, Some(7));
+        assert_eq!(run.data.stdout, "out");
+        assert_eq!(run.data.stderr, "err");
+        assert!(!run.output_truncated);
     }
 
     #[test]
