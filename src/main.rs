@@ -3406,14 +3406,7 @@ fn rank_cochange_impact(
     for (path, item) in accumulators {
         push_bounded_sorted(
             &mut impacted,
-            ImpactFile {
-                path,
-                score: normalized_rank_score(item.weighted_cochanges, max_weight),
-                cochanged_commits: item.cochanged_commits,
-                weighted_cochanges: round3(item.weighted_cochanges),
-                seed_files: item.seed_files.into_iter().collect(),
-                sample_commits: item.sample_commits,
-            },
+            impact_file_from_accumulator(path, item, max_weight),
             max_results,
             compare_impact_by_weight,
         );
@@ -3468,14 +3461,7 @@ fn rank_cochange_impact_from_index(
     for (path, item) in accumulators {
         push_bounded_sorted(
             &mut impacted,
-            ImpactFile {
-                path,
-                score: normalized_rank_score(item.weighted_cochanges, max_weight),
-                cochanged_commits: item.cochanged_commits,
-                weighted_cochanges: round3(item.weighted_cochanges),
-                seed_files: item.seed_files.into_iter().collect(),
-                sample_commits: item.sample_commits,
-            },
+            impact_file_from_accumulator(path, item, max_weight),
             max_results,
             compare_impact_by_weight,
         );
@@ -3845,6 +3831,21 @@ fn indexed_file_commit_count(index: &CochangeIndex, file: &str) -> usize {
 
 fn max_rank_weight(weights: impl IntoIterator<Item = f64>) -> f64 {
     weights.into_iter().fold(0.0, f64::max)
+}
+
+fn impact_file_from_accumulator(
+    path: String,
+    item: ImpactAccumulator,
+    max_weight: f64,
+) -> ImpactFile {
+    ImpactFile {
+        path,
+        score: normalized_rank_score(item.weighted_cochanges, max_weight),
+        cochanged_commits: item.cochanged_commits,
+        weighted_cochanges: round3(item.weighted_cochanges),
+        seed_files: item.seed_files.into_iter().collect(),
+        sample_commits: item.sample_commits,
+    }
 }
 
 fn normalized_rank_score(weight: f64, max_weight: f64) -> f64 {
@@ -6906,6 +6907,30 @@ src/b.rs
         assert_eq!(indexed_file_commit_count(&index, "src/a.rs"), 2);
         assert_eq!(indexed_file_commit_count(&index, "src/missing.rs"), 0);
         assert_eq!(indexed_seed_commit_count(&index, &seed_set), 5);
+    }
+
+    #[test]
+    fn impact_file_from_accumulator_preserves_rank_fields() {
+        let mut seed_files = BTreeSet::new();
+        seed_files.insert("src/z.rs".to_string());
+        seed_files.insert("src/a.rs".to_string());
+        let file = impact_file_from_accumulator(
+            "src/impact.rs".to_string(),
+            ImpactAccumulator {
+                cochanged_commits: 3,
+                weighted_cochanges: 2.0 / 3.0,
+                seed_files,
+                sample_commits: vec!["aaaaaaaaaaaa".to_string()],
+            },
+            2.0,
+        );
+
+        assert_eq!(file.path, "src/impact.rs");
+        assert_eq!(file.score, 0.333);
+        assert_eq!(file.cochanged_commits, 3);
+        assert_eq!(file.weighted_cochanges, 0.667);
+        assert_eq!(file.seed_files, vec!["src/a.rs", "src/z.rs"]);
+        assert_eq!(file.sample_commits, vec!["aaaaaaaaaaaa"]);
     }
 
     #[test]
