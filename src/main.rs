@@ -1896,6 +1896,20 @@ fn observed_string_prefix(items: &[String], max_len: usize) -> (Vec<String>, usi
     (observed, omitted)
 }
 
+fn push_bounded_sorted<T>(
+    items: &mut Vec<T>,
+    item: T,
+    max_len: usize,
+    compare: fn(&T, &T) -> std::cmp::Ordering,
+) {
+    if max_len == 0 {
+        return;
+    }
+    items.push(item);
+    items.sort_by(compare);
+    items.truncate(max_len);
+}
+
 fn push_recent_candidate(
     recent_candidates: &mut Vec<(SystemTime, String)>,
     modified: SystemTime,
@@ -3133,28 +3147,25 @@ fn rank_cochanges(
         .values()
         .map(|item| item.weighted_cochanges)
         .fold(0.0, f64::max);
-    let mut related = accumulators
-        .into_iter()
-        .map(|(path, item)| RelatedFile {
-            path,
-            score: if max_weight > 0.0 {
-                round3(item.weighted_cochanges / max_weight)
-            } else {
-                0.0
+    let mut related = Vec::new();
+    for (path, item) in accumulators {
+        push_bounded_sorted(
+            &mut related,
+            RelatedFile {
+                path,
+                score: if max_weight > 0.0 {
+                    round3(item.weighted_cochanges / max_weight)
+                } else {
+                    0.0
+                },
+                cochanged_commits: item.cochanged_commits,
+                weighted_cochanges: round3(item.weighted_cochanges),
+                sample_commits: item.sample_commits,
             },
-            cochanged_commits: item.cochanged_commits,
-            weighted_cochanges: round3(item.weighted_cochanges),
-            sample_commits: item.sample_commits,
-        })
-        .collect::<Vec<_>>();
-
-    related.sort_by(|a, b| {
-        b.weighted_cochanges
-            .total_cmp(&a.weighted_cochanges)
-            .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
-            .then_with(|| a.path.cmp(&b.path))
-    });
-    related.truncate(max_results);
+            max_results,
+            compare_related_by_weight,
+        );
+    }
 
     CochangeRanking {
         related,
@@ -3169,30 +3180,40 @@ fn rank_cochanges_from_index(
     max_results: usize,
 ) -> CochangeRanking {
     let target = normalize_repo_path(target);
-    let mut related = index
+    let max_weight = index
         .edges
         .iter()
-        .filter_map(|edge| {
-            let path = if edge.a == target {
-                edge.b.clone()
-            } else if edge.b == target {
-                edge.a.clone()
-            } else {
-                return None;
-            };
+        .filter(|edge| edge.a == target || edge.b == target)
+        .map(|edge| edge.weighted_cochanges)
+        .fold(0.0, f64::max);
+    let mut related = Vec::new();
 
-            Some(RelatedFile {
+    for edge in &index.edges {
+        let path = if edge.a == target {
+            edge.b.clone()
+        } else if edge.b == target {
+            edge.a.clone()
+        } else {
+            continue;
+        };
+
+        push_bounded_sorted(
+            &mut related,
+            RelatedFile {
                 path,
-                score: 0.0,
+                score: if max_weight > 0.0 {
+                    round3(edge.weighted_cochanges / max_weight)
+                } else {
+                    0.0
+                },
                 cochanged_commits: edge.cochanged_commits,
                 weighted_cochanges: edge.weighted_cochanges,
                 sample_commits: edge.sample_commits.clone(),
-            })
-        })
-        .collect::<Vec<_>>();
-
-    normalize_related_scores(&mut related);
-    related.truncate(max_results);
+            },
+            max_results,
+            compare_related_by_weight,
+        );
+    }
 
     CochangeRanking {
         related,
@@ -3229,12 +3250,7 @@ fn rank_cochanges_pagerank_from_index(
         })
         .collect::<Vec<_>>();
 
-    related.sort_by(|a, b| {
-        b.score
-            .total_cmp(&a.score)
-            .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
-            .then_with(|| a.path.cmp(&b.path))
-    });
+    related.sort_by(compare_related_by_score);
     related.truncate(max_results);
 
     CochangeRanking {
@@ -3310,29 +3326,26 @@ fn rank_cochange_impact(
         .values()
         .map(|item| item.weighted_cochanges)
         .fold(0.0, f64::max);
-    let mut impacted = accumulators
-        .into_iter()
-        .map(|(path, item)| ImpactFile {
-            path,
-            score: if max_weight > 0.0 {
-                round3(item.weighted_cochanges / max_weight)
-            } else {
-                0.0
+    let mut impacted = Vec::new();
+    for (path, item) in accumulators {
+        push_bounded_sorted(
+            &mut impacted,
+            ImpactFile {
+                path,
+                score: if max_weight > 0.0 {
+                    round3(item.weighted_cochanges / max_weight)
+                } else {
+                    0.0
+                },
+                cochanged_commits: item.cochanged_commits,
+                weighted_cochanges: round3(item.weighted_cochanges),
+                seed_files: item.seed_files.into_iter().collect(),
+                sample_commits: item.sample_commits,
             },
-            cochanged_commits: item.cochanged_commits,
-            weighted_cochanges: round3(item.weighted_cochanges),
-            seed_files: item.seed_files.into_iter().collect(),
-            sample_commits: item.sample_commits,
-        })
-        .collect::<Vec<_>>();
-
-    impacted.sort_by(|a, b| {
-        b.weighted_cochanges
-            .total_cmp(&a.weighted_cochanges)
-            .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
-            .then_with(|| a.path.cmp(&b.path))
-    });
-    impacted.truncate(max_results);
+            max_results,
+            compare_impact_by_weight,
+        );
+    }
 
     ImpactRanking {
         impacted,
@@ -3377,20 +3390,31 @@ fn rank_cochange_impact_from_index(
         }
     }
 
-    let mut impacted = accumulators
-        .into_iter()
-        .map(|(path, item)| ImpactFile {
-            path,
-            score: 0.0,
-            cochanged_commits: item.cochanged_commits,
-            weighted_cochanges: round3(item.weighted_cochanges),
-            seed_files: item.seed_files.into_iter().collect(),
-            sample_commits: item.sample_commits,
-        })
-        .collect::<Vec<_>>();
+    let max_weight = accumulators
+        .values()
+        .map(|item| item.weighted_cochanges)
+        .fold(0.0, f64::max);
+    let mut impacted = Vec::new();
+    for (path, item) in accumulators {
+        push_bounded_sorted(
+            &mut impacted,
+            ImpactFile {
+                path,
+                score: if max_weight > 0.0 {
+                    round3(item.weighted_cochanges / max_weight)
+                } else {
+                    0.0
+                },
+                cochanged_commits: item.cochanged_commits,
+                weighted_cochanges: round3(item.weighted_cochanges),
+                seed_files: item.seed_files.into_iter().collect(),
+                sample_commits: item.sample_commits,
+            },
+            max_results,
+            compare_impact_by_weight,
+        );
+    }
 
-    normalize_impact_scores(&mut impacted);
-    impacted.truncate(max_results);
     let commits_matched = seed_files
         .iter()
         .filter_map(|file| index.file_commit_counts.get(file))
@@ -3453,12 +3477,7 @@ fn rank_cochange_impact_pagerank_from_index(
         })
         .collect::<Vec<_>>();
 
-    impacted.sort_by(|a, b| {
-        b.score
-            .total_cmp(&a.score)
-            .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
-            .then_with(|| a.path.cmp(&b.path))
-    });
+    impacted.sort_by(compare_impact_by_score);
     impacted.truncate(max_results);
     let commits_matched = seed_files
         .iter()
@@ -3568,11 +3587,7 @@ fn personalized_pagerank(
             score: score / max_score,
         })
         .collect::<Vec<_>>();
-    hits.sort_by(|a, b| {
-        b.score
-            .total_cmp(&a.score)
-            .then_with(|| a.path.cmp(&b.path))
-    });
+    hits.sort_by(compare_pagerank_hit_by_score);
     hits
 }
 
@@ -3585,44 +3600,38 @@ fn find_cochange_edge<'a>(index: &'a CochangeIndex, a: &str, b: &str) -> Option<
         .find(|edge| (edge.a == a && edge.b == b) || (edge.a == b && edge.b == a))
 }
 
-fn normalize_related_scores(related: &mut [RelatedFile]) {
-    let max_weight = related
-        .iter()
-        .map(|item| item.weighted_cochanges)
-        .fold(0.0, f64::max);
-    for item in related.iter_mut() {
-        item.score = if max_weight > 0.0 {
-            round3(item.weighted_cochanges / max_weight)
-        } else {
-            0.0
-        };
-    }
-    related.sort_by(|a, b| {
-        b.weighted_cochanges
-            .total_cmp(&a.weighted_cochanges)
-            .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
-            .then_with(|| a.path.cmp(&b.path))
-    });
+fn compare_related_by_weight(a: &RelatedFile, b: &RelatedFile) -> std::cmp::Ordering {
+    b.weighted_cochanges
+        .total_cmp(&a.weighted_cochanges)
+        .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
+        .then_with(|| a.path.cmp(&b.path))
 }
 
-fn normalize_impact_scores(impacted: &mut [ImpactFile]) {
-    let max_weight = impacted
-        .iter()
-        .map(|item| item.weighted_cochanges)
-        .fold(0.0, f64::max);
-    for item in impacted.iter_mut() {
-        item.score = if max_weight > 0.0 {
-            round3(item.weighted_cochanges / max_weight)
-        } else {
-            0.0
-        };
-    }
-    impacted.sort_by(|a, b| {
-        b.weighted_cochanges
-            .total_cmp(&a.weighted_cochanges)
-            .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
-            .then_with(|| a.path.cmp(&b.path))
-    });
+fn compare_related_by_score(a: &RelatedFile, b: &RelatedFile) -> std::cmp::Ordering {
+    b.score
+        .total_cmp(&a.score)
+        .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
+        .then_with(|| a.path.cmp(&b.path))
+}
+
+fn compare_impact_by_weight(a: &ImpactFile, b: &ImpactFile) -> std::cmp::Ordering {
+    b.weighted_cochanges
+        .total_cmp(&a.weighted_cochanges)
+        .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
+        .then_with(|| a.path.cmp(&b.path))
+}
+
+fn compare_impact_by_score(a: &ImpactFile, b: &ImpactFile) -> std::cmp::Ordering {
+    b.score
+        .total_cmp(&a.score)
+        .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
+        .then_with(|| a.path.cmp(&b.path))
+}
+
+fn compare_pagerank_hit_by_score(a: &PageRankHit, b: &PageRankHit) -> std::cmp::Ordering {
+    b.score
+        .total_cmp(&a.score)
+        .then_with(|| a.path.cmp(&b.path))
 }
 
 fn related_evidence(data: &RelatedData) -> Vec<Evidence> {
@@ -6021,6 +6030,30 @@ src/b.rs
     }
 
     #[test]
+    fn ranks_cochanged_files_with_bounded_results() {
+        let commits = vec![
+            GitCommitFiles {
+                hash: "aaaaaaaaaaaa".to_string(),
+                files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+            },
+            GitCommitFiles {
+                hash: "bbbbbbbbbbbb".to_string(),
+                files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+            },
+            GitCommitFiles {
+                hash: "cccccccccccc".to_string(),
+                files: vec!["src/a.rs".to_string(), "src/c.rs".to_string()],
+            },
+        ];
+
+        let ranking = rank_cochanges(&commits, "src/a.rs", 10, 1);
+
+        assert_eq!(ranking.related.len(), 1);
+        assert_eq!(ranking.related[0].path, "src/b.rs");
+        assert_eq!(ranking.related[0].cochanged_commits, 2);
+    }
+
+    #[test]
     fn ignores_large_cochange_commits() {
         let commits = vec![GitCommitFiles {
             hash: "aaaaaaaaaaaa".to_string(),
@@ -6066,6 +6099,31 @@ src/b.rs
             vec!["src/a.rs", "src/other.rs"]
         );
         assert_eq!(ranking.impacted[1].path, "tests/a_test.rs");
+    }
+
+    #[test]
+    fn ranks_impact_with_bounded_results() {
+        let commits = vec![
+            GitCommitFiles {
+                hash: "aaaaaaaaaaaa".to_string(),
+                files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+            },
+            GitCommitFiles {
+                hash: "bbbbbbbbbbbb".to_string(),
+                files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+            },
+            GitCommitFiles {
+                hash: "cccccccccccc".to_string(),
+                files: vec!["src/a.rs".to_string(), "src/c.rs".to_string()],
+            },
+        ];
+        let seeds = vec!["src/a.rs".to_string()];
+
+        let ranking = rank_cochange_impact(&commits, &seeds, 10, 1);
+
+        assert_eq!(ranking.impacted.len(), 1);
+        assert_eq!(ranking.impacted[0].path, "src/b.rs");
+        assert_eq!(ranking.impacted[0].cochanged_commits, 2);
     }
 
     #[test]
