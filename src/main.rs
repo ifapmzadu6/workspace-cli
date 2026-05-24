@@ -1145,7 +1145,7 @@ fn cmd_index(workspace: &Workspace, args: IndexArgs) -> Result<()> {
 }
 
 fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> {
-    let data = cochange_index_status(workspace);
+    let data = observed_index_status(workspace);
     let observation = index_status_observation(data);
 
     append_observation_log(
@@ -1381,8 +1381,7 @@ fn execute_run_command(workspace: &Workspace, command_text: &str) -> Result<Obse
 }
 
 fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
-    let window = read_log(workspace, args.limit)?;
-    let data = log_data(workspace, window);
+    let data = observed_log(workspace, &args)?;
     let observation = log_observation(data);
     output_observation(args.json, &observation, print_log)
 }
@@ -1828,6 +1827,10 @@ fn status_observation(data: StatusData) -> Observation<StatusData> {
     }
 }
 
+fn observed_index_status(workspace: &Workspace) -> IndexStatusData {
+    cochange_index_status(workspace)
+}
+
 fn index_status_observation(data: IndexStatusData) -> Observation<IndexStatusData> {
     let summary = index_status_summary(&data);
     Observation {
@@ -2029,6 +2032,11 @@ fn log_data(workspace: &Workspace, window: LogWindow) -> LogData {
         omitted_lines: window.omitted_lines,
         entries: window.entries,
     }
+}
+
+fn observed_log(workspace: &Workspace, args: &LogArgs) -> Result<LogData> {
+    let window = read_log(workspace, args.limit)?;
+    Ok(log_data(workspace, window))
 }
 
 fn log_observation(data: LogData) -> Observation<LogData> {
@@ -7482,6 +7490,23 @@ rename to new name.txt
     }
 
     #[test]
+    fn observed_index_status_reports_non_repo_state() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let data = observed_index_status(&workspace);
+
+        assert_eq!(data.path, COCHANGE_INDEX_FILE);
+        assert!(!data.is_repo);
+        assert_eq!(data.status, INDEX_STATUS_NOT_GIT_REPO);
+        assert!(!data.exists);
+        assert!(!data.fresh);
+    }
+
+    #[test]
     fn index_cochange_summary_reports_edges_and_commits() {
         let data = IndexCochangeData {
             path: ".workspace/index/cochange.json".to_string(),
@@ -8139,6 +8164,47 @@ rename to new name.txt
         assert!(observation.truncated);
         assert!(observation.evidence.is_empty());
         assert_eq!(observation.next_observations, log_followup_observations());
+    }
+
+    #[test]
+    fn observed_log_respects_requested_limit() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        append_log(&workspace, LOG_KIND_OBSERVE, LOG_OP_MAP, ".", "map", None)
+            .expect("first log entry should be written");
+        append_log(
+            &workspace,
+            LOG_KIND_OBSERVE,
+            LOG_OP_STATUS,
+            ".",
+            "status",
+            None,
+        )
+        .expect("second log entry should be written");
+        append_log(
+            &workspace,
+            LOG_KIND_OBSERVE,
+            LOG_OP_SEARCH,
+            "needle",
+            "search",
+            None,
+        )
+        .expect("third log entry should be written");
+        let args = LogArgs {
+            json: true,
+            limit: 2,
+        };
+
+        let data = observed_log(&workspace, &args).expect("log should be observed");
+
+        assert_eq!(data.log_path, LOG_FILE);
+        assert_eq!(data.omitted_lines, 1);
+        assert_eq!(data.entries.len(), 2);
+        assert_eq!(data.entries[0].op, LOG_OP_STATUS);
+        assert_eq!(data.entries[1].op, LOG_OP_SEARCH);
     }
 
     #[test]
