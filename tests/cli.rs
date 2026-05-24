@@ -855,6 +855,22 @@ JSON
     assert!(!impacted_paths.contains(&"C:/outside.rs".to_string()));
     assert!(impacted_paths.contains(&"src/b.rs".to_string()));
     assert_eq!(impact["data"]["impacted"][0]["path"], "src/b.rs");
+
+    let limited_impact = run_workspace_with_related_bin(
+        root,
+        &[
+            "impact",
+            "--diff",
+            "--by",
+            "cochange",
+            "--max-results",
+            "1",
+            "--json",
+        ],
+        &fake_related,
+    );
+    let limited_impacted_paths = paths_at(&limited_impact, &["data", "impacted"]);
+    assert_eq!(limited_impacted_paths, vec!["src/b.rs".to_string()]);
 }
 
 #[cfg(unix)]

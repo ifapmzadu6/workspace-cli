@@ -2433,7 +2433,7 @@ fn cochange_index_from_commits(
                 let accumulator = accumulators.entry(key).or_default();
                 accumulator.cochanged_commits += 1;
                 accumulator.weighted_cochanges += weight;
-                if accumulator.sample_commits.len() < 5 {
+                if accumulator.sample_commits.len() < MAX_SAMPLE_COMMITS {
                     accumulator.sample_commits.push(short_commit(&commit.hash));
                 }
             }
@@ -2749,7 +2749,7 @@ fn impact_by_related_cli(
             accumulator.weighted_cochanges += item.weight;
             accumulator.seed_files.insert(seed.clone());
             for evidence in item.evidence {
-                if accumulator.sample_commits.len() >= 5 {
+                if accumulator.sample_commits.len() >= MAX_SAMPLE_COMMITS {
                     break;
                 }
                 accumulator
@@ -2763,28 +2763,26 @@ fn impact_by_related_cli(
         .values()
         .map(|item| item.score)
         .fold(0.0, f64::max);
-    let mut impacted = accumulators
-        .into_iter()
-        .map(|(path, item)| ImpactFile {
-            path,
-            score: if max_score > 0.0 {
-                round3(item.score / max_score)
-            } else {
-                0.0
+    let mut impacted = Vec::new();
+    for (path, item) in accumulators {
+        push_bounded_sorted(
+            &mut impacted,
+            ImpactFile {
+                path,
+                score: if max_score > 0.0 {
+                    round3(item.score / max_score)
+                } else {
+                    0.0
+                },
+                cochanged_commits: item.cochanged_commits,
+                weighted_cochanges: round3(item.weighted_cochanges),
+                seed_files: item.seed_files.into_iter().collect(),
+                sample_commits: item.sample_commits,
             },
-            cochanged_commits: item.cochanged_commits,
-            weighted_cochanges: round3(item.weighted_cochanges),
-            seed_files: item.seed_files.into_iter().collect(),
-            sample_commits: item.sample_commits,
-        })
-        .collect::<Vec<_>>();
-    impacted.sort_by(|a, b| {
-        b.score
-            .total_cmp(&a.score)
-            .then_with(|| b.cochanged_commits.cmp(&a.cochanged_commits))
-            .then_with(|| a.path.cmp(&b.path))
-    });
-    impacted.truncate(max_results);
+            max_results,
+            compare_impact_by_score,
+        );
+    }
 
     Ok(Some(ImpactData {
         source: "diff".to_string(),
@@ -3137,7 +3135,7 @@ fn rank_cochanges(
             let accumulator = accumulators.entry(file).or_default();
             accumulator.cochanged_commits += 1;
             accumulator.weighted_cochanges += weight;
-            if accumulator.sample_commits.len() < 5 {
+            if accumulator.sample_commits.len() < MAX_SAMPLE_COMMITS {
                 accumulator.sample_commits.push(short_commit(&commit.hash));
             }
         }
@@ -3316,7 +3314,7 @@ fn rank_cochange_impact(
             accumulator.cochanged_commits += 1;
             accumulator.weighted_cochanges += weight;
             accumulator.seed_files.extend(matched_seeds.iter().cloned());
-            if accumulator.sample_commits.len() < 5 {
+            if accumulator.sample_commits.len() < MAX_SAMPLE_COMMITS {
                 accumulator.sample_commits.push(short_commit(&commit.hash));
             }
         }
@@ -3381,7 +3379,7 @@ fn rank_cochange_impact_from_index(
         accumulator.weighted_cochanges += edge.weighted_cochanges;
         accumulator.seed_files.insert(seed);
         for commit in &edge.sample_commits {
-            if accumulator.sample_commits.len() >= 5 {
+            if accumulator.sample_commits.len() >= MAX_SAMPLE_COMMITS {
                 break;
             }
             if !accumulator.sample_commits.contains(commit) {
@@ -3452,7 +3450,7 @@ fn rank_cochange_impact_pagerank_from_index(
                     direct_weight += edge.weighted_cochanges;
                     direct_seeds.insert(seed.clone());
                     for commit in &edge.sample_commits {
-                        if sample_commits.len() >= 5 {
+                        if sample_commits.len() >= MAX_SAMPLE_COMMITS {
                             break;
                         }
                         if !sample_commits.contains(commit) {
