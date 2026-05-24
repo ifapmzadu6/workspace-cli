@@ -1200,21 +1200,7 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
             args.max_files_per_commit,
         )
     };
-    let summary = related_summary(&data);
-    let evidence = related_evidence(&data);
-    let next_observations = read_next_observations(
-        workspace,
-        data.related.iter().map(|file| file.path.as_str()),
-    );
-    let observation = Observation {
-        kind: WORKSPACE_RELATED_KIND.to_string(),
-        scope: target.clone(),
-        summary,
-        data,
-        evidence,
-        truncated: false,
-        next_observations,
-    };
+    let observation = related_observation(workspace, &target, data);
 
     append_observation_log(workspace, LOG_OP_RELATED, &target, &observation.summary);
     output_observation(args.json, &observation, print_related)
@@ -1243,22 +1229,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
             args.max_files_per_commit,
         )
     };
-    let seed_files_truncated = impact_truncated(&data);
-    let summary = impact_summary(&data);
-    let evidence = impact_evidence(&data);
-    let next_observations = read_next_observations(
-        workspace,
-        data.impacted.iter().map(|file| file.path.as_str()),
-    );
-    let observation = Observation {
-        kind: WORKSPACE_IMPACT_KIND.to_string(),
-        scope: data.source.clone(),
-        summary,
-        data,
-        evidence,
-        truncated: seed_files_truncated,
-        next_observations,
-    };
+    let observation = impact_observation(workspace, data);
 
     append_observation_log(
         workspace,
@@ -1469,16 +1440,7 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
         stdout: stdout.text,
         stderr: stderr.text,
     };
-    let summary = run_summary(data.exit_code, data.duration_ms, truncated);
-    let observation = Observation {
-        kind: WORKSPACE_RUN_KIND.to_string(),
-        scope: data.command.clone(),
-        summary,
-        data,
-        evidence: vec![],
-        truncated,
-        next_observations: run_followup_observations(),
-    };
+    let observation = run_observation(data, truncated);
 
     append_log(
         workspace,
@@ -1493,22 +1455,8 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
 
 fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
     let window = read_log(workspace, args.limit)?;
-    let data = LogData {
-        log_path: workspace.relative(&workspace.log_path()),
-        omitted_lines: window.omitted_lines,
-        entries: window.entries,
-    };
-    let truncated = log_truncated(&data);
-    let summary = log_summary(&data);
-    let observation = Observation {
-        kind: WORKSPACE_LOG_KIND.to_string(),
-        scope: data.log_path.clone(),
-        summary,
-        data,
-        evidence: vec![],
-        truncated,
-        next_observations: log_followup_observations(),
-    };
+    let data = log_data(workspace, window);
+    let observation = log_observation(data);
     output_observation(args.json, &observation, print_log)
 }
 
@@ -1840,6 +1788,82 @@ fn index_cochange_observation(data: IndexCochangeData) -> Observation<IndexCocha
         evidence: vec![],
         truncated: false,
         next_observations: index_cochange_next_observations(),
+    }
+}
+
+fn related_observation(
+    workspace: &Workspace,
+    target: &str,
+    data: RelatedData,
+) -> Observation<RelatedData> {
+    let summary = related_summary(&data);
+    let evidence = related_evidence(&data);
+    let next_observations = read_next_observations(
+        workspace,
+        data.related.iter().map(|file| file.path.as_str()),
+    );
+    Observation {
+        kind: WORKSPACE_RELATED_KIND.to_string(),
+        scope: target.to_string(),
+        summary,
+        data,
+        evidence,
+        truncated: false,
+        next_observations,
+    }
+}
+
+fn impact_observation(workspace: &Workspace, data: ImpactData) -> Observation<ImpactData> {
+    let summary = impact_summary(&data);
+    let evidence = impact_evidence(&data);
+    let truncated = impact_truncated(&data);
+    let next_observations = read_next_observations(
+        workspace,
+        data.impacted.iter().map(|file| file.path.as_str()),
+    );
+    Observation {
+        kind: WORKSPACE_IMPACT_KIND.to_string(),
+        scope: data.source.clone(),
+        summary,
+        data,
+        evidence,
+        truncated,
+        next_observations,
+    }
+}
+
+fn run_observation(data: RunData, output_truncated: bool) -> Observation<RunData> {
+    let summary = run_summary(data.exit_code, data.duration_ms, output_truncated);
+    Observation {
+        kind: WORKSPACE_RUN_KIND.to_string(),
+        scope: data.command.clone(),
+        summary,
+        data,
+        evidence: vec![],
+        truncated: output_truncated,
+        next_observations: run_followup_observations(),
+    }
+}
+
+fn log_data(workspace: &Workspace, window: LogWindow) -> LogData {
+    LogData {
+        log_path: workspace.relative(&workspace.log_path()),
+        omitted_lines: window.omitted_lines,
+        entries: window.entries,
+    }
+}
+
+fn log_observation(data: LogData) -> Observation<LogData> {
+    let summary = log_summary(&data);
+    let truncated = log_truncated(&data);
+    Observation {
+        kind: WORKSPACE_LOG_KIND.to_string(),
+        scope: data.log_path.clone(),
+        summary,
+        data,
+        evidence: vec![],
+        truncated,
+        next_observations: log_followup_observations(),
     }
 }
 
@@ -7154,6 +7178,116 @@ rename to new name.txt
     }
 
     #[test]
+    fn relationship_observation_helpers_preserve_contract() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::create_dir(temp.path().join("src")).expect("src directory should be created");
+        fs::write(temp.path().join("src/b.rs"), "b\n").expect("related file should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: true,
+        };
+
+        let related = RelatedData {
+            target: "src/a.rs".to_string(),
+            method: RELATED_METHOD_COCHANGE.to_string(),
+            ranking: RANK_DIRECT.to_string(),
+            relationship_source: RELATIONSHIP_SOURCE_GIT_LOG.to_string(),
+            is_repo: true,
+            commits_scanned: 5,
+            commits_matched: 2,
+            ignored_large_commits: 0,
+            max_commits: 500,
+            max_files_per_commit: 100,
+            related: vec![
+                RelatedFile {
+                    path: "src/b.rs".to_string(),
+                    score: 1.0,
+                    cochanged_commits: 1,
+                    weighted_cochanges: 1.0,
+                    sample_commits: vec!["abc123".to_string()],
+                },
+                RelatedFile {
+                    path: "src/missing.rs".to_string(),
+                    score: 0.5,
+                    cochanged_commits: 1,
+                    weighted_cochanges: 0.5,
+                    sample_commits: vec!["def456".to_string()],
+                },
+            ],
+        };
+
+        let observation = related_observation(&workspace, "src/a.rs", related);
+        assert_eq!(observation.kind, WORKSPACE_RELATED_KIND);
+        assert_eq!(observation.scope, "src/a.rs");
+        assert_eq!(
+            observation.summary,
+            "2 related file(s) for src/a.rs using cochange history"
+        );
+        assert!(!observation.truncated);
+        assert_eq!(observation.evidence.len(), 2);
+        assert_eq!(
+            observation.evidence[0].reason,
+            "changed with src/a.rs in 1 commit(s); samples: abc123"
+        );
+        assert_eq!(
+            observation.next_observations,
+            vec!["workspace read src/b.rs"]
+        );
+
+        let impact = ImpactData {
+            source: IMPACT_SOURCE_DIFF.to_string(),
+            method: RELATED_METHOD_COCHANGE.to_string(),
+            ranking: RANK_DIRECT.to_string(),
+            relationship_source: RELATIONSHIP_SOURCE_GIT_LOG.to_string(),
+            is_repo: true,
+            seed_files: vec!["src/a.rs".to_string()],
+            seed_file_count: 3,
+            omitted_seed_files: 1,
+            commits_scanned: 5,
+            commits_matched: 2,
+            ignored_large_commits: 0,
+            max_commits: 500,
+            max_files_per_commit: 100,
+            impacted: vec![
+                ImpactFile {
+                    path: "src/b.rs".to_string(),
+                    score: 1.0,
+                    cochanged_commits: 1,
+                    weighted_cochanges: 1.0,
+                    seed_files: vec!["src/a.rs".to_string()],
+                    sample_commits: vec!["abc123".to_string()],
+                },
+                ImpactFile {
+                    path: "src/missing.rs".to_string(),
+                    score: 0.5,
+                    cochanged_commits: 1,
+                    weighted_cochanges: 0.5,
+                    seed_files: vec!["src/a.rs".to_string()],
+                    sample_commits: vec!["def456".to_string()],
+                },
+            ],
+        };
+
+        let observation = impact_observation(&workspace, impact);
+        assert_eq!(observation.kind, WORKSPACE_IMPACT_KIND);
+        assert_eq!(observation.scope, IMPACT_SOURCE_DIFF);
+        assert_eq!(
+            observation.summary,
+            "2 impacted file(s) from 3 seed file(s) using cochange history (seed files truncated)"
+        );
+        assert!(observation.truncated);
+        assert_eq!(observation.evidence.len(), 2);
+        assert_eq!(
+            observation.evidence[0].reason,
+            "changed with seed file(s) src/a.rs in 1 commit(s); samples: abc123"
+        );
+        assert_eq!(
+            observation.next_observations,
+            vec!["workspace read src/b.rs"]
+        );
+    }
+
+    #[test]
     fn search_summary_reports_truncated_results_and_text() {
         let data = SearchData {
             query: "needle".to_string(),
@@ -7328,6 +7462,60 @@ rename to new name.txt
             log_summary(&data),
             "1 operation(s) (2 older log line(s) omitted)"
         );
+    }
+
+    #[test]
+    fn run_and_log_observation_helpers_preserve_contract() {
+        let run = RunData {
+            command: "printf ok".to_string(),
+            cwd: "/repo".to_string(),
+            exit_code: Some(0),
+            duration_ms: 42,
+            stdout: "ok".to_string(),
+            stderr: String::new(),
+        };
+
+        let observation = run_observation(run, true);
+        assert_eq!(observation.kind, WORKSPACE_RUN_KIND);
+        assert_eq!(observation.scope, "printf ok");
+        assert_eq!(
+            observation.summary,
+            "command exited with 0 in 42ms (output truncated)"
+        );
+        assert!(observation.truncated);
+        assert!(observation.evidence.is_empty());
+        assert_eq!(observation.next_observations, run_followup_observations());
+
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        let window = LogWindow {
+            entries: vec![LogEntry {
+                id: "op-1".to_string(),
+                timestamp_unix_ms: 1,
+                kind: LOG_KIND_OBSERVE.to_string(),
+                op: LOG_OP_STATUS.to_string(),
+                scope: ".".to_string(),
+                summary: "entry".to_string(),
+                transaction_id: None,
+            }],
+            omitted_lines: 2,
+        };
+
+        let data = log_data(&workspace, window);
+        assert_eq!(data.log_path, LOG_FILE);
+        let observation = log_observation(data);
+        assert_eq!(observation.kind, WORKSPACE_LOG_KIND);
+        assert_eq!(observation.scope, LOG_FILE);
+        assert_eq!(
+            observation.summary,
+            "1 operation(s) (2 older log line(s) omitted)"
+        );
+        assert!(observation.truncated);
+        assert!(observation.evidence.is_empty());
+        assert_eq!(observation.next_observations, log_followup_observations());
     }
 
     #[test]
