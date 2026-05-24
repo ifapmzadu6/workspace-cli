@@ -3443,38 +3443,7 @@ fn rank_cochange_impact_pagerank_from_index(
     let edge_lookup = cochange_edge_lookup(index);
     let mut impacted = hits
         .into_iter()
-        .map(|hit| {
-            let mut direct_commits = 0usize;
-            let mut direct_weight = 0.0f64;
-            let mut direct_seeds = BTreeSet::new();
-            let mut sample_commits = Vec::new();
-
-            for seed in &seed_files {
-                if let Some(edge) = find_cochange_edge(&edge_lookup, seed, &hit.path) {
-                    direct_commits += edge.cochanged_commits;
-                    direct_weight += edge.weighted_cochanges;
-                    direct_seeds.insert(seed.clone());
-                    for commit in &edge.sample_commits {
-                        if !push_unique_sample_commit(&mut sample_commits, commit) {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            ImpactFile {
-                path: hit.path,
-                score: round3(hit.score),
-                cochanged_commits: direct_commits,
-                weighted_cochanges: round3(direct_weight),
-                seed_files: if direct_seeds.is_empty() {
-                    seed_files.iter().cloned().collect()
-                } else {
-                    direct_seeds.into_iter().collect()
-                },
-                sample_commits,
-            }
-        })
+        .map(|hit| impact_file_from_pagerank_hit(hit, &seed_files, &edge_lookup))
         .collect::<Vec<_>>();
 
     sort_and_truncate(&mut impacted, max_results, compare_impact_by_score);
@@ -3877,6 +3846,43 @@ fn impact_file_from_related_cli_accumulator(
         weighted_cochanges: round3(item.weighted_cochanges),
         seed_files: item.seed_files.into_iter().collect(),
         sample_commits: item.sample_commits,
+    }
+}
+
+fn impact_file_from_pagerank_hit(
+    hit: PageRankHit,
+    seed_files: &BTreeSet<String>,
+    edge_lookup: &BTreeMap<(String, String), &CochangeEdge>,
+) -> ImpactFile {
+    let mut direct_commits = 0usize;
+    let mut direct_weight = 0.0f64;
+    let mut direct_seeds = BTreeSet::new();
+    let mut sample_commits = Vec::new();
+
+    for seed in seed_files {
+        if let Some(edge) = find_cochange_edge(edge_lookup, seed, &hit.path) {
+            direct_commits += edge.cochanged_commits;
+            direct_weight += edge.weighted_cochanges;
+            direct_seeds.insert(seed.clone());
+            for commit in &edge.sample_commits {
+                if !push_unique_sample_commit(&mut sample_commits, commit) {
+                    break;
+                }
+            }
+        }
+    }
+
+    ImpactFile {
+        path: hit.path,
+        score: round3(hit.score),
+        cochanged_commits: direct_commits,
+        weighted_cochanges: round3(direct_weight),
+        seed_files: if direct_seeds.is_empty() {
+            seed_files.iter().cloned().collect()
+        } else {
+            direct_seeds.into_iter().collect()
+        },
+        sample_commits,
     }
 }
 
@@ -7021,6 +7027,71 @@ src/b.rs
         assert_eq!(file.weighted_cochanges, 1.667);
         assert_eq!(file.seed_files, vec!["src/a.rs", "src/z.rs"]);
         assert_eq!(file.sample_commits, vec!["aaaaaaaaaaaa"]);
+    }
+
+    #[test]
+    fn impact_pagerank_hit_conversion_preserves_direct_edges() {
+        let index = CochangeIndex {
+            version: 1,
+            generated_at_unix_ms: 0,
+            head: None,
+            max_commits: 10,
+            max_files_per_commit: 10,
+            commits_scanned: 0,
+            commits_indexed: 0,
+            ignored_large_commits: 0,
+            file_commit_counts: BTreeMap::new(),
+            edges: vec![
+                CochangeEdge {
+                    a: "src/a.rs".to_string(),
+                    b: "src/impact.rs".to_string(),
+                    cochanged_commits: 2,
+                    weighted_cochanges: 1.25,
+                    sample_commits: vec!["aaaaaaaaaaaa".to_string()],
+                },
+                CochangeEdge {
+                    a: "src/other.rs".to_string(),
+                    b: "src/impact.rs".to_string(),
+                    cochanged_commits: 3,
+                    weighted_cochanges: 0.75,
+                    sample_commits: vec!["aaaaaaaaaaaa".to_string(), "bbbbbbbbbbbb".to_string()],
+                },
+            ],
+        };
+        let edge_lookup = cochange_edge_lookup(&index);
+        let seed_files = BTreeSet::from(["src/a.rs".to_string(), "src/other.rs".to_string()]);
+
+        let file = impact_file_from_pagerank_hit(
+            PageRankHit {
+                path: "src/impact.rs".to_string(),
+                score: 2.0 / 3.0,
+            },
+            &seed_files,
+            &edge_lookup,
+        );
+
+        assert_eq!(file.path, "src/impact.rs");
+        assert_eq!(file.score, 0.667);
+        assert_eq!(file.cochanged_commits, 5);
+        assert_eq!(file.weighted_cochanges, 2.0);
+        assert_eq!(file.seed_files, vec!["src/a.rs", "src/other.rs"]);
+        assert_eq!(file.sample_commits, vec!["aaaaaaaaaaaa", "bbbbbbbbbbbb"]);
+
+        let file = impact_file_from_pagerank_hit(
+            PageRankHit {
+                path: "src/indirect.rs".to_string(),
+                score: 0.25,
+            },
+            &seed_files,
+            &edge_lookup,
+        );
+
+        assert_eq!(file.path, "src/indirect.rs");
+        assert_eq!(file.score, 0.25);
+        assert_eq!(file.cochanged_commits, 0);
+        assert_eq!(file.weighted_cochanges, 0.0);
+        assert_eq!(file.seed_files, vec!["src/a.rs", "src/other.rs"]);
+        assert!(file.sample_commits.is_empty());
     }
 
     #[test]
