@@ -10,6 +10,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
@@ -19,6 +20,7 @@ const TRANSACTION_DIR: &str = ".workspace/transactions";
 const INDEX_DIR: &str = ".workspace/index";
 const COCHANGE_INDEX_FILE: &str = ".workspace/index/cochange.json";
 const MAX_CAPTURED_OUTPUT: usize = 24_000;
+static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Parser)]
 #[command(name = "workspace")]
@@ -3479,7 +3481,13 @@ fn truncate_string(value: &str, max_chars: usize) -> String {
 }
 
 fn new_id(prefix: &str) -> String {
-    format!("{prefix}-{}", now_ms())
+    let sequence = ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "{prefix}-{}{:05}{:06}",
+        now_ms(),
+        std::process::id(),
+        sequence
+    )
 }
 
 fn now_ms() -> u128 {
@@ -3750,5 +3758,21 @@ src/c.rs
             .unwrap();
         assert_eq!(indirect.cochanged_commits, 0);
         assert_eq!(indirect.seed_files, vec!["src/a.rs"]);
+    }
+
+    #[test]
+    fn generated_ids_keep_numeric_suffixes_and_do_not_repeat() {
+        let ids = (0..1_000).map(|_| new_id("tx")).collect::<BTreeSet<_>>();
+        assert_eq!(ids.len(), 1_000);
+        for id in ids {
+            let suffix = id
+                .strip_prefix("tx-")
+                .expect("generated id should include prefix");
+            assert!(
+                suffix.bytes().all(|byte| byte.is_ascii_digit()),
+                "generated id should keep tx-<digits> format: {id}"
+            );
+            validate_patch_transaction_id(&id).expect("generated tx id should validate");
+        }
     }
 }
