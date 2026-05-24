@@ -1199,18 +1199,11 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
 }
 
 fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
-    let path = workspace.resolve_existing_workspace_path(&args.path)?;
-    let rel_path = workspace.relative(&path);
-    let range = args
-        .lines
-        .as_deref()
-        .map(parse_line_range)
-        .transpose()
-        .context("invalid --lines range")?;
-    let read = observed_read(workspace, &path, range)?;
+    let read = observed_read_args(workspace, &args)?;
+    let scope = read.data.path.clone();
     let observation = read_observation(read);
 
-    append_observation_log(workspace, LOG_OP_READ, &rel_path, &observation.summary);
+    append_observation_log(workspace, LOG_OP_READ, &scope, &observation.summary);
     output_observation(args.json, &observation, print_read)
 }
 
@@ -1661,6 +1654,17 @@ fn observed_read(
         },
         content_truncated: read_content.truncated,
     })
+}
+
+fn observed_read_args(workspace: &Workspace, args: &ReadArgs) -> Result<ObservedRead> {
+    let path = workspace.resolve_existing_workspace_path(&args.path)?;
+    let range = args
+        .lines
+        .as_deref()
+        .map(parse_line_range)
+        .transpose()
+        .context("invalid --lines range")?;
+    observed_read(workspace, &path, range)
 }
 
 fn read_observation(read: ObservedRead) -> Observation<ReadData> {
@@ -6664,6 +6668,33 @@ rename to new name.txt
         assert_eq!(read.data.path, "src/main.rs");
         assert_eq!(read.data.lines.as_deref(), Some("2:3"));
         assert_eq!(read.data.content, "two\nthree");
+        assert!(!read.content_truncated);
+    }
+
+    #[test]
+    fn observed_read_args_resolves_path_and_line_range() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::create_dir(temp.path().join("src")).expect("src directory should be created");
+        fs::write(temp.path().join("src/main.rs"), "one\ntwo\nthree\n")
+            .expect("source file should be written");
+        let workspace = Workspace {
+            root: temp
+                .path()
+                .canonicalize()
+                .expect("temp path should resolve"),
+            is_git_repo: false,
+        };
+        let args = ReadArgs {
+            json: true,
+            lines: Some("1:2".to_string()),
+            path: PathBuf::from("src/main.rs"),
+        };
+
+        let read = observed_read_args(&workspace, &args).expect("read data should be observed");
+
+        assert_eq!(read.data.path, "src/main.rs");
+        assert_eq!(read.data.lines.as_deref(), Some("1:2"));
+        assert_eq!(read.data.content, "one\ntwo");
         assert!(!read.content_truncated);
     }
 
