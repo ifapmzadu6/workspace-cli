@@ -86,6 +86,16 @@ const RANK_PAGERANK: &str = "pagerank";
 const RELATIONSHIP_SOURCE_COCHANGE_INDEX: &str = "cochange-index";
 const RELATIONSHIP_SOURCE_GIT_LOG: &str = "git-log";
 const RELATIONSHIP_SOURCE_RELATED_CLI: &str = "related-cli";
+const EVIDENCE_REASON_GIT_DIFF_CHANGED_FILE: &str = "git diff changed file";
+const EVIDENCE_REASON_PATCH_FILE_TARGET: &str = "patch file target";
+const EVIDENCE_REASON_ROLLBACK_TARGET: &str = "rollback target";
+const EVIDENCE_REASON_TEXT_MATCH: &str = "text match";
+const EVIDENCE_REASON_REQUESTED_FILE_CONTENT: &str = "requested file content";
+const IMPORTANT_REASON_CONFIGURATION_OR_PACKAGE_MANIFEST: &str =
+    "configuration or package manifest";
+const IMPORTANT_REASON_LIKELY_ENTRYPOINT: &str = "likely entrypoint";
+const IMPORTANT_REASON_PRIMARY_PROJECT_DOCUMENTATION: &str = "primary project documentation";
+const IMPORTANT_REASON_NO_LANGUAGE_SIGNALS: &str = "no language signals detected yet";
 const INDEX_STATUS_FRESH: &str = "fresh";
 const INDEX_STATUS_STALE: &str = "stale";
 const INDEX_STATUS_MISSING: &str = "missing";
@@ -1408,7 +1418,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     };
     let truncated = diff_truncated(&data, summary_truncated, patch_truncated);
     let summary = diff_summary(&data, summary_truncated, patch_truncated);
-    let evidence = changed_file_evidence(&data.files, "git diff changed file");
+    let evidence = changed_file_evidence(&data.files, EVIDENCE_REASON_GIT_DIFF_CHANGED_FILE);
     let next_observations =
         read_next_observations(workspace, data.files.iter().map(String::as_str));
     let observation = Observation {
@@ -1677,7 +1687,7 @@ fn patch_observation(data: PatchData, files_changed: &[String]) -> Observation<P
         scope: data.patch_file.clone(),
         summary,
         data,
-        evidence: changed_file_evidence(files_changed, "patch file target"),
+        evidence: changed_file_evidence(files_changed, EVIDENCE_REASON_PATCH_FILE_TARGET),
         truncated,
         next_observations,
     }
@@ -1714,7 +1724,7 @@ fn rollback_observation(data: RollbackData, files_changed: &[String]) -> Observa
         scope: data.transaction_id.clone(),
         summary,
         data,
-        evidence: changed_file_evidence(files_changed, "rollback target"),
+        evidence: changed_file_evidence(files_changed, EVIDENCE_REASON_ROLLBACK_TARGET),
         truncated,
         next_observations: rollback_followup_observations(),
     }
@@ -1755,7 +1765,7 @@ fn search_evidence(matches: &[SearchMatch]) -> Vec<Evidence> {
         .map(|item| Evidence {
             path: item.path.clone(),
             lines: Some(item.line.to_string()),
-            reason: "text match".to_string(),
+            reason: EVIDENCE_REASON_TEXT_MATCH.to_string(),
         })
         .collect()
 }
@@ -1772,7 +1782,7 @@ fn read_evidence(data: &ReadData) -> Vec<Evidence> {
     vec![Evidence {
         path: data.path.clone(),
         lines: data.lines.clone(),
-        reason: "requested file content".to_string(),
+        reason: EVIDENCE_REASON_REQUESTED_FILE_CONTENT.to_string(),
     }]
 }
 
@@ -2511,13 +2521,13 @@ fn important_files(structure: &StructureSummary, stack: &StackSummary) -> Vec<Im
     for path in &structure.configs {
         items.push(ImportantFile {
             path: path.clone(),
-            reason: "configuration or package manifest".to_string(),
+            reason: IMPORTANT_REASON_CONFIGURATION_OR_PACKAGE_MANIFEST.to_string(),
         });
     }
     for path in &structure.entrypoints {
         items.push(ImportantFile {
             path: path.clone(),
-            reason: "likely entrypoint".to_string(),
+            reason: IMPORTANT_REASON_LIKELY_ENTRYPOINT.to_string(),
         });
     }
     if let Some(doc) = structure
@@ -2527,13 +2537,13 @@ fn important_files(structure: &StructureSummary, stack: &StackSummary) -> Vec<Im
     {
         items.push(ImportantFile {
             path: doc.clone(),
-            reason: "primary project documentation".to_string(),
+            reason: IMPORTANT_REASON_PRIMARY_PROJECT_DOCUMENTATION.to_string(),
         });
     }
     if stack.languages.is_empty() {
         items.push(ImportantFile {
             path: ".".to_string(),
-            reason: "no language signals detected yet".to_string(),
+            reason: IMPORTANT_REASON_NO_LANGUAGE_SIGNALS.to_string(),
         });
     }
     items
@@ -6178,7 +6188,7 @@ rename to new name.txt
             .collect::<Vec<_>>();
 
         let observed = observed_changed_files(&files);
-        let evidence = changed_file_evidence(&files, "patch file target");
+        let evidence = changed_file_evidence(&files, EVIDENCE_REASON_PATCH_FILE_TARGET);
 
         assert_eq!(observed.files.len(), MAX_CHANGED_FILES);
         assert_eq!(observed.files[0], "file_000.txt");
@@ -6189,7 +6199,7 @@ rename to new name.txt
         assert_eq!(observed.omitted_files, 2);
         assert_eq!(evidence.len(), MAX_CHANGED_FILES);
         assert_eq!(evidence[0].path, "file_000.txt");
-        assert_eq!(evidence[0].reason, "patch file target");
+        assert_eq!(evidence[0].reason, EVIDENCE_REASON_PATCH_FILE_TARGET);
         assert!(evidence.iter().all(|item| item.lines.is_none()));
     }
 
@@ -6250,7 +6260,10 @@ rename to new name.txt
         );
         assert!(observation.truncated);
         assert_eq!(observation.evidence.len(), MAX_CHANGED_FILES);
-        assert_eq!(observation.evidence[0].reason, "patch file target");
+        assert_eq!(
+            observation.evidence[0].reason,
+            EVIDENCE_REASON_PATCH_FILE_TARGET
+        );
         assert_eq!(
             observation.next_observations,
             patch_followup_observations("tx-1")
@@ -6269,7 +6282,10 @@ rename to new name.txt
         );
         assert!(observation.truncated);
         assert_eq!(observation.evidence.len(), MAX_CHANGED_FILES);
-        assert_eq!(observation.evidence[0].reason, "rollback target");
+        assert_eq!(
+            observation.evidence[0].reason,
+            EVIDENCE_REASON_ROLLBACK_TARGET
+        );
         assert_eq!(
             observation.next_observations,
             rollback_followup_observations()
@@ -6327,7 +6343,7 @@ rename to new name.txt
         assert_eq!(evidence.len(), 1);
         assert_eq!(evidence[0].path, "src/main.rs");
         assert_eq!(evidence[0].lines.as_deref(), Some("3:5"));
-        assert_eq!(evidence[0].reason, "requested file content");
+        assert_eq!(evidence[0].reason, EVIDENCE_REASON_REQUESTED_FILE_CONTENT);
 
         assert_eq!(
             read_followup_observations("path with spaces.txt"),
@@ -6411,6 +6427,34 @@ rename to new name.txt
                 "workspace_run",
                 "workspace_log",
                 "workspace_rollback",
+            ]
+        );
+    }
+
+    #[test]
+    fn evidence_reason_constants_match_json_contract() {
+        assert_eq!(
+            [
+                EVIDENCE_REASON_GIT_DIFF_CHANGED_FILE,
+                EVIDENCE_REASON_PATCH_FILE_TARGET,
+                EVIDENCE_REASON_ROLLBACK_TARGET,
+                EVIDENCE_REASON_TEXT_MATCH,
+                EVIDENCE_REASON_REQUESTED_FILE_CONTENT,
+                IMPORTANT_REASON_CONFIGURATION_OR_PACKAGE_MANIFEST,
+                IMPORTANT_REASON_LIKELY_ENTRYPOINT,
+                IMPORTANT_REASON_PRIMARY_PROJECT_DOCUMENTATION,
+                IMPORTANT_REASON_NO_LANGUAGE_SIGNALS,
+            ],
+            [
+                "git diff changed file",
+                "patch file target",
+                "rollback target",
+                "text match",
+                "requested file content",
+                "configuration or package manifest",
+                "likely entrypoint",
+                "primary project documentation",
+                "no language signals detected yet",
             ]
         );
     }
@@ -6636,7 +6680,7 @@ rename to new name.txt
         assert_eq!(evidence.len(), MAX_EVIDENCE_ITEMS);
         assert_eq!(evidence[0].path, "file_00.txt");
         assert_eq!(evidence[0].lines.as_deref(), Some("1"));
-        assert_eq!(evidence[0].reason, "text match");
+        assert_eq!(evidence[0].reason, EVIDENCE_REASON_TEXT_MATCH);
         assert_eq!(next.len(), MAX_NEXT_OBSERVATIONS);
         assert_eq!(next[0], "workspace read file_00.txt --lines 1:1");
         assert_eq!(next[4], "workspace read file_04.txt --lines 5:5");
