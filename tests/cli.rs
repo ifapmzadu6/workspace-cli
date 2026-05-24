@@ -252,7 +252,8 @@ fn related_can_delegate_to_related_cli() {
     write_file(root, "src/b.rs", "b\n");
     commit_all(root, "a with b");
 
-    let fake_related = root.join("fake-related");
+    let bin_dir = TempDir::new().expect("bin temp dir should be created");
+    let fake_related = bin_dir.path().join("fake-related");
     write_executable(
         &fake_related,
         r#"#!/bin/sh
@@ -307,6 +308,22 @@ JSON
         related["data"]["related"][0]["sample_commits"][0],
         "1234567890ab"
     );
+
+    append_file(root, "src/a.rs", "local change\n");
+    let impact = run_workspace_with_related_bin(
+        root,
+        &["impact", "--diff", "--by", "cochange", "--json"],
+        &fake_related,
+    );
+    assert_eq!(impact["kind"], "workspace_impact");
+    assert!(
+        impact["data"]["relationship_source"]
+            .as_str()
+            .expect("relationship source should be a string")
+            .starts_with("related-cli:direct:aggregate")
+    );
+    assert!(strings_at(&impact, &["data", "seed_files"]).contains(&"src/a.rs".to_string()));
+    assert_eq!(impact["data"]["impacted"][0]["path"], "src/b.rs");
 }
 
 #[test]

@@ -442,6 +442,11 @@ struct RelatedCliEvidence {
     hash: String,
 }
 
+struct RelatedCli {
+    bin: PathBuf,
+    history_backend: String,
+}
+
 #[derive(Default)]
 struct RelatedCliImpactAccumulator {
     score: f64,
@@ -1699,15 +1704,16 @@ fn related_by_cochange(
     use_index: bool,
 ) -> Result<RelatedData> {
     if !uses_cochange_index(use_index, rank)
-        && let Some(output) = related_cli_query(
+        && let Some(cli) = RelatedCli::detect()
+    {
+        let output = cli.query(
             workspace,
             target,
             max_commits,
             max_files_per_commit,
             max_results,
             rank,
-        )?
-    {
+        )?;
         return Ok(related_data_from_related_cli(
             target,
             output,
@@ -1757,66 +1763,74 @@ fn related_by_cochange(
     })
 }
 
-fn related_cli_query(
-    workspace: &Workspace,
-    target: &str,
-    max_commits: usize,
-    max_files_per_commit: usize,
-    max_results: usize,
-    rank: RankingMethod,
-) -> Result<Option<RelatedCliOutput>> {
-    let Some(bin) = related_cli_bin() else {
-        return Ok(None);
-    };
-    let history_backend =
-        env::var("WORKSPACE_RELATED_HISTORY_BACKEND").unwrap_or_else(|_| "git".to_string());
-    let output = Command::new(&bin)
-        .current_dir(&workspace.root)
-        .arg("query")
-        .arg(target)
-        .arg("--repo")
-        .arg(&workspace.root)
-        .arg("--history-backend")
-        .arg(&history_backend)
-        .arg("--max-commits")
-        .arg(max_commits.to_string())
-        .arg("--max-files-per-commit")
-        .arg(max_files_per_commit.to_string())
-        .arg("--top")
-        .arg(max_results.to_string())
-        .arg("--mode")
-        .arg(rank.as_str())
-        .arg("--evidence")
-        .arg("3")
-        .arg("--json")
-        .output()
-        .with_context(|| format!("failed to run related-cli at {}", bin.display()))?;
-
-    if !output.status.success() {
-        bail!(
-            "related-cli query failed for {}: {}",
-            target,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-
-    let parsed = serde_json::from_slice(&output.stdout)
-        .with_context(|| "failed to parse related-cli JSON output")?;
-    Ok(Some(parsed))
-}
-
-fn related_cli_bin() -> Option<PathBuf> {
-    if env_flag_is_set("WORKSPACE_RELATED_DISABLE") {
-        return None;
-    }
-    if let Ok(value) = env::var("WORKSPACE_RELATED_BIN") {
-        let trimmed = value.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed));
+impl RelatedCli {
+    fn detect() -> Option<Self> {
+        if env_flag_is_set("WORKSPACE_RELATED_DISABLE") {
+            return None;
         }
+        let bin = if let Ok(value) = env::var("WORKSPACE_RELATED_BIN") {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            PathBuf::from(trimmed)
+        } else {
+            let candidate = PathBuf::from("related");
+            if !command_available(&candidate) {
+                return None;
+            }
+            candidate
+        };
+        let history_backend =
+            env::var("WORKSPACE_RELATED_HISTORY_BACKEND").unwrap_or_else(|_| "git".to_string());
+        Some(Self {
+            bin,
+            history_backend,
+        })
     }
-    let candidate = PathBuf::from("related");
-    command_available(&candidate).then_some(candidate)
+
+    fn query(
+        &self,
+        workspace: &Workspace,
+        target: &str,
+        max_commits: usize,
+        max_files_per_commit: usize,
+        max_results: usize,
+        rank: RankingMethod,
+    ) -> Result<RelatedCliOutput> {
+        let output = Command::new(&self.bin)
+            .current_dir(&workspace.root)
+            .arg("query")
+            .arg(target)
+            .arg("--repo")
+            .arg(&workspace.root)
+            .arg("--history-backend")
+            .arg(&self.history_backend)
+            .arg("--max-commits")
+            .arg(max_commits.to_string())
+            .arg("--max-files-per-commit")
+            .arg(max_files_per_commit.to_string())
+            .arg("--top")
+            .arg(max_results.to_string())
+            .arg("--mode")
+            .arg(rank.as_str())
+            .arg("--evidence")
+            .arg("3")
+            .arg("--json")
+            .output()
+            .with_context(|| format!("failed to run related-cli at {}", self.bin.display()))?;
+
+        if !output.status.success() {
+            bail!(
+                "related-cli query failed for {}: {}",
+                target,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+
+        serde_json::from_slice(&output.stdout)
+            .with_context(|| "failed to parse related-cli JSON output")
+    }
 }
 
 fn command_available(bin: &Path) -> bool {
@@ -2082,8 +2096,10 @@ fn impact_by_cochange(
 ) -> Result<ImpactData> {
     let seed_files = git_changed_files(workspace)?;
     if !uses_cochange_index(use_index, rank)
+        && let Some(cli) = RelatedCli::detect()
         && let Some(data) = impact_by_related_cli(
             workspace,
+            &cli,
             &seed_files,
             max_commits,
             max_files_per_commit,
@@ -2141,6 +2157,7 @@ fn impact_by_cochange(
 
 fn impact_by_related_cli(
     workspace: &Workspace,
+    cli: &RelatedCli,
     seed_files: &[String],
     max_commits: usize,
     max_files_per_commit: usize,
@@ -2150,14 +2167,11 @@ fn impact_by_related_cli(
     if seed_files.is_empty() {
         return Ok(None);
     }
-    if related_cli_bin().is_none() {
-        return Ok(None);
-    }
 
     let seed_set = seed_files.iter().cloned().collect::<BTreeSet<_>>();
     let mut accumulators = BTreeMap::<String, RelatedCliImpactAccumulator>::new();
     for seed in seed_files {
-        let Some(output) = related_cli_query(
+        let output = cli.query(
             workspace,
             seed,
             max_commits,
@@ -2166,10 +2180,7 @@ fn impact_by_related_cli(
                 .saturating_add(seed_files.len())
                 .max(max_results),
             rank,
-        )?
-        else {
-            return Ok(None);
-        };
+        )?;
         for item in output.related {
             let path = normalize_repo_path(&item.path);
             if seed_set.contains(&path) {
