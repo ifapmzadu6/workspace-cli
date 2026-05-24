@@ -534,6 +534,12 @@ struct StatusData {
     recent_operations_error: Option<String>,
 }
 
+struct StatusRecentOperations {
+    entries: Vec<LogEntry>,
+    omitted_lines: usize,
+    error: Option<String>,
+}
+
 #[derive(Serialize)]
 struct SearchData {
     query: String,
@@ -1096,19 +1102,8 @@ fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
 fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
     let git = git_summary(workspace)?;
     let index_status = cochange_index_status(workspace);
-    let (recent_operations, recent_operations_omitted, recent_operations_error) =
-        match read_log(workspace, 10) {
-            Ok(window) => (window.entries, window.omitted_lines, None),
-            Err(error) => (Vec::new(), 0, Some(format!("{error:#}"))),
-        };
-    let data = StatusData {
-        root: workspace.root.to_string_lossy().into_owned(),
-        git,
-        index_status,
-        recent_operations,
-        recent_operations_omitted,
-        recent_operations_error,
-    };
+    let recent_operations = read_status_recent_operations(workspace, 10);
+    let data = status_data(workspace, git, index_status, recent_operations);
     let observation = status_observation(data);
 
     append_observation_log(
@@ -1728,6 +1723,37 @@ fn map_observation(map: WorkspaceMap) -> Observation<WorkspaceMap> {
         evidence,
         truncated,
         next_observations,
+    }
+}
+
+fn read_status_recent_operations(workspace: &Workspace, limit: usize) -> StatusRecentOperations {
+    match read_log(workspace, limit) {
+        Ok(window) => StatusRecentOperations {
+            entries: window.entries,
+            omitted_lines: window.omitted_lines,
+            error: None,
+        },
+        Err(error) => StatusRecentOperations {
+            entries: vec![],
+            omitted_lines: 0,
+            error: Some(format!("{error:#}")),
+        },
+    }
+}
+
+fn status_data(
+    workspace: &Workspace,
+    git: GitSummary,
+    index_status: IndexStatusData,
+    recent_operations: StatusRecentOperations,
+) -> StatusData {
+    StatusData {
+        root: workspace.root.to_string_lossy().into_owned(),
+        git,
+        index_status,
+        recent_operations: recent_operations.entries,
+        recent_operations_omitted: recent_operations.omitted_lines,
+        recent_operations_error: recent_operations.error,
     }
 }
 
@@ -6979,6 +7005,50 @@ rename to new name.txt
         assert_eq!(
             status_summary(&data, status_truncated(&data)),
             "not a git repository (status truncated)"
+        );
+    }
+
+    #[test]
+    fn status_data_helpers_preserve_recent_operation_state() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: true,
+        };
+        let recent = StatusRecentOperations {
+            entries: vec![LogEntry {
+                id: "op-1".to_string(),
+                timestamp_unix_ms: 1,
+                kind: LOG_KIND_OBSERVE.to_string(),
+                op: LOG_OP_STATUS.to_string(),
+                scope: ".".to_string(),
+                summary: "entry".to_string(),
+                transaction_id: None,
+            }],
+            omitted_lines: 2,
+            error: None,
+        };
+
+        let data = status_data(
+            &workspace,
+            test_git_summary(true),
+            test_index_status_data(INDEX_STATUS_FRESH),
+            recent,
+        );
+        assert_eq!(data.root, temp.path().to_string_lossy().into_owned());
+        assert_eq!(data.recent_operations.len(), 1);
+        assert_eq!(data.recent_operations_omitted, 2);
+        assert!(data.recent_operations_error.is_none());
+
+        fs::create_dir_all(temp.path().join(LOG_FILE)).expect("log path directory should exist");
+        let recent = read_status_recent_operations(&workspace, 10);
+        assert!(recent.entries.is_empty());
+        assert_eq!(recent.omitted_lines, 0);
+        assert!(
+            recent
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("not a file"))
         );
     }
 
