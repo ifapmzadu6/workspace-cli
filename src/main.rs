@@ -1123,22 +1123,7 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
         matches,
     };
     let truncated = data.total_matches > data.matches.len() || data.truncated_match_texts > 0;
-    let mut summary = if data.total_matches > data.matches.len() {
-        format!(
-            "{} match(es) for {:?}, showing {}",
-            data.total_matches,
-            data.query,
-            data.matches.len()
-        )
-    } else {
-        format!("{} match(es) for {:?}", data.total_matches, data.query)
-    };
-    if data.truncated_match_texts > 0 {
-        summary.push_str(&format!(
-            ", truncated {} match text(s)",
-            data.truncated_match_texts
-        ));
-    }
+    let summary = search_summary(&data);
     let next_observations = search_next_observations(&data.matches);
     let observation = Observation {
         kind: "workspace_search".to_string(),
@@ -1829,6 +1814,26 @@ fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
         .take(MAX_NEXT_OBSERVATIONS)
         .map(|item| workspace_read_lines_command(&item.path, item.line, item.line))
         .collect()
+}
+
+fn search_summary(data: &SearchData) -> String {
+    let mut summary = if data.total_matches > data.matches.len() {
+        format!(
+            "{} match(es) for {:?}, showing {}",
+            data.total_matches,
+            data.query,
+            data.matches.len()
+        )
+    } else {
+        format!("{} match(es) for {:?}", data.total_matches, data.query)
+    };
+    if data.truncated_match_texts > 0 {
+        summary.push_str(&format!(
+            ", truncated {} match text(s)",
+            data.truncated_match_texts
+        ));
+    }
+    summary
 }
 
 fn transaction_patch_path(workspace: &Workspace, transaction_id: &str) -> Result<PathBuf> {
@@ -5990,6 +5995,40 @@ rename to new name.txt
         assert_eq!(next.len(), MAX_NEXT_OBSERVATIONS);
         assert_eq!(next[0], "workspace read file_00.txt --lines 1:1");
         assert_eq!(next[4], "workspace read file_04.txt --lines 5:5");
+    }
+
+    #[test]
+    fn search_summary_reports_truncated_results_and_text() {
+        let data = SearchData {
+            query: "needle".to_string(),
+            total_matches: 3,
+            truncated_match_texts: 2,
+            matches: vec![SearchMatch {
+                path: "a.txt".to_string(),
+                line: 1,
+                column: 1,
+                text: "needle".to_string(),
+            }],
+        };
+
+        assert_eq!(
+            search_summary(&data),
+            "3 match(es) for \"needle\", showing 1, truncated 2 match text(s)"
+        );
+
+        let data = SearchData {
+            query: "needle".to_string(),
+            total_matches: 1,
+            truncated_match_texts: 0,
+            matches: vec![SearchMatch {
+                path: "a.txt".to_string(),
+                line: 1,
+                column: 1,
+                text: "needle".to_string(),
+            }],
+        };
+
+        assert_eq!(search_summary(&data), "1 match(es) for \"needle\"");
     }
 
     #[test]
