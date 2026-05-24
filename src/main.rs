@@ -2456,10 +2456,7 @@ fn cochange_index_from_commits(
             *file_commit_counts.entry(file.clone()).or_default() += 1;
         }
 
-        let file_count = files.len().max(2);
-        let recency_weight = 1.0 / (1.0 + rank as f64 / 50.0);
-        let size_weight = 1.0 / (file_count as f64 + 1.0).ln();
-        let weight = recency_weight * size_weight;
+        let weight = cochange_commit_weight(rank, files.len());
 
         for i in 0..files.len() {
             for j in (i + 1)..files.len() {
@@ -3200,10 +3197,7 @@ fn rank_cochanges(
             continue;
         };
 
-        let file_count = files.len().max(2);
-        let recency_weight = 1.0 / (1.0 + rank as f64 / 50.0);
-        let size_weight = 1.0 / (file_count as f64 + 1.0).ln();
-        let weight = recency_weight * size_weight;
+        let weight = cochange_commit_weight(rank, files.len());
 
         for file in files {
             if file == target {
@@ -3400,11 +3394,8 @@ fn rank_cochange_impact(
             .iter()
             .filter(|file| seed_files.contains(*file))
             .count();
-        let file_count = files.len().max(2);
-        let recency_weight = 1.0 / (1.0 + rank as f64 / 50.0);
-        let size_weight = 1.0 / (file_count as f64 + 1.0).ln();
-        let seed_weight = 1.0 + (matched_seed_count.saturating_sub(1) as f64 * 0.25);
-        let weight = recency_weight * size_weight * seed_weight;
+        let weight =
+            cochange_commit_weight(rank, files.len()) * impact_seed_weight(matched_seed_count);
         let matched_seeds = files
             .iter()
             .filter(|file| seed_files.contains(*file))
@@ -3863,6 +3854,16 @@ fn push_unique_sample_commit(sample_commits: &mut Vec<String>, commit: &str) -> 
         sample_commits.push(commit.to_string());
     }
     true
+}
+
+fn cochange_commit_weight(rank: usize, file_count: usize) -> f64 {
+    let recency_weight = 1.0 / (1.0 + rank as f64 / 50.0);
+    let size_weight = 1.0 / (file_count.max(2) as f64 + 1.0).ln();
+    recency_weight * size_weight
+}
+
+fn impact_seed_weight(matched_seed_count: usize) -> f64 {
+    1.0 + (matched_seed_count.saturating_sub(1) as f64 * 0.25)
 }
 
 fn round3(value: f64) -> f64 {
@@ -6844,6 +6845,17 @@ src/b.rs
         assert_eq!(unique_samples, vec!["commit-a"]);
         assert!(push_unique_sample_commit(&mut unique_samples, "commit-b"));
         assert_eq!(unique_samples, vec!["commit-a", "commit-b"]);
+    }
+
+    #[test]
+    fn ranking_weight_helpers_preserve_expected_scoring() {
+        assert_eq!(round3(cochange_commit_weight(0, 2)), 0.91);
+        assert_eq!(round3(cochange_commit_weight(50, 4)), 0.311);
+        assert_eq!(round3(cochange_commit_weight(0, 1)), 0.91);
+
+        assert_eq!(impact_seed_weight(0), 1.0);
+        assert_eq!(impact_seed_weight(1), 1.0);
+        assert_eq!(impact_seed_weight(3), 1.5);
     }
 
     #[test]
