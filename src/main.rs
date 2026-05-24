@@ -680,6 +680,12 @@ struct DiffData {
     patch: Option<String>,
 }
 
+struct ObservedDiff {
+    data: DiffData,
+    summary_truncated: bool,
+    patch_truncated: bool,
+}
+
 #[derive(Serialize)]
 struct PatchData {
     transaction_id: String,
@@ -1265,45 +1271,8 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
 }
 
 fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
-    let (data, summary_truncated, patch_truncated) = if workspace.is_git_repo {
-        let summary_output =
-            git_observable_diff_output_bounded(workspace, ["--stat"], MAX_DIFF_SUMMARY)?;
-        let summary_truncated = summary_output.truncated;
-        let summary = summary_output.text;
-        let diff_files = git_observable_diff_name_only(workspace, MAX_CHANGED_FILES)?;
-        let (patch, patch_truncated) = if args.summary {
-            (None, false)
-        } else {
-            let patch = git_observable_diff_output_bounded(workspace, [], MAX_DIFF_PATCH)?;
-            (Some(patch.text), patch.truncated)
-        };
-        (
-            DiffData {
-                is_repo: true,
-                summary,
-                file_count: diff_files.total_files,
-                files: diff_files.files,
-                omitted_files: diff_files.omitted_files,
-                patch,
-            },
-            summary_truncated,
-            patch_truncated,
-        )
-    } else {
-        (
-            DiffData {
-                is_repo: false,
-                summary: SUMMARY_NOT_GIT_REPOSITORY.to_string(),
-                file_count: 0,
-                files: vec![],
-                omitted_files: 0,
-                patch: None,
-            },
-            false,
-            false,
-        )
-    };
-    let observation = diff_observation(workspace, data, summary_truncated, patch_truncated);
+    let diff = observed_diff(workspace, args.summary)?;
+    let observation = diff_observation(workspace, diff);
 
     append_observation_log(
         workspace,
@@ -1689,15 +1658,58 @@ fn read_followup_observations(path: &str) -> Vec<String> {
     ]
 }
 
-fn diff_observation(
-    workspace: &Workspace,
-    data: DiffData,
-    summary_truncated: bool,
-    patch_truncated: bool,
-) -> Observation<DiffData> {
-    let summary = diff_summary(&data, summary_truncated, patch_truncated);
+fn observed_diff(workspace: &Workspace, summary_only: bool) -> Result<ObservedDiff> {
+    if workspace.is_git_repo {
+        git_observed_diff(workspace, summary_only)
+    } else {
+        Ok(non_repo_observed_diff())
+    }
+}
+
+fn git_observed_diff(workspace: &Workspace, summary_only: bool) -> Result<ObservedDiff> {
+    let summary_output =
+        git_observable_diff_output_bounded(workspace, ["--stat"], MAX_DIFF_SUMMARY)?;
+    let diff_files = git_observable_diff_name_only(workspace, MAX_CHANGED_FILES)?;
+    let (patch, patch_truncated) = if summary_only {
+        (None, false)
+    } else {
+        let patch = git_observable_diff_output_bounded(workspace, [], MAX_DIFF_PATCH)?;
+        (Some(patch.text), patch.truncated)
+    };
+    Ok(ObservedDiff {
+        data: DiffData {
+            is_repo: true,
+            summary: summary_output.text,
+            file_count: diff_files.total_files,
+            files: diff_files.files,
+            omitted_files: diff_files.omitted_files,
+            patch,
+        },
+        summary_truncated: summary_output.truncated,
+        patch_truncated,
+    })
+}
+
+fn non_repo_observed_diff() -> ObservedDiff {
+    ObservedDiff {
+        data: DiffData {
+            is_repo: false,
+            summary: SUMMARY_NOT_GIT_REPOSITORY.to_string(),
+            file_count: 0,
+            files: vec![],
+            omitted_files: 0,
+            patch: None,
+        },
+        summary_truncated: false,
+        patch_truncated: false,
+    }
+}
+
+fn diff_observation(workspace: &Workspace, diff: ObservedDiff) -> Observation<DiffData> {
+    let data = diff.data;
+    let summary = diff_summary(&data, diff.summary_truncated, diff.patch_truncated);
     let evidence = changed_file_evidence(&data.files, EVIDENCE_REASON_GIT_DIFF_CHANGED_FILE);
-    let truncated = diff_truncated(&data, summary_truncated, patch_truncated);
+    let truncated = diff_truncated(&data, diff.summary_truncated, diff.patch_truncated);
     let next_observations =
         read_next_observations(workspace, data.files.iter().map(String::as_str));
     Observation {
@@ -7565,8 +7577,13 @@ rename to new name.txt
             omitted_files: 1,
             patch: None,
         };
+        let diff = ObservedDiff {
+            data,
+            summary_truncated: false,
+            patch_truncated: false,
+        };
 
-        let observation = diff_observation(&workspace, data, false, false);
+        let observation = diff_observation(&workspace, diff);
         assert_eq!(observation.kind, WORKSPACE_DIFF_KIND);
         assert_eq!(
             observation.scope,
@@ -7583,6 +7600,20 @@ rename to new name.txt
             observation.next_observations,
             vec!["workspace read src/main.rs"]
         );
+    }
+
+    #[test]
+    fn non_repo_observed_diff_preserves_contract() {
+        let diff = non_repo_observed_diff();
+
+        assert!(!diff.data.is_repo);
+        assert_eq!(diff.data.summary, SUMMARY_NOT_GIT_REPOSITORY);
+        assert_eq!(diff.data.file_count, 0);
+        assert!(diff.data.files.is_empty());
+        assert_eq!(diff.data.omitted_files, 0);
+        assert!(diff.data.patch.is_none());
+        assert!(!diff.summary_truncated);
+        assert!(!diff.patch_truncated);
     }
 
     #[test]
