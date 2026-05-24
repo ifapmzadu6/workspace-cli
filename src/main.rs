@@ -1250,23 +1250,14 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
             args.use_index,
         )?
     } else {
-        RelatedData {
-            target: target.clone(),
-            method: args.by.as_str().to_string(),
-            ranking: args.rank.as_str().to_string(),
-            relationship_source: relationship_source(uses_cochange_index(
-                args.use_index,
-                args.rank,
-            ))
-            .to_string(),
-            is_repo: false,
-            commits_scanned: 0,
-            commits_matched: 0,
-            ignored_large_commits: 0,
-            max_commits: args.max_commits,
-            max_files_per_commit: args.max_files_per_commit,
-            related: vec![],
-        }
+        related_data_for_non_repo(
+            &target,
+            &args.by,
+            args.rank,
+            args.use_index,
+            args.max_commits,
+            args.max_files_per_commit,
+        )
     };
     let summary = related_summary(&data);
     let evidence = related_evidence(&data);
@@ -1303,26 +1294,13 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
             args.use_index,
         )?
     } else {
-        ImpactData {
-            source: IMPACT_SOURCE_DIFF.to_string(),
-            method: args.by.as_str().to_string(),
-            ranking: args.rank.as_str().to_string(),
-            relationship_source: relationship_source(uses_cochange_index(
-                args.use_index,
-                args.rank,
-            ))
-            .to_string(),
-            is_repo: false,
-            seed_files: vec![],
-            seed_file_count: 0,
-            omitted_seed_files: 0,
-            commits_scanned: 0,
-            commits_matched: 0,
-            ignored_large_commits: 0,
-            max_commits: args.max_commits,
-            max_files_per_commit: args.max_files_per_commit,
-            impacted: vec![],
-        }
+        impact_data_for_non_repo(
+            &args.by,
+            args.rank,
+            args.use_index,
+            args.max_commits,
+            args.max_files_per_commit,
+        )
     };
     let seed_files_truncated = impact_truncated(&data);
     let summary = impact_summary(&data);
@@ -1787,6 +1765,54 @@ fn index_cochange_next_observations() -> Vec<String> {
         WORKSPACE_RELATED_INDEX_COMMAND,
         WORKSPACE_IMPACT_INDEX_COMMAND,
     ])
+}
+
+fn related_data_for_non_repo(
+    target: &str,
+    method: &RelatedMethod,
+    rank: RankingMethod,
+    use_index: bool,
+    max_commits: usize,
+    max_files_per_commit: usize,
+) -> RelatedData {
+    RelatedData {
+        target: target.to_string(),
+        method: method.as_str().to_string(),
+        ranking: rank.as_str().to_string(),
+        relationship_source: relationship_source(uses_cochange_index(use_index, rank)).to_string(),
+        is_repo: false,
+        commits_scanned: 0,
+        commits_matched: 0,
+        ignored_large_commits: 0,
+        max_commits,
+        max_files_per_commit,
+        related: vec![],
+    }
+}
+
+fn impact_data_for_non_repo(
+    method: &RelatedMethod,
+    rank: RankingMethod,
+    use_index: bool,
+    max_commits: usize,
+    max_files_per_commit: usize,
+) -> ImpactData {
+    ImpactData {
+        source: IMPACT_SOURCE_DIFF.to_string(),
+        method: method.as_str().to_string(),
+        ranking: rank.as_str().to_string(),
+        relationship_source: relationship_source(uses_cochange_index(use_index, rank)).to_string(),
+        is_repo: false,
+        seed_files: vec![],
+        seed_file_count: 0,
+        omitted_seed_files: 0,
+        commits_scanned: 0,
+        commits_matched: 0,
+        ignored_large_commits: 0,
+        max_commits,
+        max_files_per_commit,
+        impacted: vec![],
+    }
 }
 
 fn patch_followup_observations(transaction_id: &str) -> Vec<String> {
@@ -6338,6 +6364,46 @@ rename to new name.txt
             ],
             ["fresh", "stale", "missing", "invalid", "not_git_repo"]
         );
+    }
+
+    #[test]
+    fn non_repo_relationship_data_uses_requested_labels() {
+        let related = related_data_for_non_repo(
+            "src/main.rs",
+            &RelatedMethod::Cochange,
+            RankingMethod::Direct,
+            false,
+            300,
+            40,
+        );
+        assert_eq!(related.target, "src/main.rs");
+        assert_eq!(related.method, RELATED_METHOD_COCHANGE);
+        assert_eq!(related.ranking, RANK_DIRECT);
+        assert_eq!(related.relationship_source, RELATIONSHIP_SOURCE_GIT_LOG);
+        assert!(!related.is_repo);
+        assert_eq!(related.max_commits, 300);
+        assert_eq!(related.max_files_per_commit, 40);
+        assert!(related.related.is_empty());
+
+        let impact = impact_data_for_non_repo(
+            &RelatedMethod::Cochange,
+            RankingMethod::Pagerank,
+            false,
+            500,
+            80,
+        );
+        assert_eq!(impact.source, IMPACT_SOURCE_DIFF);
+        assert_eq!(impact.method, RELATED_METHOD_COCHANGE);
+        assert_eq!(impact.ranking, RANK_PAGERANK);
+        assert_eq!(
+            impact.relationship_source,
+            RELATIONSHIP_SOURCE_COCHANGE_INDEX
+        );
+        assert!(!impact.is_repo);
+        assert_eq!(impact.seed_file_count, 0);
+        assert_eq!(impact.max_commits, 500);
+        assert_eq!(impact.max_files_per_commit, 80);
+        assert!(impact.impacted.is_empty());
     }
 
     #[test]
