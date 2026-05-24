@@ -1104,7 +1104,7 @@ impl Workspace {
 }
 
 fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
-    let map = build_map(workspace, args.depth, args.include_hidden)?;
+    let map = observed_map(workspace, &args)?;
     let observation = map_observation(map);
 
     append_observation_log(
@@ -1754,6 +1754,10 @@ fn diff_observation(workspace: &Workspace, diff: ObservedDiff) -> Observation<Di
         truncated,
         next_observations,
     }
+}
+
+fn observed_map(workspace: &Workspace, args: &MapArgs) -> Result<WorkspaceMap> {
+    build_map(workspace, args.depth, args.include_hidden)
 }
 
 fn map_observation(map: WorkspaceMap) -> Observation<WorkspaceMap> {
@@ -7286,6 +7290,48 @@ rename to new name.txt
                 "workspace related src/main.rs --by cochange",
                 "workspace run 'cargo test'",
             ]
+        );
+    }
+
+    #[test]
+    fn observed_map_respects_hidden_file_filter() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::create_dir(temp.path().join("src")).expect("src directory should be created");
+        fs::write(temp.path().join("src/main.rs"), "fn main() {}\n")
+            .expect("source file should be written");
+        fs::write(temp.path().join(".hidden.txt"), "hidden\n")
+            .expect("hidden file should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let hidden_excluded = observed_map(
+            &workspace,
+            &MapArgs {
+                json: true,
+                depth: 2,
+                include_hidden: false,
+            },
+        )
+        .expect("map should be observed");
+        let hidden_included = observed_map(
+            &workspace,
+            &MapArgs {
+                json: true,
+                depth: 2,
+                include_hidden: true,
+            },
+        )
+        .expect("map should include hidden files");
+
+        assert_eq!(hidden_excluded.stats.file_count, 1);
+        assert_eq!(hidden_included.stats.file_count, 2);
+        assert!(
+            !hidden_excluded
+                .recent_files
+                .iter()
+                .any(|path| path == ".hidden.txt")
         );
     }
 
