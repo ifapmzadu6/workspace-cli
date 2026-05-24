@@ -670,6 +670,11 @@ struct ReadContent {
     truncated: bool,
 }
 
+struct ObservedRead {
+    data: ReadData,
+    content_truncated: bool,
+}
+
 #[derive(Serialize)]
 struct DiffData {
     is_repo: bool,
@@ -1256,20 +1261,8 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
         .map(parse_line_range)
         .transpose()
         .context("invalid --lines range")?;
-    let line_label = range.map(|(start, end)| format!("{start}:{end}"));
-    let read_content = if let Some((start, end)) = range {
-        read_line_range_bounded(&path, start, end)
-    } else {
-        read_text_prefix_bounded(&path)
-    }
-    .with_context(|| format!("failed to read text file {}", path.display()))?;
-
-    let data = ReadData {
-        path: rel_path.clone(),
-        lines: line_label.clone(),
-        content: read_content.content,
-    };
-    let observation = read_observation(data, read_content.truncated);
+    let read = observed_read(workspace, &path, range)?;
+    let observation = read_observation(read);
 
     append_observation_log(workspace, LOG_OP_READ, &rel_path, &observation.summary);
     output_observation(args.json, &observation, print_read)
@@ -1640,7 +1633,32 @@ fn read_evidence(data: &ReadData) -> Vec<Evidence> {
     }]
 }
 
-fn read_observation(data: ReadData, content_truncated: bool) -> Observation<ReadData> {
+fn observed_read(
+    workspace: &Workspace,
+    path: &Path,
+    range: Option<(usize, usize)>,
+) -> Result<ObservedRead> {
+    let line_label = range.map(|(start, end)| format!("{start}:{end}"));
+    let read_content = if let Some((start, end)) = range {
+        read_line_range_bounded(path, start, end)
+    } else {
+        read_text_prefix_bounded(path)
+    }
+    .with_context(|| format!("failed to read text file {}", path.display()))?;
+
+    Ok(ObservedRead {
+        data: ReadData {
+            path: workspace.relative(path),
+            lines: line_label,
+            content: read_content.content,
+        },
+        content_truncated: read_content.truncated,
+    })
+}
+
+fn read_observation(read: ObservedRead) -> Observation<ReadData> {
+    let data = read.data;
+    let content_truncated = read.content_truncated;
     let summary = read_summary(&data.path, data.lines.as_deref(), content_truncated);
     let evidence = read_evidence(&data);
     let next_observations = read_followup_observations(&data.path);
@@ -6502,19 +6520,22 @@ rename to new name.txt
 
     #[test]
     fn read_observation_helpers_report_requested_content() {
-        let data = ReadData {
-            path: "src/main.rs".to_string(),
-            lines: Some("3:5".to_string()),
-            content: "content".to_string(),
+        let read = ObservedRead {
+            data: ReadData {
+                path: "src/main.rs".to_string(),
+                lines: Some("3:5".to_string()),
+                content: "content".to_string(),
+            },
+            content_truncated: true,
         };
 
-        let evidence = read_evidence(&data);
+        let evidence = read_evidence(&read.data);
         assert_eq!(evidence.len(), 1);
         assert_eq!(evidence[0].path, "src/main.rs");
         assert_eq!(evidence[0].lines.as_deref(), Some("3:5"));
         assert_eq!(evidence[0].reason, EVIDENCE_REASON_REQUESTED_FILE_CONTENT);
 
-        let observation = read_observation(data, true);
+        let observation = read_observation(read);
         assert_eq!(observation.kind, WORKSPACE_READ_KIND);
         assert_eq!(observation.scope, "src/main.rs");
         assert_eq!(
@@ -6539,6 +6560,25 @@ rename to new name.txt
                 "workspace diff --summary"
             ]
         );
+    }
+
+    #[test]
+    fn observed_read_preserves_path_range_and_truncation() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::create_dir(temp.path().join("src")).expect("src directory should be created");
+        let path = temp.path().join("src/main.rs");
+        fs::write(&path, "one\ntwo\nthree\n").expect("source file should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let read = observed_read(&workspace, &path, Some((2, 3))).expect("file should be read");
+
+        assert_eq!(read.data.path, "src/main.rs");
+        assert_eq!(read.data.lines.as_deref(), Some("2:3"));
+        assert_eq!(read.data.content, "two\nthree");
+        assert!(!read.content_truncated);
     }
 
     #[test]
