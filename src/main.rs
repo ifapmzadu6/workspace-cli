@@ -64,6 +64,21 @@ const WORKSPACE_PATCH_KIND: &str = "workspace_patch";
 const WORKSPACE_RUN_KIND: &str = "workspace_run";
 const WORKSPACE_LOG_KIND: &str = "workspace_log";
 const WORKSPACE_ROLLBACK_KIND: &str = "workspace_rollback";
+const LOG_KIND_OBSERVE: &str = "observe";
+const LOG_KIND_CHANGE: &str = "change";
+const LOG_KIND_VERIFY: &str = "verify";
+const LOG_OP_MAP: &str = "map";
+const LOG_OP_STATUS: &str = "status";
+const LOG_OP_SEARCH: &str = "search";
+const LOG_OP_INDEX_STATUS: &str = "index status";
+const LOG_OP_INDEX_COCHANGE: &str = "index cochange";
+const LOG_OP_RELATED: &str = "related";
+const LOG_OP_IMPACT: &str = "impact";
+const LOG_OP_READ: &str = "read";
+const LOG_OP_DIFF: &str = "diff";
+const LOG_OP_PATCH: &str = "patch";
+const LOG_OP_RUN: &str = "run";
+const LOG_OP_ROLLBACK: &str = "rollback";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -1059,7 +1074,12 @@ fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
         next_observations,
     };
 
-    append_observation_log(workspace, "map", &observation.scope, &observation.summary);
+    append_observation_log(
+        workspace,
+        LOG_OP_MAP,
+        &observation.scope,
+        &observation.summary,
+    );
     output_observation(args.json, &observation, print_map)
 }
 
@@ -1093,7 +1113,7 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
 
     append_observation_log(
         workspace,
-        "status",
+        LOG_OP_STATUS,
         &observation.scope,
         &observation.summary,
     );
@@ -1123,7 +1143,7 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
         next_observations,
     };
 
-    append_observation_log(workspace, "search", &args.query, &observation.summary);
+    append_observation_log(workspace, LOG_OP_SEARCH, &args.query, &observation.summary);
     output_observation(args.json, &observation, print_search)
 }
 
@@ -1149,7 +1169,7 @@ fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> 
 
     append_observation_log(
         workspace,
-        "index status",
+        LOG_OP_INDEX_STATUS,
         &observation.scope,
         &observation.summary,
     );
@@ -1196,8 +1216,8 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
 
     append_log(
         workspace,
-        "observe",
-        "index cochange",
+        LOG_KIND_OBSERVE,
+        LOG_OP_INDEX_COCHANGE,
         &observation.scope,
         &observation.summary,
         None,
@@ -1252,7 +1272,7 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
         next_observations,
     };
 
-    append_observation_log(workspace, "related", &target, &observation.summary);
+    append_observation_log(workspace, LOG_OP_RELATED, &target, &observation.summary);
     output_observation(args.json, &observation, print_related)
 }
 
@@ -1311,7 +1331,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
 
     append_observation_log(
         workspace,
-        "impact",
+        LOG_OP_IMPACT,
         &observation.scope,
         &observation.summary,
     );
@@ -1353,7 +1373,7 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
         next_observations,
     };
 
-    append_observation_log(workspace, "read", &rel_path, &observation.summary);
+    append_observation_log(workspace, LOG_OP_READ, &rel_path, &observation.summary);
     output_observation(args.json, &observation, print_read)
 }
 
@@ -1411,7 +1431,12 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
         next_observations,
     };
 
-    append_observation_log(workspace, "diff", &observation.scope, &observation.summary);
+    append_observation_log(
+        workspace,
+        LOG_OP_DIFF,
+        &observation.scope,
+        &observation.summary,
+    );
     output_observation(args.json, &observation, print_diff)
 }
 
@@ -1466,8 +1491,8 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
 
     append_log(
         workspace,
-        "change",
-        "patch",
+        LOG_KIND_CHANGE,
+        LOG_OP_PATCH,
         &observation.scope,
         &args
             .description
@@ -1567,8 +1592,8 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
 
     append_log(
         workspace,
-        "verify",
-        "run",
+        LOG_KIND_VERIFY,
+        LOG_OP_RUN,
         &args.command,
         &observation.summary,
         None,
@@ -1641,8 +1666,8 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
 
     append_log(
         workspace,
-        "change",
-        "rollback",
+        LOG_KIND_CHANGE,
+        LOG_OP_ROLLBACK,
         &args.transaction_id,
         &observation.summary,
         Some(&rollback_transaction_id),
@@ -5270,7 +5295,7 @@ fn append_log(
 }
 
 fn append_observation_log(workspace: &Workspace, op: &str, scope: &str, summary: &str) {
-    let _ = append_log(workspace, "observe", op, scope, summary, None);
+    let _ = append_log(workspace, LOG_KIND_OBSERVE, op, scope, summary, None);
 }
 
 fn ensure_log_writable(workspace: &Workspace) -> Result<()> {
@@ -6204,6 +6229,44 @@ rename to new name.txt
                 "workspace_run",
                 "workspace_log",
                 "workspace_rollback",
+            ]
+        );
+    }
+
+    #[test]
+    fn log_label_constants_match_operation_log_contract() {
+        assert_eq!(
+            [LOG_KIND_OBSERVE, LOG_KIND_CHANGE, LOG_KIND_VERIFY],
+            ["observe", "change", "verify"]
+        );
+        assert_eq!(
+            [
+                LOG_OP_MAP,
+                LOG_OP_STATUS,
+                LOG_OP_SEARCH,
+                LOG_OP_INDEX_STATUS,
+                LOG_OP_INDEX_COCHANGE,
+                LOG_OP_RELATED,
+                LOG_OP_IMPACT,
+                LOG_OP_READ,
+                LOG_OP_DIFF,
+                LOG_OP_PATCH,
+                LOG_OP_RUN,
+                LOG_OP_ROLLBACK,
+            ],
+            [
+                "map",
+                "status",
+                "search",
+                "index status",
+                "index cochange",
+                "related",
+                "impact",
+                "read",
+                "diff",
+                "patch",
+                "run",
+                "rollback",
             ]
         );
     }
