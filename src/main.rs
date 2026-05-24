@@ -1755,18 +1755,9 @@ fn detect_stack(workspace: &Workspace, files: &[String]) -> Result<StackSummary>
     if file_set.contains("package.json") {
         package_managers.insert("npm".to_string());
         let package_json = workspace.root.join("package.json");
-        if let Ok(text) = fs::read_to_string(package_json) {
-            for (needle, name) in [
-                ("\"next\"", "nextjs"),
-                ("\"react\"", "react"),
-                ("\"vue\"", "vue"),
-                ("\"svelte\"", "svelte"),
-                ("\"vite\"", "vite"),
-                ("\"express\"", "express"),
-            ] {
-                if text.contains(needle) {
-                    frameworks.insert(name.to_string());
-                }
+        if let Ok(detected_frameworks) = detect_package_json_frameworks(&package_json) {
+            for framework in detected_frameworks {
+                frameworks.insert(framework);
             }
         }
     }
@@ -1862,6 +1853,63 @@ fn detect_structure(files: &[String], directories: Vec<String>) -> StructureSumm
     }
 }
 
+fn detect_package_json_frameworks(path: &Path) -> Result<Vec<String>> {
+    let needles = [
+        (b"\"next\"".as_slice(), "nextjs"),
+        (b"\"react\"".as_slice(), "react"),
+        (b"\"vue\"".as_slice(), "vue"),
+        (b"\"svelte\"".as_slice(), "svelte"),
+        (b"\"vite\"".as_slice(), "vite"),
+        (b"\"express\"".as_slice(), "express"),
+    ];
+    let matched = file_contains_needles(path, &needles)?;
+    Ok(needles
+        .iter()
+        .zip(matched)
+        .filter(|(_, matched)| *matched)
+        .map(|((_, name), _)| (*name).to_string())
+        .collect())
+}
+
+fn file_contains_needles(path: &Path, needles: &[(&[u8], &str)]) -> Result<Vec<bool>> {
+    let mut file = fs::File::open(path)?;
+    let mut matched = vec![false; needles.len()];
+    let max_needle_len = needles
+        .iter()
+        .map(|(needle, _)| needle.len())
+        .max()
+        .unwrap_or(0);
+    let mut tail = Vec::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let mut scan = Vec::with_capacity(tail.len() + bytes_read);
+        scan.extend_from_slice(&tail);
+        scan.extend_from_slice(&buffer[..bytes_read]);
+        for (index, (needle, _)) in needles.iter().enumerate() {
+            if !matched[index] && scan.windows(needle.len()).any(|window| window == *needle) {
+                matched[index] = true;
+            }
+        }
+        if max_needle_len > 1 {
+            let tail_len = (max_needle_len - 1).min(scan.len());
+            tail = scan[scan.len() - tail_len..].to_vec();
+        }
+    }
+
+    Ok(matched)
+}
+
+fn read_json_file(path: &Path) -> Result<Value> {
+    let file = fs::File::open(path)?;
+    serde_json::from_reader(BufReader::new(file)).context("failed to parse JSON")
+}
+
 fn detect_commands(workspace: &Workspace, files: &[String]) -> Result<BTreeMap<String, String>> {
     let mut commands = BTreeMap::new();
     let file_set = files.iter().map(String::as_str).collect::<BTreeSet<_>>();
@@ -1874,8 +1922,7 @@ fn detect_commands(workspace: &Workspace, files: &[String]) -> Result<BTreeMap<S
 
     if file_set.contains("package.json") {
         let package_json = workspace.root.join("package.json");
-        if let Ok(text) = fs::read_to_string(package_json)
-            && let Ok(value) = serde_json::from_str::<Value>(&text)
+        if let Ok(value) = read_json_file(&package_json)
             && let Some(scripts) = value.get("scripts").and_then(Value::as_object)
         {
             for (name, value) in scripts {
@@ -5142,6 +5189,19 @@ not json
         assert_eq!(structure.configs, vec!["Cargo.toml", "vite.config.js"]);
         assert_eq!(structure.tests, vec!["tests/a_test.rs", "tests/z_test.rs"]);
         assert_eq!(structure.docs, vec!["README.md", "docs/guide.md"]);
+    }
+
+    #[test]
+    fn finds_package_json_frameworks_across_read_buffer() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let package_json = temp.path().join("package.json");
+        let content = format!("{}\"react\": \"latest\"\n", "x".repeat(8189));
+        fs::write(&package_json, content).expect("package.json should be written");
+
+        let frameworks =
+            detect_package_json_frameworks(&package_json).expect("frameworks should be detected");
+
+        assert_eq!(frameworks, vec!["react"]);
     }
 
     #[test]

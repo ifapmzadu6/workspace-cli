@@ -172,6 +172,41 @@ fn map_and_read_emit_observations() {
 }
 
 #[test]
+fn map_detects_package_json_stack_and_commands() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    write_file(
+        temp.path(),
+        "package.json",
+        r#"{
+  "scripts": {
+    "test": "vitest run",
+    "dev": "vite --host 0.0.0.0"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "vite": "^6.0.0"
+  }
+}
+"#,
+    );
+    write_file(temp.path(), "src/index.js", "console.log('demo');\n");
+
+    let map = run_workspace(temp.path(), &["map", "--json"]);
+    let package_managers = strings_at(&map, &["data", "stack", "package_managers"]);
+    let frameworks = strings_at(&map, &["data", "stack", "frameworks"]);
+
+    assert_eq!(map["kind"], "workspace_map");
+    assert!(package_managers.contains(&"npm".to_string()));
+    assert!(frameworks.contains(&"react".to_string()));
+    assert!(frameworks.contains(&"vite".to_string()));
+    assert_eq!(map["data"]["commands"]["test"], "npm run test # vitest run");
+    assert_eq!(
+        map["data"]["commands"]["dev"],
+        "npm run dev # vite --host 0.0.0.0"
+    );
+}
+
+#[test]
 fn map_does_not_suggest_reading_workspace_root() {
     let temp = TempDir::new().expect("temp dir should be created");
 
