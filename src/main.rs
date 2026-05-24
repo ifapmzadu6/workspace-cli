@@ -33,6 +33,7 @@ const MAX_DIFF_SUMMARY: usize = 12_000;
 const MAX_DIFF_PATCH: usize = 48_000;
 const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
 const MAX_SAMPLE_COMMITS: usize = 5;
+const MAX_LOG_LINE_BYTES: usize = 64_000;
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Parser)]
@@ -585,6 +586,56 @@ struct LogData {
 struct LogWindow {
     entries: Vec<LogEntry>,
     omitted_lines: usize,
+}
+
+struct StoredLogLine {
+    line_number: usize,
+    bytes: Vec<u8>,
+    oversized: bool,
+}
+
+struct PendingLogLine {
+    line_number: usize,
+    bytes: Vec<u8>,
+    oversized: bool,
+    saw_non_whitespace: bool,
+}
+
+impl PendingLogLine {
+    fn new(line_number: usize) -> Self {
+        Self {
+            line_number,
+            bytes: Vec::new(),
+            oversized: false,
+            saw_non_whitespace: false,
+        }
+    }
+
+    fn push_segment(&mut self, segment: &[u8]) {
+        if segment.iter().any(|byte| !byte.is_ascii_whitespace()) {
+            self.saw_non_whitespace = true;
+        }
+
+        let remaining = MAX_LOG_LINE_BYTES.saturating_sub(self.bytes.len());
+        if remaining > 0 {
+            let bytes_to_store = remaining.min(segment.len());
+            self.bytes.extend_from_slice(&segment[..bytes_to_store]);
+        }
+        if segment.len() > remaining {
+            self.oversized = true;
+        }
+    }
+
+    fn into_stored(mut self) -> StoredLogLine {
+        if !self.oversized && self.bytes.last() == Some(&b'\r') {
+            self.bytes.pop();
+        }
+        StoredLogLine {
+            line_number: self.line_number,
+            bytes: self.bytes,
+            oversized: self.oversized,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -4467,24 +4518,50 @@ fn read_log(workspace: &Workspace, limit: usize) -> Result<LogWindow> {
         .with_context(|| format!("failed to parse operation log {}", path.display()))
 }
 
-fn read_log_entries<R: BufRead>(reader: R, limit: usize) -> Result<LogWindow> {
+fn read_log_entries<R: BufRead>(mut reader: R, limit: usize) -> Result<LogWindow> {
     if limit == 0 {
         return Ok(LogWindow::default());
     }
 
     let mut non_empty_lines = 0usize;
     let mut window = VecDeque::new();
-    for (idx, line) in reader.lines().enumerate() {
-        let line =
-            line.with_context(|| format!("failed to read operation log line {}", idx + 1))?;
-        if line.trim().is_empty() {
-            continue;
+    let mut line_number = 1usize;
+    let mut line = PendingLogLine::new(line_number);
+
+    loop {
+        let (bytes_to_consume, reached_line_end) = {
+            let buffer = reader
+                .fill_buf()
+                .with_context(|| format!("failed to read operation log line {line_number}"))?;
+            if buffer.is_empty() {
+                if line.saw_non_whitespace {
+                    push_log_window_line(&mut window, limit, line.into_stored());
+                    non_empty_lines += 1;
+                }
+                break;
+            }
+
+            match buffer.iter().position(|byte| *byte == b'\n') {
+                Some(newline_index) => {
+                    line.push_segment(&buffer[..newline_index]);
+                    (newline_index + 1, true)
+                }
+                None => {
+                    line.push_segment(buffer);
+                    (buffer.len(), false)
+                }
+            }
+        };
+
+        reader.consume(bytes_to_consume);
+        if reached_line_end {
+            if line.saw_non_whitespace {
+                push_log_window_line(&mut window, limit, line.into_stored());
+                non_empty_lines += 1;
+            }
+            line_number += 1;
+            line = PendingLogLine::new(line_number);
         }
-        non_empty_lines += 1;
-        if window.len() == limit {
-            window.pop_front();
-        }
-        window.push_back((idx + 1, line));
     }
 
     let omitted_lines = non_empty_lines.saturating_sub(window.len());
@@ -4494,14 +4571,31 @@ fn read_log_entries<R: BufRead>(reader: R, limit: usize) -> Result<LogWindow> {
     })
 }
 
+fn push_log_window_line(window: &mut VecDeque<StoredLogLine>, limit: usize, line: StoredLogLine) {
+    if window.len() == limit {
+        window.pop_front();
+    }
+    window.push_back(line);
+}
+
 fn parse_log_entries<I>(lines: I) -> Result<Vec<LogEntry>>
 where
-    I: IntoIterator<Item = (usize, String)>,
+    I: IntoIterator<Item = StoredLogLine>,
 {
     lines
         .into_iter()
-        .map(|(line_number, line)| {
-            serde_json::from_str::<LogEntry>(&line)
+        .map(|line| {
+            let line_number = line.line_number;
+            if line.oversized {
+                bail!(
+                    "operation log line {} exceeded {} bytes",
+                    line_number,
+                    MAX_LOG_LINE_BYTES
+                );
+            }
+            let text = String::from_utf8(line.bytes)
+                .with_context(|| format!("operation log line {line_number} is not valid UTF-8"))?;
+            serde_json::from_str::<LogEntry>(&text)
                 .with_context(|| format!("invalid operation log JSON at line {line_number}"))
         })
         .collect()
@@ -5144,6 +5238,35 @@ not json
         assert_eq!(window.omitted_lines, 1);
         assert_eq!(window.entries[0].id, "op-1");
         assert_eq!(window.entries[1].id, "op-2");
+    }
+
+    #[test]
+    fn ignores_oversized_log_lines_outside_requested_window() {
+        let log = format!(
+            "{}\n{{\"id\":\"op-1\",\"timestamp_unix_ms\":1,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"one\",\"transaction_id\":null}}\n{{\"id\":\"op-2\",\"timestamp_unix_ms\":2,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"two\",\"transaction_id\":null}}\n",
+            "x".repeat(MAX_LOG_LINE_BYTES + 1)
+        );
+
+        let window =
+            read_log_entries(std::io::Cursor::new(log), 2).expect("log window should parse");
+
+        assert_eq!(window.entries.len(), 2);
+        assert_eq!(window.omitted_lines, 1);
+        assert_eq!(window.entries[0].id, "op-1");
+        assert_eq!(window.entries[1].id, "op-2");
+    }
+
+    #[test]
+    fn rejects_oversized_log_lines_inside_requested_window() {
+        let log = format!("{}\n", "x".repeat(MAX_LOG_LINE_BYTES + 1));
+
+        let Err(error) = read_log_entries(std::io::Cursor::new(log), 1) else {
+            panic!("oversized log line should fail");
+        };
+        let error = format!("{error:#}");
+
+        assert!(error.contains("line 1"), "unexpected error: {error}");
+        assert!(error.contains("exceeded"), "unexpected error: {error}");
     }
 
     #[test]
