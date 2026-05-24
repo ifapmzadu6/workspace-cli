@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsStr;
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -1027,7 +1027,7 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
     let index_dir = workspace.root.join(INDEX_DIR);
     fs::create_dir_all(&index_dir)
         .with_context(|| format!("failed to create index directory {}", index_dir.display()))?;
-    fs::write(&index_path, serde_json::to_string_pretty(&index)?)
+    write_cochange_index(&index_path, &index)
         .with_context(|| format!("failed to write index {}", index_path.display()))?;
 
     let data = IndexCochangeData {
@@ -2279,10 +2279,25 @@ fn empty_index_status(
 
 fn read_cochange_index(workspace: &Workspace) -> Result<CochangeIndex> {
     let path = workspace.cochange_index_path();
-    let text = fs::read_to_string(&path)
+    read_cochange_index_from_path(&path)
+}
+
+fn read_cochange_index_from_path(path: &Path) -> Result<CochangeIndex> {
+    let file = fs::File::open(path)
         .with_context(|| format!("failed to read co-change index {}", path.display()))?;
-    serde_json::from_str(&text)
+    serde_json::from_reader(BufReader::new(file))
         .with_context(|| format!("failed to parse co-change index {}", path.display()))
+}
+
+fn write_cochange_index(path: &Path, index: &CochangeIndex) -> Result<()> {
+    let file = fs::File::create(path)
+        .with_context(|| format!("failed to create co-change index {}", path.display()))?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, index)
+        .with_context(|| format!("failed to serialize co-change index {}", path.display()))?;
+    writer
+        .flush()
+        .with_context(|| format!("failed to flush co-change index {}", path.display()))
 }
 
 fn impact_by_cochange(
@@ -5297,6 +5312,25 @@ src/b.rs
         assert_eq!(index.commits_indexed, 2);
         assert_eq!(index.file_commit_counts["src/a.rs"], 2);
         assert_eq!(index.edges.len(), 2);
+    }
+
+    #[test]
+    fn cochange_index_round_trips_through_json_file() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let path = temp.path().join("cochange.json");
+        let commits = vec![GitCommitFiles {
+            hash: "aaaaaaaaaaaa".to_string(),
+            files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+        }];
+        let index = cochange_index_from_commits(&commits, 100, 10, Some("head".to_string()));
+
+        write_cochange_index(&path, &index).expect("index should be written");
+        let loaded = read_cochange_index_from_path(&path).expect("index should be read");
+
+        assert_eq!(loaded.version, index.version);
+        assert_eq!(loaded.head, index.head);
+        assert_eq!(loaded.file_commit_counts, index.file_commit_counts);
+        assert_eq!(loaded.edges.len(), index.edges.len());
     }
 
     #[test]
