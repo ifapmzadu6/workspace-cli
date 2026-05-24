@@ -1391,13 +1391,7 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
         lines: line_label.clone(),
         content: read_content.content,
     };
-    let mut summary = match &data.lines {
-        Some(lines) => format!("read {} lines {}", data.path, lines),
-        None => format!("read {}", data.path),
-    };
-    if read_content.truncated {
-        summary.push_str(" (truncated)");
-    }
+    let summary = read_summary(&data.path, data.lines.as_deref(), read_content.truncated);
     let observation = Observation {
         kind: "workspace_read".to_string(),
         scope: data.path.clone(),
@@ -1851,6 +1845,17 @@ fn run_summary(exit_code: Option<i32>, duration_ms: u128, truncated: bool) -> St
     let mut summary = format!("command exited with {status} in {duration_ms}ms");
     if truncated {
         summary.push_str(" (output truncated)");
+    }
+    summary
+}
+
+fn read_summary(path: &str, lines: Option<&str>, truncated: bool) -> String {
+    let mut summary = match lines {
+        Some(lines) => format!("read {path} lines {lines}"),
+        None => format!("read {path}"),
+    };
+    if truncated {
+        summary.push_str(" (truncated)");
     }
     summary
 }
@@ -6111,6 +6116,19 @@ rename to new name.txt
         assert_eq!(
             run_summary(None, 9, false),
             "command exited with signal in 9ms"
+        );
+    }
+
+    #[test]
+    fn read_summary_reports_lines_and_truncation() {
+        assert_eq!(read_summary("src/main.rs", None, false), "read src/main.rs");
+        assert_eq!(
+            read_summary("src/main.rs", Some("3:5"), false),
+            "read src/main.rs lines 3:5"
+        );
+        assert_eq!(
+            read_summary("src/main.rs", Some("3:5"), true),
+            "read src/main.rs lines 3:5 (truncated)"
         );
     }
 
