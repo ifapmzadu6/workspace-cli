@@ -1643,26 +1643,14 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
         .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("failed to run command {:?}", args.command))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture command stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture command stderr"))?;
-    let stdout_reader = std::thread::spawn(move || read_captured_output(stdout));
-    let stderr_reader = std::thread::spawn(move || read_captured_output(stderr));
+    let stdout_reader = capture_child_stdout(&mut child, "command stdout", MAX_CAPTURED_OUTPUT)?;
+    let stderr_reader = capture_child_stderr(&mut child, "command stderr", MAX_CAPTURED_OUTPUT)?;
     let status = child
         .wait()
         .with_context(|| format!("failed to wait for command {:?}", args.command))?;
     let duration_ms = start.elapsed().as_millis();
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| anyhow!("stdout reader thread panicked"))??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("stderr reader thread panicked"))??;
+    let stdout = join_captured_output_reader(stdout_reader, "stdout")?;
+    let stderr = join_captured_output_reader(stderr_reader, "stderr")?;
     let truncated = stdout.truncated || stderr.truncated;
     let data = RunData {
         command: args.command.clone(),
@@ -4976,10 +4964,6 @@ fn shell_command(command: &str) -> Command {
         cmd.args(["-c", command]);
         cmd
     }
-}
-
-fn read_captured_output<R: Read>(mut reader: R) -> Result<CapturedOutput> {
-    read_captured_output_with_limit(&mut reader, MAX_CAPTURED_OUTPUT)
 }
 
 fn wait_for_captured_command(
