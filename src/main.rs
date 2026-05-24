@@ -1056,15 +1056,6 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
             Ok(window) => (window.entries, window.omitted_lines, None),
             Err(error) => (Vec::new(), 0, Some(format!("{error:#}"))),
         };
-    let recent_operations_truncated = recent_operations_omitted > 0;
-    let truncated = git.omitted_files() || recent_operations_truncated;
-    let log_note = if recent_operations_error.is_some() {
-        ", operation log unreadable"
-    } else if recent_operations_truncated {
-        ", recent operations truncated"
-    } else {
-        ""
-    };
     let data = StatusData {
         root: workspace.root.to_string_lossy().into_owned(),
         git,
@@ -1073,21 +1064,8 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
         recent_operations_omitted,
         recent_operations_error,
     };
-    let mut summary = if data.git.is_repo {
-        format!(
-            "branch {}, {} dirty file(s), {} untracked file(s), index {}{}",
-            data.git.branch.as_deref().unwrap_or("unknown"),
-            data.git.dirty_file_count,
-            data.git.untracked_file_count,
-            data.index_status.status,
-            log_note
-        )
-    } else {
-        "not a git repository".to_string()
-    };
-    if truncated {
-        summary.push_str(" (status truncated)");
-    }
+    let truncated = status_truncated(&data);
+    let summary = status_summary(&data, truncated);
     let observation = Observation {
         kind: "workspace_status".to_string(),
         scope: data.root.clone(),
@@ -1148,14 +1126,7 @@ fn cmd_index(workspace: &Workspace, args: IndexArgs) -> Result<()> {
 
 fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> {
     let data = cochange_index_status(workspace);
-    let summary = match data.status.as_str() {
-        "fresh" => "co-change index is fresh".to_string(),
-        "stale" => "co-change index is stale".to_string(),
-        "missing" => "co-change index is missing".to_string(),
-        "invalid" => "co-change index is invalid".to_string(),
-        "not_git_repo" => "not a git repository".to_string(),
-        _ => data.status.clone(),
-    };
+    let summary = index_status_summary(&data);
     let observation = Observation {
         kind: "workspace_index_status".to_string(),
         scope: data.path.clone(),
@@ -1206,10 +1177,7 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
         file_count: index.file_commit_counts.len(),
         edge_count: index.edges.len(),
     };
-    let summary = format!(
-        "indexed {} co-change edge(s) from {} commit(s)",
-        data.edge_count, data.commits_indexed
-    );
+    let summary = index_cochange_summary(&data);
     let observation = Observation {
         kind: "workspace_index_cochange".to_string(),
         scope: data.path.clone(),
@@ -1755,6 +1723,57 @@ fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
         .take(MAX_NEXT_OBSERVATIONS)
         .map(|item| workspace_read_lines_command(&item.path, item.line, item.line))
         .collect()
+}
+
+fn status_truncated(data: &StatusData) -> bool {
+    data.git.omitted_files() || data.recent_operations_omitted > 0
+}
+
+fn status_summary(data: &StatusData, truncated: bool) -> String {
+    let mut summary = if data.git.is_repo {
+        format!(
+            "branch {}, {} dirty file(s), {} untracked file(s), index {}{}",
+            data.git.branch.as_deref().unwrap_or("unknown"),
+            data.git.dirty_file_count,
+            data.git.untracked_file_count,
+            data.index_status.status,
+            status_log_note(data)
+        )
+    } else {
+        "not a git repository".to_string()
+    };
+    if truncated {
+        summary.push_str(" (status truncated)");
+    }
+    summary
+}
+
+fn status_log_note(data: &StatusData) -> &'static str {
+    if data.recent_operations_error.is_some() {
+        ", operation log unreadable"
+    } else if data.recent_operations_omitted > 0 {
+        ", recent operations truncated"
+    } else {
+        ""
+    }
+}
+
+fn index_status_summary(data: &IndexStatusData) -> String {
+    match data.status.as_str() {
+        "fresh" => "co-change index is fresh".to_string(),
+        "stale" => "co-change index is stale".to_string(),
+        "missing" => "co-change index is missing".to_string(),
+        "invalid" => "co-change index is invalid".to_string(),
+        "not_git_repo" => "not a git repository".to_string(),
+        _ => data.status.clone(),
+    }
+}
+
+fn index_cochange_summary(data: &IndexCochangeData) -> String {
+    format!(
+        "indexed {} co-change edge(s) from {} commit(s)",
+        data.edge_count, data.commits_indexed
+    )
 }
 
 fn related_summary(data: &RelatedData) -> String {
@@ -6032,6 +6051,124 @@ rename to new name.txt
         assert_eq!(next.len(), MAX_NEXT_OBSERVATIONS);
         assert_eq!(next[0], "workspace read file_00.txt --lines 1:1");
         assert_eq!(next[4], "workspace read file_04.txt --lines 5:5");
+    }
+
+    fn test_git_summary(is_repo: bool) -> GitSummary {
+        GitSummary {
+            is_repo,
+            branch: Some("main".to_string()),
+            dirty_file_count: 2,
+            untracked_file_count: 1,
+            dirty_files: vec![],
+            untracked_files: vec![],
+            omitted_dirty_files: 0,
+            omitted_untracked_files: 0,
+        }
+    }
+
+    fn test_index_status_data(status: &str) -> IndexStatusData {
+        IndexStatusData {
+            is_repo: status != "not_git_repo",
+            path: ".workspace/index/cochange.json".to_string(),
+            exists: status != "missing",
+            readable: status != "invalid",
+            status: status.to_string(),
+            fresh: status == "fresh",
+            current_head: Some("abc123".to_string()),
+            index_head: Some("abc123".to_string()),
+            generated_at_unix_ms: Some(1),
+            max_commits: Some(500),
+            max_files_per_commit: Some(100),
+            commits_scanned: Some(5),
+            commits_indexed: Some(4),
+            ignored_large_commits: Some(1),
+            file_count: Some(3),
+            edge_count: Some(2),
+            error: None,
+        }
+    }
+
+    fn test_status_data() -> StatusData {
+        StatusData {
+            root: "/repo".to_string(),
+            git: test_git_summary(true),
+            index_status: test_index_status_data("fresh"),
+            recent_operations: vec![],
+            recent_operations_omitted: 0,
+            recent_operations_error: None,
+        }
+    }
+
+    #[test]
+    fn status_summary_reports_log_notes_and_truncation() {
+        let mut data = test_status_data();
+        assert!(!status_truncated(&data));
+        assert_eq!(
+            status_summary(&data, status_truncated(&data)),
+            "branch main, 2 dirty file(s), 1 untracked file(s), index fresh"
+        );
+
+        data.recent_operations_omitted = 3;
+        assert!(status_truncated(&data));
+        assert_eq!(
+            status_summary(&data, status_truncated(&data)),
+            "branch main, 2 dirty file(s), 1 untracked file(s), index fresh, recent operations truncated (status truncated)"
+        );
+
+        data.recent_operations_omitted = 0;
+        data.recent_operations_error = Some("bad log".to_string());
+        assert!(!status_truncated(&data));
+        assert_eq!(
+            status_summary(&data, status_truncated(&data)),
+            "branch main, 2 dirty file(s), 1 untracked file(s), index fresh, operation log unreadable"
+        );
+
+        data.git.is_repo = false;
+        data.recent_operations_error = None;
+        data.recent_operations_omitted = 2;
+        assert_eq!(
+            status_summary(&data, status_truncated(&data)),
+            "not a git repository (status truncated)"
+        );
+    }
+
+    #[test]
+    fn index_status_summary_reports_known_statuses() {
+        for (status, expected) in [
+            ("fresh", "co-change index is fresh"),
+            ("stale", "co-change index is stale"),
+            ("missing", "co-change index is missing"),
+            ("invalid", "co-change index is invalid"),
+            ("not_git_repo", "not a git repository"),
+            ("custom", "custom"),
+        ] {
+            assert_eq!(
+                index_status_summary(&test_index_status_data(status)),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn index_cochange_summary_reports_edges_and_commits() {
+        let data = IndexCochangeData {
+            path: ".workspace/index/cochange.json".to_string(),
+            version: 1,
+            generated_at_unix_ms: 1,
+            head: Some("abc123".to_string()),
+            max_commits: 500,
+            max_files_per_commit: 100,
+            commits_scanned: 5,
+            commits_indexed: 4,
+            ignored_large_commits: 1,
+            file_count: 3,
+            edge_count: 2,
+        };
+
+        assert_eq!(
+            index_cochange_summary(&data),
+            "indexed 2 co-change edge(s) from 4 commit(s)"
+        );
     }
 
     #[test]
