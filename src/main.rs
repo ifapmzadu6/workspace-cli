@@ -3194,19 +3194,13 @@ fn rank_cochanges(
             continue;
         }
 
-        let files = commit
-            .files
-            .iter()
-            .map(|file| normalize_repo_path(file))
-            .filter(|file| !file.is_empty())
-            .collect::<BTreeSet<_>>();
-
         commits_matched += 1;
 
-        if files.len() > max_files_per_commit.max(1) {
+        let Some(files) = bounded_normalized_commit_files(commit, max_files_per_commit.max(1))
+        else {
             ignored_large_commits += 1;
             continue;
-        }
+        };
 
         let file_count = files.len().max(2);
         let recency_weight = 1.0 / (1.0 + rank as f64 / 50.0);
@@ -3255,6 +3249,24 @@ fn rank_cochanges(
         commits_matched,
         ignored_large_commits,
     }
+}
+
+fn bounded_normalized_commit_files(
+    commit: &GitCommitFiles,
+    max_files_per_commit: usize,
+) -> Option<BTreeSet<String>> {
+    let mut files = BTreeSet::new();
+    for file in &commit.files {
+        let file = normalize_repo_path(file);
+        if file.is_empty() {
+            continue;
+        }
+        files.insert(file);
+        if files.len() > max_files_per_commit {
+            return None;
+        }
+    }
+    Some(files)
 }
 
 fn commit_mentions_normalized_path(commit: &GitCommitFiles, target: &str) -> bool {
@@ -6365,6 +6377,25 @@ src/b.rs
         assert_eq!(ranking.commits_matched, 1);
         assert_eq!(ranking.ignored_large_commits, 1);
         assert!(ranking.related.is_empty());
+    }
+
+    #[test]
+    fn cochange_ranking_counts_unique_files_for_broad_commits() {
+        let commits = vec![GitCommitFiles {
+            hash: "aaaaaaaaaaaa".to_string(),
+            files: vec![
+                "src/a.rs".to_string(),
+                "src/b.rs".to_string(),
+                "src/b.rs".to_string(),
+            ],
+        }];
+
+        let ranking = rank_cochanges(&commits, "src/a.rs", 2, 10);
+
+        assert_eq!(ranking.commits_matched, 1);
+        assert_eq!(ranking.ignored_large_commits, 0);
+        assert_eq!(ranking.related.len(), 1);
+        assert_eq!(ranking.related[0].path, "src/b.rs");
     }
 
     #[test]
