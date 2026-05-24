@@ -269,6 +269,10 @@ recent operations
 running commands
 ```
 
+Large dirty and untracked file lists are bounded in JSON output. The total
+counts remain available as `dirty_file_count` and `untracked_file_count`, with
+omitted counts reported separately.
+
 ### `workspace search`
 
 Searches within the workspace. The initial implementation is ripgrep-based.

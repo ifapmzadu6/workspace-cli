@@ -488,6 +488,24 @@ fn impact_decodes_git_quoted_seed_paths() {
     assert!(impacted_paths.contains(&"src/neighbor.rs".to_string()));
 }
 
+#[test]
+fn impact_expands_untracked_directories_to_files() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "README.md", "initial\n");
+    commit_all(root, "initial");
+    write_file(root, "new/nested/file.rs", "new\n");
+
+    let impact = run_workspace(root, &["impact", "--diff", "--by", "cochange", "--json"]);
+    let seed_files = strings_at(&impact, &["data", "seed_files"]);
+
+    assert_eq!(impact["kind"], "workspace_impact");
+    assert!(seed_files.contains(&"new/nested/file.rs".to_string()));
+    assert!(!seed_files.contains(&"new".to_string()));
+    assert!(!seed_files.contains(&"new/nested".to_string()));
+}
+
 #[cfg(unix)]
 #[test]
 fn related_can_delegate_to_related_cli() {
@@ -928,6 +946,51 @@ fn status_decodes_git_quoted_paths() {
         dirty.contains(&path.to_string()),
         "dirty files should decode git quoting: {dirty:?}"
     );
+}
+
+#[test]
+fn status_truncates_large_git_file_lists() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    for index in 0..90 {
+        write_file(root, &format!("tracked/file_{index:03}.txt"), "old\n");
+    }
+    commit_all(root, "initial tracked files");
+    for index in 0..90 {
+        write_file(root, &format!("tracked/file_{index:03}.txt"), "new\n");
+        write_file(root, &format!("untracked/file_{index:03}.txt"), "new\n");
+    }
+
+    let status = run_workspace(root, &["status", "--json"]);
+    let dirty = strings_at(&status, &["data", "git", "dirty_files"]);
+    let untracked = strings_at(&status, &["data", "git", "untracked_files"]);
+
+    assert_eq!(status["kind"], "workspace_status");
+    assert_eq!(status["truncated"], true);
+    assert!(
+        status["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("90 dirty file(s), 90 untracked file(s)")
+    );
+    assert!(
+        status["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("status truncated")
+    );
+    assert_eq!(status["data"]["git"]["dirty_file_count"], 90);
+    assert_eq!(status["data"]["git"]["untracked_file_count"], 90);
+    assert_eq!(status["data"]["git"]["omitted_dirty_files"], 10);
+    assert_eq!(status["data"]["git"]["omitted_untracked_files"], 10);
+    assert_eq!(dirty.len(), 80);
+    assert_eq!(untracked.len(), 80);
+
+    let map = run_workspace(root, &["map", "--json"]);
+    assert_eq!(map["truncated"], true);
+    assert_eq!(map["data"]["git"]["dirty_file_count"], 90);
+    assert_eq!(map["data"]["git"]["untracked_file_count"], 90);
 }
 
 #[test]

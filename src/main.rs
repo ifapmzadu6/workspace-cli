@@ -22,6 +22,7 @@ const INDEX_DIR: &str = ".workspace/index";
 const COCHANGE_INDEX_FILE: &str = ".workspace/index/cochange.json";
 const MAX_CAPTURED_OUTPUT: usize = 24_000;
 const MAX_READ_CONTENT: usize = 24_000;
+const MAX_GIT_STATUS_FILES: usize = 80;
 const MAX_MAP_LIST_ITEMS: usize = 80;
 const MAX_MAP_LARGE_FILES: usize = 40;
 const MAX_DIFF_SUMMARY: usize = 12_000;
@@ -305,8 +306,18 @@ struct Evidence {
 struct GitSummary {
     is_repo: bool,
     branch: Option<String>,
+    dirty_file_count: usize,
+    untracked_file_count: usize,
     dirty_files: Vec<String>,
     untracked_files: Vec<String>,
+    omitted_dirty_files: usize,
+    omitted_untracked_files: usize,
+}
+
+impl GitSummary {
+    fn omitted_files(&self) -> bool {
+        self.omitted_dirty_files > 0 || self.omitted_untracked_files > 0
+    }
 }
 
 #[derive(Serialize)]
@@ -702,7 +713,7 @@ impl Workspace {
 
 fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
     let map = build_map(workspace, args.depth, args.include_hidden)?;
-    let truncated = map.omitted.any();
+    let truncated = map.omitted.any() || map.git.omitted_files();
     let mut summary = format!(
         "{} file(s), languages: {}",
         map.stats.file_count,
@@ -741,7 +752,8 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
         recent_operations,
         recent_operations_error,
     };
-    let summary = if data.git.is_repo {
+    let truncated = data.git.omitted_files();
+    let mut summary = if data.git.is_repo {
         let log_note = if data.recent_operations_error.is_some() {
             ", operation log unreadable"
         } else {
@@ -750,21 +762,24 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
         format!(
             "branch {}, {} dirty file(s), {} untracked file(s), index {}{}",
             data.git.branch.as_deref().unwrap_or("unknown"),
-            data.git.dirty_files.len(),
-            data.git.untracked_files.len(),
+            data.git.dirty_file_count,
+            data.git.untracked_file_count,
             data.index_status.status,
             log_note
         )
     } else {
         "not a git repository".to_string()
     };
+    if truncated {
+        summary.push_str(" (status truncated)");
+    }
     let observation = Observation {
         kind: "workspace_status".to_string(),
         scope: data.root.clone(),
         summary,
         data,
         evidence: vec![],
-        truncated: false,
+        truncated,
         next_observations: vec![
             "workspace map".to_string(),
             "workspace diff --summary".to_string(),
@@ -2263,7 +2278,10 @@ fn git_changed_files(workspace: &Workspace) -> Result<Vec<String>> {
     collect_git_name_only(workspace, ["diff", "--name-only"], &mut files)?;
     collect_git_name_only(workspace, ["diff", "--cached", "--name-only"], &mut files)?;
 
-    let status = git_output(workspace, ["status", "--porcelain"])?;
+    let status = git_output(
+        workspace,
+        ["status", "--porcelain", "--untracked-files=all"],
+    )?;
     for line in status.lines() {
         if line.len() < 4 {
             continue;
@@ -3038,8 +3056,12 @@ fn git_summary(workspace: &Workspace) -> Result<GitSummary> {
         return Ok(GitSummary {
             is_repo: false,
             branch: None,
+            dirty_file_count: 0,
+            untracked_file_count: 0,
             dirty_files: vec![],
             untracked_files: vec![],
+            omitted_dirty_files: 0,
+            omitted_untracked_files: 0,
         });
     }
 
@@ -3047,9 +3069,14 @@ fn git_summary(workspace: &Workspace) -> Result<GitSummary> {
         .ok()
         .map(|branch| branch.trim().to_string())
         .filter(|branch| !branch.is_empty());
-    let status = git_output(workspace, ["status", "--porcelain"])?;
+    let status = git_output(
+        workspace,
+        ["status", "--porcelain", "--untracked-files=all"],
+    )?;
     let mut dirty_files = Vec::new();
     let mut untracked_files = Vec::new();
+    let mut dirty_file_count = 0usize;
+    let mut untracked_file_count = 0usize;
 
     for line in status.lines() {
         if line.len() < 4 {
@@ -3063,15 +3090,25 @@ fn git_summary(workspace: &Workspace) -> Result<GitSummary> {
             continue;
         }
         if code == "??" {
-            untracked_files.push(path);
+            untracked_file_count += 1;
+            if untracked_files.len() < MAX_GIT_STATUS_FILES {
+                untracked_files.push(path);
+            }
         } else {
-            dirty_files.push(path);
+            dirty_file_count += 1;
+            if dirty_files.len() < MAX_GIT_STATUS_FILES {
+                dirty_files.push(path);
+            }
         }
     }
 
     Ok(GitSummary {
         is_repo: true,
         branch,
+        dirty_file_count,
+        untracked_file_count,
+        omitted_dirty_files: dirty_file_count.saturating_sub(dirty_files.len()),
+        omitted_untracked_files: untracked_file_count.saturating_sub(untracked_files.len()),
         dirty_files,
         untracked_files,
     })
@@ -3555,8 +3592,8 @@ fn print_map(observation: &Observation<WorkspaceMap>) -> Result<()> {
             format!(
                 "branch {}, {} dirty, {} untracked",
                 map.git.branch.as_deref().unwrap_or("unknown"),
-                map.git.dirty_files.len(),
-                map.git.untracked_files.len()
+                map.git.dirty_file_count,
+                map.git.untracked_file_count
             )
         } else {
             "not a git repository".to_string()
@@ -3595,7 +3632,19 @@ fn print_status(observation: &Observation<StatusData>) -> Result<()> {
             data.git.branch.as_deref().unwrap_or("unknown")
         );
         print_list("dirty", &data.git.dirty_files);
+        if data.git.omitted_dirty_files > 0 {
+            println!(
+                "    ... {} more dirty file(s)",
+                data.git.omitted_dirty_files
+            );
+        }
         print_list("untracked", &data.git.untracked_files);
+        if data.git.omitted_untracked_files > 0 {
+            println!(
+                "    ... {} more untracked file(s)",
+                data.git.omitted_untracked_files
+            );
+        }
         println!("  index: {}", data.index_status.status);
         println!("  index fresh: {}", data.index_status.fresh);
         if let Some(edge_count) = data.index_status.edge_count {
