@@ -1628,16 +1628,7 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
         stdout: stdout.text,
         stderr: stderr.text,
     };
-    let mut summary = format!(
-        "command exited with {} in {}ms",
-        data.exit_code
-            .map(|code| code.to_string())
-            .unwrap_or_else(|| "signal".to_string()),
-        data.duration_ms
-    );
-    if truncated {
-        summary.push_str(" (output truncated)");
-    }
+    let summary = run_summary(data.exit_code, data.duration_ms, truncated);
     let observation = Observation {
         kind: "workspace_run".to_string(),
         scope: data.command.clone(),
@@ -1849,6 +1840,17 @@ fn transaction_file_summary(
         format!("{action} transaction {transaction_id} touching {file_count} file(s)");
     if omitted_files > 0 {
         summary.push_str(" (files truncated)");
+    }
+    summary
+}
+
+fn run_summary(exit_code: Option<i32>, duration_ms: u128, truncated: bool) -> String {
+    let status = exit_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "signal".to_string());
+    let mut summary = format!("command exited with {status} in {duration_ms}ms");
+    if truncated {
+        summary.push_str(" (output truncated)");
     }
     summary
 }
@@ -6093,6 +6095,22 @@ rename to new name.txt
         assert_eq!(
             transaction_file_summary("rolled back", "tx-123", 3, 2),
             "rolled back transaction tx-123 touching 3 file(s) (files truncated)"
+        );
+    }
+
+    #[test]
+    fn run_summary_reports_exit_signal_and_truncation() {
+        assert_eq!(
+            run_summary(Some(0), 42, false),
+            "command exited with 0 in 42ms"
+        );
+        assert_eq!(
+            run_summary(Some(2), 7, true),
+            "command exited with 2 in 7ms (output truncated)"
+        );
+        assert_eq!(
+            run_summary(None, 9, false),
+            "command exited with signal in 9ms"
         );
     }
 
