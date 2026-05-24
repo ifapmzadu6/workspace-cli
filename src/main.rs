@@ -22,6 +22,7 @@ const INDEX_DIR: &str = ".workspace/index";
 const COCHANGE_INDEX_FILE: &str = ".workspace/index/cochange.json";
 const MAX_CAPTURED_OUTPUT: usize = 24_000;
 const MAX_READ_CONTENT: usize = 24_000;
+const MAX_DIFF_SUMMARY: usize = 12_000;
 const MAX_DIFF_PATCH: usize = 48_000;
 const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -1087,8 +1088,10 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
 }
 
 fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
-    let (data, truncated) = if workspace.is_git_repo {
-        let summary = git_observable_diff_output(workspace, ["--stat"])?;
+    let (data, summary_truncated, patch_truncated) = if workspace.is_git_repo {
+        let raw_summary = git_observable_diff_output(workspace, ["--stat"])?;
+        let summary_truncated = raw_summary.chars().count() > MAX_DIFF_SUMMARY;
+        let summary = truncate_string(&raw_summary, MAX_DIFF_SUMMARY);
         let files = git_name_only_paths(&git_observable_diff_output(workspace, ["--name-only"])?);
         let (patch, patch_truncated) = if args.summary {
             (None, false)
@@ -1104,6 +1107,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
                 files,
                 patch,
             },
+            summary_truncated,
             patch_truncated,
         )
     } else {
@@ -1115,14 +1119,20 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
                 patch: None,
             },
             false,
+            false,
         )
     };
+    let truncated = summary_truncated || patch_truncated;
     let mut summary = if data.is_repo {
         format!("{} changed file(s)", data.files.len())
     } else {
         data.summary.clone()
     };
-    if truncated {
+    if summary_truncated && patch_truncated {
+        summary.push_str(" (summary and patch truncated)");
+    } else if summary_truncated {
+        summary.push_str(" (summary truncated)");
+    } else if patch_truncated {
         summary.push_str(" (patch truncated)");
     }
     let evidence = data

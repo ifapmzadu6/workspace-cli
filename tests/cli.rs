@@ -752,6 +752,38 @@ fn diff_truncates_large_patch() {
 }
 
 #[test]
+fn diff_truncates_large_summary_stat() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    for index in 0..300 {
+        let path = format!("many/files/file_{index:03}_with_a_long_observable_name.txt");
+        write_file(root, &path, "old\n");
+    }
+    commit_all(root, "initial many files");
+    for index in 0..300 {
+        let path = format!("many/files/file_{index:03}_with_a_long_observable_name.txt");
+        write_file(root, &path, "new\n");
+    }
+
+    let diff = run_workspace(root, &["diff", "--summary", "--json"]);
+    let stat = diff["data"]["summary"]
+        .as_str()
+        .expect("diff stat should be a string");
+
+    assert_eq!(diff["kind"], "workspace_diff");
+    assert_eq!(diff["truncated"], true);
+    assert!(
+        diff["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("summary truncated")
+    );
+    assert!(stat.contains("[output truncated]"));
+    assert!(diff["data"]["patch"].is_null());
+}
+
+#[test]
 fn diff_does_not_suggest_reading_deleted_files() {
     let temp = init_git_repo();
     let root = temp.path();
