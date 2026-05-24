@@ -2772,7 +2772,7 @@ fn impact_by_related_cli(
     let seed_file_count = seed_files.len();
     let (observed_seed_files, omitted_seed_files) =
         observed_string_prefix(seed_files, MAX_CHANGED_FILES);
-    let seed_set = seed_files.iter().cloned().collect::<BTreeSet<_>>();
+    let seed_set = normalized_seed_file_set(seed_files);
     let mut accumulators = BTreeMap::<String, RelatedCliImpactAccumulator>::new();
     for seed in seed_files {
         let output = cli.query(
@@ -2816,11 +2816,7 @@ fn impact_by_related_cli(
             &mut impacted,
             ImpactFile {
                 path,
-                score: if max_score > 0.0 {
-                    round3(item.score / max_score)
-                } else {
-                    0.0
-                },
+                score: normalized_rank_score(item.score, max_score),
                 cochanged_commits: item.cochanged_commits,
                 weighted_cochanges: round3(item.weighted_cochanges),
                 seed_files: item.seed_files.into_iter().collect(),
@@ -3352,11 +3348,7 @@ fn rank_cochange_impact(
     max_files_per_commit: usize,
     max_results: usize,
 ) -> ImpactRanking {
-    let seed_files = seed_files
-        .iter()
-        .map(|file| normalize_repo_path(file))
-        .filter(|file| !file.is_empty())
-        .collect::<BTreeSet<_>>();
+    let seed_files = normalized_seed_file_set(seed_files);
     let mut accumulators = BTreeMap::<String, ImpactAccumulator>::new();
     let mut commits_matched = 0;
     let mut ignored_large_commits = 0;
@@ -3447,11 +3439,7 @@ fn rank_cochange_impact_from_index(
     seed_files: &[String],
     max_results: usize,
 ) -> ImpactRanking {
-    let seed_files = seed_files
-        .iter()
-        .map(|file| normalize_repo_path(file))
-        .filter(|file| !file.is_empty())
-        .collect::<BTreeSet<_>>();
+    let seed_files = normalized_seed_file_set(seed_files);
     let mut accumulators = BTreeMap::<String, ImpactAccumulator>::new();
 
     for edge in &index.edges {
@@ -3496,10 +3484,7 @@ fn rank_cochange_impact_from_index(
         );
     }
 
-    let commits_matched = seed_files
-        .iter()
-        .filter_map(|file| index.file_commit_counts.get(file))
-        .sum();
+    let commits_matched = indexed_seed_commit_count(index, &seed_files);
 
     ImpactRanking {
         impacted,
@@ -3513,11 +3498,7 @@ fn rank_cochange_impact_pagerank_from_index(
     seed_files: &[String],
     max_results: usize,
 ) -> ImpactRanking {
-    let seed_files = seed_files
-        .iter()
-        .map(|file| normalize_repo_path(file))
-        .filter(|file| !file.is_empty())
-        .collect::<BTreeSet<_>>();
+    let seed_files = normalized_seed_file_set(seed_files);
     let hits = personalized_pagerank(index, &seed_files, 40, 0.85);
     let edge_lookup = cochange_edge_lookup(index);
     let mut impacted = hits
@@ -3558,10 +3539,7 @@ fn rank_cochange_impact_pagerank_from_index(
 
     impacted.sort_by(compare_impact_by_score);
     impacted.truncate(max_results);
-    let commits_matched = seed_files
-        .iter()
-        .filter_map(|file| index.file_commit_counts.get(file))
-        .sum();
+    let commits_matched = indexed_seed_commit_count(index, &seed_files);
 
     ImpactRanking {
         impacted,
@@ -3848,6 +3826,21 @@ fn cochange_commit_weight(rank: usize, file_count: usize) -> f64 {
 
 fn impact_seed_weight(matched_seed_count: usize) -> f64 {
     1.0 + (matched_seed_count.saturating_sub(1) as f64 * 0.25)
+}
+
+fn normalized_seed_file_set(seed_files: &[String]) -> BTreeSet<String> {
+    seed_files
+        .iter()
+        .map(|file| normalize_repo_path(file))
+        .filter(|file| !file.is_empty())
+        .collect()
+}
+
+fn indexed_seed_commit_count(index: &CochangeIndex, seed_files: &BTreeSet<String>) -> usize {
+    seed_files
+        .iter()
+        .filter_map(|file| index.file_commit_counts.get(file))
+        .sum()
 }
 
 fn normalized_rank_score(weight: f64, max_weight: f64) -> f64 {
@@ -6855,6 +6848,41 @@ src/b.rs
         assert_eq!(normalized_rank_score(2.0, 4.0), 0.5);
         assert_eq!(normalized_rank_score(1.0, 3.0), 0.333);
         assert_eq!(normalized_rank_score(10.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn seed_file_helpers_normalize_and_count_indexed_commits() {
+        let seeds = vec![
+            "./src/a.rs".to_string(),
+            "src/a.rs".to_string(),
+            "src\\b.rs".to_string(),
+            "  ".to_string(),
+        ];
+        let seed_set = normalized_seed_file_set(&seeds);
+
+        assert_eq!(
+            seed_set.iter().cloned().collect::<Vec<_>>(),
+            vec!["src/a.rs", "src/b.rs"]
+        );
+
+        let mut file_commit_counts = BTreeMap::new();
+        file_commit_counts.insert("src/a.rs".to_string(), 2);
+        file_commit_counts.insert("src/b.rs".to_string(), 3);
+        file_commit_counts.insert("src/c.rs".to_string(), 5);
+        let index = CochangeIndex {
+            version: 1,
+            generated_at_unix_ms: 0,
+            head: None,
+            max_commits: 10,
+            max_files_per_commit: 10,
+            commits_scanned: 0,
+            commits_indexed: 0,
+            ignored_large_commits: 0,
+            file_commit_counts,
+            edges: vec![],
+        };
+
+        assert_eq!(indexed_seed_commit_count(&index, &seed_set), 5);
     }
 
     #[test]
