@@ -1163,20 +1163,7 @@ fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> 
 }
 
 fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<()> {
-    if !workspace.is_git_repo {
-        bail!("workspace index cochange requires a git repository");
-    }
-
-    ensure_log_writable(workspace)?;
-    let index = build_cochange_index(workspace, args.max_commits, args.max_files_per_commit)?;
-    let index_path = workspace.cochange_index_path();
-    let index_dir = workspace.root.join(INDEX_DIR);
-    fs::create_dir_all(&index_dir)
-        .with_context(|| format!("failed to create index directory {}", index_dir.display()))?;
-    write_cochange_index(&index_path, &index)
-        .with_context(|| format!("failed to write index {}", index_path.display()))?;
-
-    let data = index_cochange_data(workspace, &index_path, &index);
+    let data = observed_index_cochange(workspace, &args)?;
     let observation = index_cochange_observation(data);
 
     append_log(
@@ -1805,6 +1792,30 @@ fn index_cochange_data(
         file_count: index.file_commit_counts.len(),
         edge_count: index.edges.len(),
     }
+}
+
+fn observed_index_cochange(
+    workspace: &Workspace,
+    args: &IndexCochangeArgs,
+) -> Result<IndexCochangeData> {
+    if !workspace.is_git_repo {
+        bail!("workspace index cochange requires a git repository");
+    }
+
+    ensure_log_writable(workspace)?;
+    let index = build_cochange_index(workspace, args.max_commits, args.max_files_per_commit)?;
+    let index_path = write_workspace_cochange_index(workspace, &index)?;
+    Ok(index_cochange_data(workspace, &index_path, &index))
+}
+
+fn write_workspace_cochange_index(workspace: &Workspace, index: &CochangeIndex) -> Result<PathBuf> {
+    let index_path = workspace.cochange_index_path();
+    let index_dir = workspace.root.join(INDEX_DIR);
+    fs::create_dir_all(&index_dir)
+        .with_context(|| format!("failed to create index directory {}", index_dir.display()))?;
+    write_cochange_index(&index_path, index)
+        .with_context(|| format!("failed to write index {}", index_path.display()))?;
+    Ok(index_path)
 }
 
 fn index_cochange_observation(data: IndexCochangeData) -> Observation<IndexCochangeData> {
@@ -7359,6 +7370,39 @@ rename to new name.txt
             observation.next_observations,
             index_cochange_next_observations()
         );
+
+        let saved_path =
+            write_workspace_cochange_index(&workspace, &index).expect("index should be written");
+        assert_eq!(saved_path, temp.path().join(COCHANGE_INDEX_FILE));
+        let loaded =
+            read_cochange_index_from_path(&saved_path).expect("written index should be readable");
+        assert_eq!(loaded.max_commits, 500);
+        assert_eq!(loaded.edges.len(), 1);
+    }
+
+    #[test]
+    fn observed_index_cochange_requires_git_repo() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        let args = IndexCochangeArgs {
+            json: true,
+            max_commits: 1000,
+            max_files_per_commit: 40,
+        };
+
+        let error = match observed_index_cochange(&workspace, &args) {
+            Ok(_) => panic!("non-repo workspace should not build a co-change index"),
+            Err(error) => error,
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "workspace index cochange requires a git repository"
+        );
+        assert!(!workspace.log_path().exists());
     }
 
     #[test]
