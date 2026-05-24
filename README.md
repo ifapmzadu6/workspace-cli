@@ -158,6 +158,8 @@ changed with the seed file, but are connected through related history.
 `workspace impact --diff --by cochange` uses the current Git diff as seed files
 and returns nearby files from history. This helps decide what to read next and
 which tests or documents may need verification.
+Large seed-file lists are bounded in the observation. The full seed count
+remains available as `seed_file_count`, with omitted seeds reported separately.
 
 ```sh
 workspace impact --diff --by cochange --json

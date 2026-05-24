@@ -495,6 +495,8 @@ struct ImpactData {
     relationship_source: String,
     is_repo: bool,
     seed_files: Vec<String>,
+    seed_file_count: usize,
+    omitted_seed_files: usize,
     commits_scanned: usize,
     commits_matched: usize,
     ignored_large_commits: usize,
@@ -1246,6 +1248,8 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
             .to_string(),
             is_repo: false,
             seed_files: vec![],
+            seed_file_count: 0,
+            omitted_seed_files: 0,
             commits_scanned: 0,
             commits_matched: 0,
             ignored_large_commits: 0,
@@ -1254,13 +1258,18 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
             impacted: vec![],
         }
     };
+    let seed_files_truncated = data.omitted_seed_files > 0;
     let summary = if data.is_repo {
-        format!(
+        let mut summary = format!(
             "{} impacted file(s) from {} seed file(s) using {} history",
             data.impacted.len(),
-            data.seed_files.len(),
+            data.seed_file_count,
             data.method
-        )
+        );
+        if seed_files_truncated {
+            summary.push_str(" (seed files truncated)");
+        }
+        summary
     } else {
         "not a git repository".to_string()
     };
@@ -1278,7 +1287,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
         summary,
         data,
         evidence,
-        truncated: false,
+        truncated: seed_files_truncated,
         next_observations,
     };
 
@@ -1825,6 +1834,12 @@ fn truncate_vec<T>(items: &mut Vec<T>, max_len: usize) -> usize {
         items.truncate(max_len);
     }
     omitted
+}
+
+fn observed_string_prefix(items: &[String], max_len: usize) -> (Vec<String>, usize) {
+    let observed = items.iter().take(max_len).cloned().collect::<Vec<_>>();
+    let omitted = items.len().saturating_sub(observed.len());
+    (observed, omitted)
 }
 
 fn push_recent_candidate(
@@ -2559,6 +2574,9 @@ fn impact_by_cochange(
     use_index: bool,
 ) -> Result<ImpactData> {
     let seed_files = git_changed_files(workspace)?;
+    let seed_file_count = seed_files.len();
+    let (observed_seed_files, omitted_seed_files) =
+        observed_string_prefix(&seed_files, MAX_CHANGED_FILES);
     if !uses_cochange_index(use_index, rank)
         && let Some(cli) = RelatedCli::detect()
         && let Some(data) = impact_by_related_cli(
@@ -2590,7 +2608,9 @@ fn impact_by_cochange(
             ranking: rank.as_str().to_string(),
             relationship_source: "cochange-index".to_string(),
             is_repo: true,
-            seed_files,
+            seed_files: observed_seed_files,
+            seed_file_count,
+            omitted_seed_files,
             commits_scanned: index.commits_scanned,
             commits_matched: ranking.commits_matched,
             ignored_large_commits: index.ignored_large_commits,
@@ -2609,7 +2629,9 @@ fn impact_by_cochange(
         ranking: rank.as_str().to_string(),
         relationship_source: "git-log".to_string(),
         is_repo: true,
-        seed_files,
+        seed_files: observed_seed_files,
+        seed_file_count,
+        omitted_seed_files,
         commits_scanned: commits.len(),
         commits_matched: ranking.commits_matched,
         ignored_large_commits: ranking.ignored_large_commits,
@@ -2632,6 +2654,9 @@ fn impact_by_related_cli(
         return Ok(None);
     }
 
+    let seed_file_count = seed_files.len();
+    let (observed_seed_files, omitted_seed_files) =
+        observed_string_prefix(seed_files, MAX_CHANGED_FILES);
     let seed_set = seed_files.iter().cloned().collect::<BTreeSet<_>>();
     let mut accumulators = BTreeMap::<String, RelatedCliImpactAccumulator>::new();
     for seed in seed_files {
@@ -2699,7 +2724,9 @@ fn impact_by_related_cli(
         ranking: rank.as_str().to_string(),
         relationship_source: format!("related-cli:{}:aggregate", rank.as_str()),
         is_repo: true,
-        seed_files: seed_files.to_vec(),
+        seed_files: observed_seed_files,
+        seed_file_count,
+        omitted_seed_files,
         commits_scanned: 0,
         commits_matched: impacted
             .iter()
@@ -5090,6 +5117,9 @@ fn print_impact(observation: &Observation<ImpactData>) -> Result<()> {
     println!("  source: {}", data.relationship_source);
     println!("  ranking: {}", data.ranking);
     print_list("seeds", &data.seed_files);
+    if data.omitted_seed_files > 0 {
+        println!("    ... {} more seed file(s)", data.omitted_seed_files);
+    }
     println!(
         "  scanned: {} commit(s), matched: {}, ignored broad commits: {}",
         data.commits_scanned, data.commits_matched, data.ignored_large_commits

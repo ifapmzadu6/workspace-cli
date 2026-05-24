@@ -671,6 +671,43 @@ fn impact_expands_untracked_directories_to_files() {
     assert!(!seed_files.contains(&"new/nested".to_string()));
 }
 
+#[test]
+fn impact_bounds_large_seed_file_lists() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    for index in 0..90 {
+        write_file(root, &format!("src/file_{index:03}.rs"), "initial\n");
+    }
+    commit_all(root, "initial");
+    for index in 0..90 {
+        append_file(root, &format!("src/file_{index:03}.rs"), "changed\n");
+    }
+
+    let impact = run_workspace(root, &["impact", "--diff", "--by", "cochange", "--json"]);
+    let seed_files = strings_at(&impact, &["data", "seed_files"]);
+
+    assert_eq!(impact["kind"], "workspace_impact");
+    assert_eq!(impact["truncated"], true);
+    assert_eq!(impact["data"]["seed_file_count"], 90);
+    assert_eq!(impact["data"]["omitted_seed_files"], 10);
+    assert_eq!(seed_files.len(), 80);
+    assert!(seed_files.contains(&"src/file_000.rs".to_string()));
+    assert!(!seed_files.contains(&"src/file_089.rs".to_string()));
+    assert!(
+        impact["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("90 seed file(s)")
+    );
+    assert!(
+        impact["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("seed files truncated")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn related_can_delegate_to_related_cli() {
