@@ -191,6 +191,42 @@ fn read_rejects_paths_outside_workspace() {
 }
 
 #[test]
+fn related_rejects_paths_outside_workspace() {
+    let parent = TempDir::new().expect("parent temp dir should be created");
+    let root = parent.path().join("workspace");
+    fs::create_dir(&root).expect("workspace dir should be created");
+    run(&root, "git", &["init", "-q"]);
+    run(&root, "git", &["config", "user.email", "test@example.com"]);
+    run(&root, "git", &["config", "user.name", "Test"]);
+    write_file(&root, "src/a.rs", "a\n");
+    commit_all(&root, "initial");
+    write_file(parent.path(), "outside.rs", "outside\n");
+
+    let relative_stderr = run_workspace_failure(&root, &["related", "../outside.rs", "--json"]);
+    assert!(
+        relative_stderr.contains("outside workspace root"),
+        "unexpected stderr: {relative_stderr}"
+    );
+
+    let absolute_stderr = run_workspace_failure(
+        &root,
+        &[
+            "related",
+            parent
+                .path()
+                .join("outside.rs")
+                .to_str()
+                .expect("path should be utf-8"),
+            "--json",
+        ],
+    );
+    assert!(
+        absolute_stderr.contains("outside workspace root"),
+        "unexpected stderr: {absolute_stderr}"
+    );
+}
+
+#[test]
 fn index_related_impact_and_status_cover_cochange_flow() {
     let temp = init_git_repo();
     let root = temp.path();

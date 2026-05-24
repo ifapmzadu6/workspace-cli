@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
@@ -2190,14 +2190,41 @@ fn collect_git_name_only<const N: usize>(
 
 fn workspace_arg_path(workspace: &Workspace, path: &Path) -> Result<String> {
     let resolved = workspace.resolve_path(path);
-    if resolved.is_absolute() && !resolved.starts_with(&workspace.root) {
+    let normalized_root = normalize_lexical_path(&workspace.root);
+    let normalized_path = normalize_lexical_path(&resolved);
+    let relative = normalized_path
+        .strip_prefix(&normalized_root)
+        .map_err(|_| {
+            anyhow!(
+                "path {} is outside workspace root {}",
+                normalized_path.display(),
+                normalized_root.display()
+            )
+        })?;
+    if relative.as_os_str().is_empty() {
         bail!(
-            "path {} is outside workspace root {}",
-            resolved.display(),
-            workspace.root.display()
+            "path {} resolves to workspace root {}",
+            normalized_path.display(),
+            normalized_root.display()
         );
     }
-    Ok(normalize_repo_path(&workspace.relative(&resolved)))
+    Ok(normalize_repo_path(&relative.to_string_lossy()))
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(_) | Component::RootDir | Component::Prefix(_) => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
 }
 
 fn parse_git_log_name_only(output: &str) -> Vec<GitCommitFiles> {
