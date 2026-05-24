@@ -635,6 +635,12 @@ struct CapturedOutput {
     truncated: bool,
 }
 
+struct CapturedCommandOutput {
+    status: std::process::ExitStatus,
+    stdout: CapturedOutput,
+    stderr: CapturedOutput,
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 struct LogEntry {
     id: String,
@@ -4910,35 +4916,18 @@ fn run_git_apply<const N: usize>(
         command.arg(arg);
     }
     command.arg(patch_path);
-    let mut child = command
+    let child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .context("failed to run git apply")?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture git apply stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture git apply stderr"))?;
-    let stdout_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stdout, MAX_CAPTURED_OUTPUT));
-    let stderr_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
-    let status = child.wait().context("failed to wait for git apply")?;
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| anyhow!("git apply stdout reader thread panicked"))??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("git apply stderr reader thread panicked"))??;
-    if !status.success() {
-        let message = if stderr.text.trim().is_empty() {
-            stdout.text.trim()
+    let output =
+        wait_for_captured_command(child, "git apply", MAX_CAPTURED_OUTPUT, MAX_CAPTURED_OUTPUT)?;
+    if !output.status.success() {
+        let message = if output.stderr.text.trim().is_empty() {
+            output.stdout.text.trim()
         } else {
-            stderr.text.trim()
+            output.stderr.text.trim()
         };
         bail!("git apply failed: {message}");
     }
@@ -4993,36 +4982,18 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut child = Command::new("git")
+    let child = Command::new("git")
         .current_dir(&workspace.root)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .context("failed to run git")?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture git stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture git stderr"))?;
-    let stdout_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stdout, max_stdout_bytes));
-    let stderr_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
-    let status = child.wait().context("failed to wait for git")?;
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| anyhow!("git stdout reader thread panicked"))??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("git stderr reader thread panicked"))??;
-    if !status.success() {
-        bail!("git failed: {}", stderr.text.trim());
+    let output = wait_for_captured_command(child, "git", max_stdout_bytes, MAX_CAPTURED_OUTPUT)?;
+    if !output.status.success() {
+        bail!("git failed: {}", output.stderr.text.trim());
     }
-    Ok(stdout)
+    Ok(output.stdout)
 }
 
 fn shell_command(command: &str) -> Command {
@@ -5042,6 +5013,41 @@ fn shell_command(command: &str) -> Command {
 
 fn read_captured_output<R: Read>(mut reader: R) -> Result<CapturedOutput> {
     read_captured_output_with_limit(&mut reader, MAX_CAPTURED_OUTPUT)
+}
+
+fn wait_for_captured_command(
+    mut child: std::process::Child,
+    command_name: &str,
+    max_stdout_bytes: usize,
+    max_stderr_bytes: usize,
+) -> Result<CapturedCommandOutput> {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture {command_name} stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture {command_name} stderr"))?;
+    let stdout_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stdout, max_stdout_bytes));
+    let stderr_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stderr, max_stderr_bytes));
+    let status = child
+        .wait()
+        .with_context(|| format!("failed to wait for {command_name}"))?;
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| anyhow!("{command_name} stdout reader thread panicked"))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("{command_name} stderr reader thread panicked"))??;
+
+    Ok(CapturedCommandOutput {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 fn read_captured_output_with_limit<R: Read>(
@@ -5619,6 +5625,25 @@ mod tests {
         assert_eq!(shell_hint("space name.txt"), "'space name.txt'");
         assert_eq!(shell_hint("weird$path.txt"), "'weird$path.txt'");
         assert_eq!(shell_hint("quote'name.txt"), "'quote'\\''name.txt'");
+    }
+
+    #[test]
+    fn captured_command_helper_collects_and_bounds_output() {
+        let mut command = Command::new(std::env::current_exe().expect("test exe should exist"));
+        let child = command
+            .arg("--help")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("test harness should run");
+
+        let output = wait_for_captured_command(child, "test harness", 8, MAX_CAPTURED_OUTPUT)
+            .expect("test harness output should be captured");
+
+        assert!(output.status.success());
+        assert!(output.stdout.truncated);
+        assert!(output.stdout.text.contains("[output truncated]"));
+        assert!(!output.stderr.truncated);
     }
 
     #[test]
