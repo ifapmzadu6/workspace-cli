@@ -20,6 +20,7 @@ const TRANSACTION_DIR: &str = ".workspace/transactions";
 const INDEX_DIR: &str = ".workspace/index";
 const COCHANGE_INDEX_FILE: &str = ".workspace/index/cochange.json";
 const MAX_CAPTURED_OUTPUT: usize = 24_000;
+const MAX_READ_CONTENT: usize = 24_000;
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Parser)]
@@ -1050,7 +1051,7 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
         .map(parse_line_range)
         .transpose()
         .context("invalid --lines range")?;
-    let (content, line_label, truncated) = if let Some((start, end)) = range {
+    let (selected_content, line_label) = if let Some((start, end)) = range {
         let selected = full_content
             .lines()
             .enumerate()
@@ -1060,20 +1061,25 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        (selected, Some(format!("{start}:{end}")), false)
+        (selected, Some(format!("{start}:{end}")))
     } else {
-        (full_content, None, false)
+        (full_content, None)
     };
+    let truncated = selected_content.chars().count() > MAX_READ_CONTENT;
+    let content = truncate_string(&selected_content, MAX_READ_CONTENT);
 
     let data = ReadData {
         path: rel_path.clone(),
         lines: line_label.clone(),
         content,
     };
-    let summary = match &data.lines {
+    let mut summary = match &data.lines {
         Some(lines) => format!("read {} lines {}", data.path, lines),
         None => format!("read {}", data.path),
     };
+    if truncated {
+        summary.push_str(" (truncated)");
+    }
     let observation = Observation {
         kind: "workspace_read".to_string(),
         scope: data.path.clone(),

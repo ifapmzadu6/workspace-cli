@@ -236,6 +236,30 @@ fn read_rejects_paths_outside_workspace() {
 }
 
 #[test]
+fn read_truncates_large_content() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    let content = format!("{}tail\n", "a".repeat(30_000));
+    write_file(temp.path(), "large.txt", &content);
+
+    let read = run_workspace(temp.path(), &["read", "large.txt", "--json"]);
+    let returned = read["data"]["content"]
+        .as_str()
+        .expect("read content should be a string");
+
+    assert_eq!(read["kind"], "workspace_read");
+    assert_eq!(read["truncated"], true);
+    assert!(
+        read["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("truncated")
+    );
+    assert!(returned.len() < content.len());
+    assert!(returned.contains("[output truncated]"));
+    assert!(!returned.contains("tail"));
+}
+
+#[test]
 fn related_rejects_paths_outside_workspace() {
     let parent = TempDir::new().expect("parent temp dir should be created");
     let root = parent.path().join("workspace");

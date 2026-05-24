@@ -282,6 +282,9 @@ workspace read src/main.rs
 workspace read src/main.rs --lines 40:120
 ```
 
+Large read results are bounded and marked as `truncated` so observations stay
+small enough for review and follow-up reads.
+
 Future versions can read by symbol or document section.
 
 ### `workspace diff`
