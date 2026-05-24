@@ -1252,14 +1252,12 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
         .output()
         .with_context(|| format!("failed to run command {:?}", args.command))?;
     let duration_ms = start.elapsed().as_millis();
-    let stdout = truncate_string(
-        &String::from_utf8_lossy(&output.stdout),
-        MAX_CAPTURED_OUTPUT,
-    );
-    let stderr = truncate_string(
-        &String::from_utf8_lossy(&output.stderr),
-        MAX_CAPTURED_OUTPUT,
-    );
+    let stdout_text = String::from_utf8_lossy(&output.stdout);
+    let stderr_text = String::from_utf8_lossy(&output.stderr);
+    let truncated = stdout_text.chars().count() > MAX_CAPTURED_OUTPUT
+        || stderr_text.chars().count() > MAX_CAPTURED_OUTPUT;
+    let stdout = truncate_string(stdout_text.as_ref(), MAX_CAPTURED_OUTPUT);
+    let stderr = truncate_string(stderr_text.as_ref(), MAX_CAPTURED_OUTPUT);
     let data = RunData {
         command: args.command.clone(),
         cwd: workspace.root.to_string_lossy().into_owned(),
@@ -1268,20 +1266,23 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
         stdout,
         stderr,
     };
-    let summary = format!(
+    let mut summary = format!(
         "command exited with {} in {}ms",
         data.exit_code
             .map(|code| code.to_string())
             .unwrap_or_else(|| "signal".to_string()),
         data.duration_ms
     );
+    if truncated {
+        summary.push_str(" (output truncated)");
+    }
     let observation = Observation {
         kind: "workspace_run".to_string(),
         scope: data.command.clone(),
         summary,
         data,
         evidence: vec![],
-        truncated: false,
+        truncated,
         next_observations: vec![
             "workspace status".to_string(),
             "workspace diff --summary".to_string(),

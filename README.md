@@ -311,6 +311,7 @@ writes.
 ### `workspace run`
 
 Runs a command and records stdout, stderr, exit code, and duration.
+Large stdout/stderr captures are bounded and marked as `truncated`.
 
 ```sh
 workspace run "cargo test"

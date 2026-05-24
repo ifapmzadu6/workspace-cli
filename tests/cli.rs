@@ -1001,6 +1001,34 @@ fn run_records_nonzero_exit_without_failing_cli() {
 }
 
 #[test]
+fn run_marks_large_output_as_truncated() {
+    let temp = TempDir::new().expect("temp dir should be created");
+
+    let run = run_workspace(
+        temp.path(),
+        &[
+            "run",
+            "python3 -c \"import sys; sys.stdout.write('a' * 30000)\"",
+            "--json",
+        ],
+    );
+    let stdout = run["data"]["stdout"]
+        .as_str()
+        .expect("stdout should be a string");
+
+    assert_eq!(run["kind"], "workspace_run");
+    assert_eq!(run["truncated"], true);
+    assert!(
+        run["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("output truncated")
+    );
+    assert!(stdout.len() < 30_000);
+    assert!(stdout.contains("[output truncated]"));
+}
+
+#[test]
 fn run_does_not_execute_when_operation_log_is_not_writable() {
     let temp = TempDir::new().expect("temp dir should be created");
     fs::create_dir_all(temp.path().join(".workspace/log.jsonl"))
