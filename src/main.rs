@@ -10,7 +10,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
@@ -640,6 +640,8 @@ struct CapturedCommandOutput {
     stdout: CapturedOutput,
     stderr: CapturedOutput,
 }
+
+type CapturedOutputReader = std::thread::JoinHandle<Result<CapturedOutput>>;
 
 #[derive(Deserialize, Serialize, Clone)]
 struct LogEntry {
@@ -2863,18 +2865,11 @@ fn git_recent_name_only_commits(
         .stdout
         .take()
         .ok_or_else(|| anyhow!("failed to capture git log stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture git log stderr"))?;
-    let stderr_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+    let stderr_reader = capture_child_stderr(&mut child, "git log stderr", MAX_CAPTURED_OUTPUT)?;
 
     let commits_result = read_git_log_name_only(stdout);
     let status = child.wait().context("failed to wait for git log")?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("git log stderr reader thread panicked"))??;
+    let stderr = join_captured_output_reader(stderr_reader, "git log stderr")?;
     let commits = commits_result?;
     if !status.success() {
         bail!("git log failed: {}", stderr.text.trim());
@@ -3000,18 +2995,11 @@ where
         .stdout
         .take()
         .ok_or_else(|| anyhow!("failed to capture git stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture git stderr"))?;
-    let stderr_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+    let stderr_reader = capture_child_stderr(&mut child, "git stderr", MAX_CAPTURED_OUTPUT)?;
 
     let paths_result = stream_git_name_only_paths_from_reader(stdout, &mut on_path);
     let status = child.wait().context("failed to wait for git")?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("git stderr reader thread panicked"))??;
+    let stderr = join_captured_output_reader(stderr_reader, "git stderr")?;
     paths_result?;
     if !status.success() {
         bail!("git failed: {}", stderr.text.trim());
@@ -3039,18 +3027,11 @@ where
         .stdout
         .take()
         .ok_or_else(|| anyhow!("failed to capture git stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture git stderr"))?;
-    let stderr_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+    let stderr_reader = capture_child_stderr(&mut child, "git stderr", MAX_CAPTURED_OUTPUT)?;
 
     let paths_result = read_git_name_only_paths_limited(stdout, max_files);
     let status = child.wait().context("failed to wait for git")?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("git stderr reader thread panicked"))??;
+    let stderr = join_captured_output_reader(stderr_reader, "git stderr")?;
     let paths = paths_result?;
     if !status.success() {
         bail!("git failed: {}", stderr.text.trim());
@@ -3971,18 +3952,11 @@ where
         .stdout
         .take()
         .ok_or_else(|| anyhow!("failed to capture git status stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture git status stderr"))?;
-    let stderr_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+    let stderr_reader = capture_child_stderr(&mut child, "git status stderr", MAX_CAPTURED_OUTPUT)?;
 
     let read_result = read_git_status_stdout(stdout, &mut handle);
     let status = child.wait().context("failed to wait for git status")?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("git status stderr reader thread panicked"))??;
+    let stderr = join_captured_output_reader(stderr_reader, "git status stderr")?;
     read_result?;
     if !status.success() {
         bail!("git status failed: {}", stderr.text.trim());
@@ -4065,17 +4039,10 @@ fn rg_search(
         .stdout
         .take()
         .ok_or_else(|| anyhow!("failed to capture ripgrep stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture ripgrep stderr"))?;
-    let stderr_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+    let stderr_reader = capture_child_stderr(&mut child, "ripgrep stderr", MAX_CAPTURED_OUTPUT)?;
     let search_result = parse_rg_json_output(stdout, max_results);
     let status = child.wait().context("failed to wait for ripgrep")?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("ripgrep stderr reader thread panicked"))??;
+    let stderr = join_captured_output_reader(stderr_reader, "ripgrep stderr")?;
 
     if !status.success() && status.code() != Some(1) {
         bail!("ripgrep failed: {}", stderr.text.trim());
@@ -5016,38 +4983,63 @@ fn read_captured_output<R: Read>(mut reader: R) -> Result<CapturedOutput> {
 }
 
 fn wait_for_captured_command(
-    mut child: std::process::Child,
+    mut child: Child,
     command_name: &str,
     max_stdout_bytes: usize,
     max_stderr_bytes: usize,
 ) -> Result<CapturedCommandOutput> {
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture {command_name} stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| anyhow!("failed to capture {command_name} stderr"))?;
-    let stdout_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stdout, max_stdout_bytes));
-    let stderr_reader =
-        std::thread::spawn(move || read_captured_output_with_limit(stderr, max_stderr_bytes));
+    let stdout_name = format!("{command_name} stdout");
+    let stderr_name = format!("{command_name} stderr");
+    let stdout_reader = capture_child_stdout(&mut child, &stdout_name, max_stdout_bytes)?;
+    let stderr_reader = capture_child_stderr(&mut child, &stderr_name, max_stderr_bytes)?;
     let status = child
         .wait()
         .with_context(|| format!("failed to wait for {command_name}"))?;
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| anyhow!("{command_name} stdout reader thread panicked"))??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("{command_name} stderr reader thread panicked"))??;
+    let stdout = join_captured_output_reader(stdout_reader, &stdout_name)?;
+    let stderr = join_captured_output_reader(stderr_reader, &stderr_name)?;
 
     Ok(CapturedCommandOutput {
         status,
         stdout,
         stderr,
     })
+}
+
+fn capture_child_stdout(
+    child: &mut Child,
+    stream_name: &str,
+    max_bytes: usize,
+) -> Result<CapturedOutputReader> {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture {stream_name}"))?;
+    Ok(std::thread::spawn(move || {
+        read_captured_output_with_limit(stdout, max_bytes)
+    }))
+}
+
+fn capture_child_stderr(
+    child: &mut Child,
+    stream_name: &str,
+    max_bytes: usize,
+) -> Result<CapturedOutputReader> {
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture {stream_name}"))?;
+    Ok(std::thread::spawn(move || {
+        read_captured_output_with_limit(stderr, max_bytes)
+    }))
+}
+
+fn join_captured_output_reader(
+    reader: CapturedOutputReader,
+    stream_name: &str,
+) -> Result<CapturedOutput> {
+    reader
+        .join()
+        .map_err(|_| anyhow!("{stream_name} reader thread panicked"))?
 }
 
 fn read_captured_output_with_limit<R: Read>(
