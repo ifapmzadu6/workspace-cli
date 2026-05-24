@@ -1192,26 +1192,7 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
 
 fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
     let target = workspace_arg_path(workspace, &args.path)?;
-    let data = if workspace.is_git_repo {
-        related_by_cochange(
-            workspace,
-            &target,
-            args.max_commits,
-            args.max_files_per_commit,
-            args.max_results,
-            args.rank,
-            args.use_index,
-        )?
-    } else {
-        related_data_for_non_repo(
-            &target,
-            &args.by,
-            args.rank,
-            args.use_index,
-            args.max_commits,
-            args.max_files_per_commit,
-        )
-    };
+    let data = observed_related(workspace, &target, &args)?;
     let observation = related_observation(workspace, &target, data);
 
     append_observation_log(workspace, LOG_OP_RELATED, &target, &observation.summary);
@@ -1223,24 +1204,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
         bail!("workspace impact currently supports only --diff as its source");
     }
 
-    let data = if workspace.is_git_repo {
-        impact_by_cochange(
-            workspace,
-            args.max_commits,
-            args.max_files_per_commit,
-            args.max_results,
-            args.rank,
-            args.use_index,
-        )?
-    } else {
-        impact_data_for_non_repo(
-            &args.by,
-            args.rank,
-            args.use_index,
-            args.max_commits,
-            args.max_files_per_commit,
-        )
-    };
+    let data = observed_impact(workspace, &args)?;
     let observation = impact_observation(workspace, data);
 
     append_observation_log(
@@ -1852,6 +1816,33 @@ fn index_cochange_observation(data: IndexCochangeData) -> Observation<IndexCocha
     }
 }
 
+fn observed_related(
+    workspace: &Workspace,
+    target: &str,
+    args: &RelatedArgs,
+) -> Result<RelatedData> {
+    if workspace.is_git_repo {
+        related_by_cochange(
+            workspace,
+            target,
+            args.max_commits,
+            args.max_files_per_commit,
+            args.max_results,
+            args.rank,
+            args.use_index,
+        )
+    } else {
+        Ok(related_data_for_non_repo(
+            target,
+            &args.by,
+            args.rank,
+            args.use_index,
+            args.max_commits,
+            args.max_files_per_commit,
+        ))
+    }
+}
+
 fn related_observation(
     workspace: &Workspace,
     target: &str,
@@ -1871,6 +1862,27 @@ fn related_observation(
         evidence,
         truncated: false,
         next_observations,
+    }
+}
+
+fn observed_impact(workspace: &Workspace, args: &ImpactArgs) -> Result<ImpactData> {
+    if workspace.is_git_repo {
+        impact_by_cochange(
+            workspace,
+            args.max_commits,
+            args.max_files_per_commit,
+            args.max_results,
+            args.rank,
+            args.use_index,
+        )
+    } else {
+        Ok(impact_data_for_non_repo(
+            &args.by,
+            args.rank,
+            args.use_index,
+            args.max_commits,
+            args.max_files_per_commit,
+        ))
     }
 }
 
@@ -6805,6 +6817,63 @@ rename to new name.txt
         );
         assert!(!impact.is_repo);
         assert_eq!(impact.seed_file_count, 0);
+        assert_eq!(impact.max_commits, 500);
+        assert_eq!(impact.max_files_per_commit, 80);
+        assert!(impact.impacted.is_empty());
+    }
+
+    #[test]
+    fn non_repo_observed_relationship_helpers_use_requested_labels() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let related_args = RelatedArgs {
+            json: true,
+            by: RelatedMethod::Cochange,
+            max_commits: 300,
+            max_files_per_commit: 40,
+            max_results: 7,
+            rank: RankingMethod::Pagerank,
+            use_index: false,
+            path: PathBuf::from("src/main.rs"),
+        };
+        let related = observed_related(&workspace, "src/main.rs", &related_args)
+            .expect("related data should be built");
+        assert_eq!(related.target, "src/main.rs");
+        assert_eq!(related.method, RELATED_METHOD_COCHANGE);
+        assert_eq!(related.ranking, RANK_PAGERANK);
+        assert_eq!(
+            related.relationship_source,
+            RELATIONSHIP_SOURCE_COCHANGE_INDEX
+        );
+        assert!(!related.is_repo);
+        assert_eq!(related.max_commits, 300);
+        assert_eq!(related.max_files_per_commit, 40);
+        assert!(related.related.is_empty());
+
+        let impact_args = ImpactArgs {
+            json: true,
+            diff: true,
+            by: RelatedMethod::Cochange,
+            max_commits: 500,
+            max_files_per_commit: 80,
+            max_results: 9,
+            rank: RankingMethod::Direct,
+            use_index: true,
+        };
+        let impact =
+            observed_impact(&workspace, &impact_args).expect("impact data should be built");
+        assert_eq!(impact.source, IMPACT_SOURCE_DIFF);
+        assert_eq!(impact.method, RELATED_METHOD_COCHANGE);
+        assert_eq!(impact.ranking, RANK_DIRECT);
+        assert_eq!(
+            impact.relationship_source,
+            RELATIONSHIP_SOURCE_COCHANGE_INDEX
+        );
+        assert!(!impact.is_repo);
         assert_eq!(impact.max_commits, 500);
         assert_eq!(impact.max_files_per_commit, 80);
         assert!(impact.impacted.is_empty());
