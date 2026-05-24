@@ -3048,17 +3048,26 @@ fn parse_line_range(value: &str) -> Result<(usize, usize)> {
 fn extract_patch_files(patch_content: &str) -> Vec<String> {
     let mut files = BTreeSet::new();
     for line in patch_content.lines() {
-        if let Some(path) = line.strip_prefix("+++ b/") {
-            if path != "/dev/null" {
-                files.insert(path.to_string());
-            }
-        } else if let Some(path) = line.strip_prefix("--- a/")
-            && path != "/dev/null"
-        {
-            files.insert(path.to_string());
+        if let Some(path) = line.strip_prefix("+++ b/").and_then(clean_patch_path) {
+            files.insert(path);
+        } else if let Some(path) = line.strip_prefix("--- a/").and_then(clean_patch_path) {
+            files.insert(path);
+        } else if let Some(path) = line.strip_prefix("rename from ").and_then(clean_patch_path) {
+            files.insert(path);
+        } else if let Some(path) = line.strip_prefix("rename to ").and_then(clean_patch_path) {
+            files.insert(path);
         }
     }
     files.into_iter().collect()
+}
+
+fn clean_patch_path(raw: &str) -> Option<String> {
+    let path = raw.split_once('\t').map_or(raw, |(path, _)| path);
+    if path.is_empty() || path == "/dev/null" {
+        None
+    } else {
+        Some(path.to_string())
+    }
 }
 
 fn run_git_apply<const N: usize>(
@@ -3520,6 +3529,33 @@ diff --git a/src/main.rs b/src/main.rs
 +new
 ";
         assert_eq!(extract_patch_files(patch), vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn extracts_patch_files_without_header_metadata() {
+        let patch = "\
+diff --git a/space name.txt b/space name.txt
+--- a/space name.txt\t2026-05-24
++++ b/space name.txt\t2026-05-24
+@@ -1 +1 @@
+-old
++new
+";
+        assert_eq!(extract_patch_files(patch), vec!["space name.txt"]);
+    }
+
+    #[test]
+    fn extracts_patch_files_from_rename_headers() {
+        let patch = "\
+diff --git a/old name.txt b/new name.txt
+similarity index 100%
+rename from old name.txt
+rename to new name.txt
+";
+        assert_eq!(
+            extract_patch_files(patch),
+            vec!["new name.txt", "old name.txt"]
+        );
     }
 
     #[test]
