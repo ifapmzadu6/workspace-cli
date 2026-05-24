@@ -3636,15 +3636,6 @@ fn personalized_pagerank(
         graph.entry(seed.clone()).or_default();
     }
 
-    let active_seeds = seed_files
-        .iter()
-        .filter(|seed| graph.contains_key(*seed))
-        .cloned()
-        .collect::<Vec<_>>();
-    if active_seeds.is_empty() {
-        return vec![];
-    }
-
     let outbound_weights = graph
         .iter()
         .map(|(node, neighbors)| {
@@ -3654,9 +3645,9 @@ fn personalized_pagerank(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let seed_probability = 1.0 / active_seeds.len() as f64;
+    let seed_probability = 1.0 / seed_files.len() as f64;
     let mut personalization = BTreeMap::<String, f64>::new();
-    for seed in &active_seeds {
+    for seed in seed_files {
         personalization.insert(seed.clone(), seed_probability);
     }
     let mut rank = personalization.clone();
