@@ -3217,13 +3217,7 @@ fn rank_cochanges(
     for (path, item) in accumulators {
         push_bounded_sorted(
             &mut related,
-            RelatedFile {
-                path,
-                score: normalized_rank_score(item.weighted_cochanges, max_weight),
-                cochanged_commits: item.cochanged_commits,
-                weighted_cochanges: round3(item.weighted_cochanges),
-                sample_commits: item.sample_commits,
-            },
+            related_file_from_accumulator(path, item, max_weight),
             max_results,
             compare_related_by_weight,
         );
@@ -3288,13 +3282,7 @@ fn rank_cochanges_from_index(
 
         push_bounded_sorted(
             &mut related,
-            RelatedFile {
-                path,
-                score: normalized_rank_score(edge.weighted_cochanges, max_weight),
-                cochanged_commits: edge.cochanged_commits,
-                weighted_cochanges: edge.weighted_cochanges,
-                sample_commits: edge.sample_commits.clone(),
-            },
+            related_file_from_edge(path, edge, max_weight),
             max_results,
             compare_related_by_weight,
         );
@@ -3831,6 +3819,30 @@ fn indexed_file_commit_count(index: &CochangeIndex, file: &str) -> usize {
 
 fn max_rank_weight(weights: impl IntoIterator<Item = f64>) -> f64 {
     weights.into_iter().fold(0.0, f64::max)
+}
+
+fn related_file_from_accumulator(
+    path: String,
+    item: CochangeAccumulator,
+    max_weight: f64,
+) -> RelatedFile {
+    RelatedFile {
+        path,
+        score: normalized_rank_score(item.weighted_cochanges, max_weight),
+        cochanged_commits: item.cochanged_commits,
+        weighted_cochanges: round3(item.weighted_cochanges),
+        sample_commits: item.sample_commits,
+    }
+}
+
+fn related_file_from_edge(path: String, edge: &CochangeEdge, max_weight: f64) -> RelatedFile {
+    RelatedFile {
+        path,
+        score: normalized_rank_score(edge.weighted_cochanges, max_weight),
+        cochanged_commits: edge.cochanged_commits,
+        weighted_cochanges: edge.weighted_cochanges,
+        sample_commits: edge.sample_commits.clone(),
+    }
 }
 
 fn impact_file_from_accumulator(
@@ -6931,6 +6943,39 @@ src/b.rs
         assert_eq!(file.weighted_cochanges, 0.667);
         assert_eq!(file.seed_files, vec!["src/a.rs", "src/z.rs"]);
         assert_eq!(file.sample_commits, vec!["aaaaaaaaaaaa"]);
+    }
+
+    #[test]
+    fn related_file_helpers_preserve_rank_fields() {
+        let file = related_file_from_accumulator(
+            "src/related.rs".to_string(),
+            CochangeAccumulator {
+                cochanged_commits: 2,
+                weighted_cochanges: 2.0 / 3.0,
+                sample_commits: vec!["aaaaaaaaaaaa".to_string()],
+            },
+            2.0,
+        );
+
+        assert_eq!(file.path, "src/related.rs");
+        assert_eq!(file.score, 0.333);
+        assert_eq!(file.cochanged_commits, 2);
+        assert_eq!(file.weighted_cochanges, 0.667);
+        assert_eq!(file.sample_commits, vec!["aaaaaaaaaaaa"]);
+
+        let edge = CochangeEdge {
+            a: "src/a.rs".to_string(),
+            b: "src/b.rs".to_string(),
+            cochanged_commits: 4,
+            weighted_cochanges: 1.25,
+            sample_commits: vec!["bbbbbbbbbbbb".to_string()],
+        };
+        let file = related_file_from_edge("src/b.rs".to_string(), &edge, 2.5);
+
+        assert_eq!(file.score, 0.5);
+        assert_eq!(file.cochanged_commits, 4);
+        assert_eq!(file.weighted_cochanges, 1.25);
+        assert_eq!(file.sample_commits, vec!["bbbbbbbbbbbb"]);
     }
 
     #[test]
