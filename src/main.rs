@@ -2830,25 +2830,24 @@ fn parse_git_log_name_only(output: &str) -> Vec<GitCommitFiles> {
 
 fn read_git_log_name_only<R: Read>(reader: R) -> Result<Vec<GitCommitFiles>> {
     let mut reader = BufReader::new(reader);
-    let mut line = Vec::new();
     let mut state = GitLogNameOnlyState::default();
+    let mut line_number = 1usize;
 
-    loop {
-        line.clear();
-        let bytes_read = reader
-            .read_until(b'\n', &mut line)
-            .context("failed to read git log output")?;
-        if bytes_read == 0 {
-            break;
+    while let Some(line) = read_bounded_output_line(
+        &mut reader,
+        line_number,
+        MAX_GIT_OUTPUT_LINE_BYTES,
+        "git log output",
+    )? {
+        line_number += 1;
+        if line.exceeded {
+            bail!(
+                "git log output line {} exceeded {} bytes",
+                line.line_number,
+                MAX_GIT_OUTPUT_LINE_BYTES
+            );
         }
-        while line
-            .last()
-            .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
-        {
-            line.pop();
-        }
-
-        let line = String::from_utf8_lossy(&line);
+        let line = String::from_utf8_lossy(&line.bytes);
         state.push_line(&line);
     }
 
@@ -2930,32 +2929,7 @@ where
 }
 
 fn read_git_name_only_paths<R: Read>(reader: R) -> Result<Vec<String>> {
-    let mut reader = BufReader::new(reader);
-    let mut line = Vec::new();
-    let mut paths = Vec::new();
-
-    loop {
-        line.clear();
-        let bytes_read = reader
-            .read_until(b'\n', &mut line)
-            .context("failed to read git name-only output")?;
-        if bytes_read == 0 {
-            break;
-        }
-        while line
-            .last()
-            .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
-        {
-            line.pop();
-        }
-
-        let line = String::from_utf8_lossy(&line);
-        if let Some(path) = git_name_only_path(&line) {
-            paths.push(path);
-        }
-    }
-
-    Ok(paths)
+    read_git_name_only_paths_limited(reader, usize::MAX).map(|paths| paths.files)
 }
 
 fn read_git_name_only_paths_limited<R: Read>(
@@ -3756,24 +3730,23 @@ where
     F: FnMut(&str, String),
 {
     let mut reader = BufReader::new(reader);
-    let mut line = Vec::new();
+    let mut line_number = 1usize;
 
-    loop {
-        line.clear();
-        let bytes_read = reader
-            .read_until(b'\n', &mut line)
-            .context("failed to read git status output")?;
-        if bytes_read == 0 {
-            break;
+    while let Some(line) = read_bounded_output_line(
+        &mut reader,
+        line_number,
+        MAX_GIT_OUTPUT_LINE_BYTES,
+        "git status output",
+    )? {
+        line_number += 1;
+        if line.exceeded {
+            bail!(
+                "git status output line {} exceeded {} bytes",
+                line.line_number,
+                MAX_GIT_OUTPUT_LINE_BYTES
+            );
         }
-        while line
-            .last()
-            .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
-        {
-            line.pop();
-        }
-
-        let line = String::from_utf8_lossy(&line);
+        let line = String::from_utf8_lossy(&line.bytes);
         if line.len() < 4 {
             continue;
         }
@@ -5373,6 +5346,22 @@ mod tests {
     }
 
     #[test]
+    fn rejects_oversized_git_name_only_lines() {
+        let output = format!("{}\n", "x".repeat(MAX_GIT_OUTPUT_LINE_BYTES + 1));
+
+        let Err(error) = read_git_name_only_paths(std::io::Cursor::new(output)) else {
+            panic!("oversized git name-only line should fail");
+        };
+        let error = format!("{error:#}");
+
+        assert!(
+            error.contains("git name-only output line 1"),
+            "unexpected error: {error}"
+        );
+        assert!(error.contains("exceeded"), "unexpected error: {error}");
+    }
+
+    #[test]
     fn decodes_git_status_paths() {
         assert_eq!(
             git_status_path("\"src/tab\\tname.txt\"").unwrap(),
@@ -5400,6 +5389,26 @@ mod tests {
                 ("??".to_string(), "new/file.rs".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn rejects_oversized_git_status_lines() {
+        let output = format!(" M {}\n", "x".repeat(MAX_GIT_OUTPUT_LINE_BYTES + 1));
+        let mut entries = Vec::new();
+
+        let Err(error) = read_git_status_stdout(std::io::Cursor::new(output), &mut |code, path| {
+            entries.push((code.to_string(), path));
+        }) else {
+            panic!("oversized git status line should fail");
+        };
+        let error = format!("{error:#}");
+
+        assert!(entries.is_empty());
+        assert!(
+            error.contains("git status output line 1"),
+            "unexpected error: {error}"
+        );
+        assert!(error.contains("exceeded"), "unexpected error: {error}");
     }
 
     #[test]
@@ -5849,6 +5858,25 @@ src/b.rs
         assert_eq!(commits[0].hash, "aaaaaaaaaaaa");
         assert_eq!(commits[0].files, vec!["src/a.rs", "src/tab\tname.rs"]);
         assert_eq!(commits[1].files, vec!["src/b.rs"]);
+    }
+
+    #[test]
+    fn rejects_oversized_git_log_lines() {
+        let log = format!(
+            "commit:aaaaaaaaaaaa\n{}\n",
+            "x".repeat(MAX_GIT_OUTPUT_LINE_BYTES + 1)
+        );
+
+        let Err(error) = read_git_log_name_only(std::io::Cursor::new(log)) else {
+            panic!("oversized git log line should fail");
+        };
+        let error = format!("{error:#}");
+
+        assert!(
+            error.contains("git log output line 2"),
+            "unexpected error: {error}"
+        );
+        assert!(error.contains("exceeded"), "unexpected error: {error}");
     }
 
     #[test]
