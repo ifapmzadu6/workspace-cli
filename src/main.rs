@@ -3271,18 +3271,23 @@ fn read_log(workspace: &Workspace, limit: usize) -> Result<Vec<LogEntry>> {
     }
     let text = fs::read_to_string(&path)
         .with_context(|| format!("failed to read log {}", path.display()))?;
-    let mut entries = parse_log_entries(&text)
-        .with_context(|| format!("failed to parse operation log {}", path.display()))?;
-    if entries.len() > limit {
-        entries = entries.split_off(entries.len() - limit);
-    }
-    Ok(entries)
+    parse_log_entries(&text, limit)
+        .with_context(|| format!("failed to parse operation log {}", path.display()))
 }
 
-fn parse_log_entries(text: &str) -> Result<Vec<LogEntry>> {
-    text.lines()
+fn parse_log_entries(text: &str, limit: usize) -> Result<Vec<LogEntry>> {
+    let lines = text
+        .lines()
         .enumerate()
         .filter(|(_, line)| !line.trim().is_empty())
+        .collect::<Vec<_>>();
+    let start = if limit == 0 {
+        lines.len()
+    } else {
+        lines.len().saturating_sub(limit)
+    };
+    lines[start..]
+        .iter()
         .map(|(idx, line)| {
             serde_json::from_str::<LogEntry>(line)
                 .with_context(|| format!("invalid operation log JSON at line {}", idx + 1))

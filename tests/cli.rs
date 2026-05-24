@@ -738,6 +738,31 @@ fn log_parse_errors_include_line_number() {
     );
 }
 
+#[test]
+fn log_limit_ignores_corrupt_entries_outside_requested_window() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(
+        root,
+        ".workspace/log.jsonl",
+        "\
+not json
+{\"id\":\"op-1\",\"timestamp_unix_ms\":1,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"one\",\"transaction_id\":null}
+{\"id\":\"op-2\",\"timestamp_unix_ms\":2,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"two\",\"transaction_id\":null}
+{\"id\":\"op-3\",\"timestamp_unix_ms\":3,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"three\",\"transaction_id\":null}
+",
+    );
+
+    let log = run_workspace(root, &["log", "--limit", "2", "--json"]);
+    let entries = log["data"]["entries"]
+        .as_array()
+        .expect("log entries should be an array");
+
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["id"], "op-2");
+    assert_eq!(entries[1]["id"], "op-3");
+}
+
 fn paths_at(value: &Value, path: &[&str]) -> Vec<String> {
     let mut cursor = value;
     for segment in path {
