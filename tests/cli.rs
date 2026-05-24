@@ -438,6 +438,48 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn patch_does_not_apply_when_transaction_storage_fails() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+    write_file(
+        root,
+        "change.patch",
+        "\
+diff --git a/note.txt b/note.txt
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-hello
++hello workspace
+",
+    );
+    write_file(root, ".workspace/transactions", "not a directory\n");
+
+    let stderr = run_workspace_failure(
+        root,
+        &[
+            "patch",
+            "--description",
+            "update note",
+            "change.patch",
+            "--json",
+        ],
+    );
+
+    assert!(
+        stderr.contains("failed to create transaction directory"),
+        "unexpected stderr: {stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello\n"
+    );
+}
+
+#[test]
 fn patch_reports_files_from_binary_patch_headers() {
     let temp = init_git_repo();
     let root = temp.path();

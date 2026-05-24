@@ -1153,7 +1153,6 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
     let files_changed = extract_patch_files(&patch_content);
     run_git_apply(workspace, &patch_path, ["--check"])?;
-    run_git_apply(workspace, &patch_path, [])?;
 
     let transaction_id = new_id("tx");
     let transaction_dir = workspace.transaction_dir();
@@ -1164,8 +1163,12 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         )
     })?;
     let stored_patch = transaction_dir.join(format!("{transaction_id}.patch"));
-    fs::write(&stored_patch, patch_content)
+    fs::write(&stored_patch, &patch_content)
         .with_context(|| format!("failed to store patch {}", stored_patch.display()))?;
+    if let Err(error) = run_git_apply(workspace, &patch_path, []) {
+        let _ = fs::remove_file(&stored_patch);
+        return Err(error);
+    }
 
     let data = PatchData {
         transaction_id: transaction_id.clone(),
