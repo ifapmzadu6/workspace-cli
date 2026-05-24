@@ -101,6 +101,7 @@ const INDEX_STATUS_STALE: &str = "stale";
 const INDEX_STATUS_MISSING: &str = "missing";
 const INDEX_STATUS_INVALID: &str = "invalid";
 const INDEX_STATUS_NOT_GIT_REPO: &str = "not_git_repo";
+const SUMMARY_NOT_GIT_REPOSITORY: &str = "not a git repository";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -1292,7 +1293,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
         (
             DiffData {
                 is_repo: false,
-                summary: "not a git repository".to_string(),
+                summary: SUMMARY_NOT_GIT_REPOSITORY.to_string(),
                 file_count: 0,
                 files: vec![],
                 omitted_files: 0,
@@ -2020,7 +2021,7 @@ fn status_summary(data: &StatusData, truncated: bool) -> String {
             status_log_note(data)
         )
     } else {
-        "not a git repository".to_string()
+        SUMMARY_NOT_GIT_REPOSITORY.to_string()
     };
     if truncated {
         summary.push_str(" (status truncated)");
@@ -2044,7 +2045,7 @@ fn index_status_summary(data: &IndexStatusData) -> String {
         INDEX_STATUS_STALE => "co-change index is stale".to_string(),
         INDEX_STATUS_MISSING => "co-change index is missing".to_string(),
         INDEX_STATUS_INVALID => "co-change index is invalid".to_string(),
-        INDEX_STATUS_NOT_GIT_REPO => "not a git repository".to_string(),
+        INDEX_STATUS_NOT_GIT_REPO => SUMMARY_NOT_GIT_REPOSITORY.to_string(),
         _ => data.status.clone(),
     }
 }
@@ -2065,7 +2066,7 @@ fn related_summary(data: &RelatedData) -> String {
             data.method
         )
     } else {
-        "not a git repository".to_string()
+        SUMMARY_NOT_GIT_REPOSITORY.to_string()
     }
 }
 
@@ -2082,7 +2083,7 @@ fn impact_summary(data: &ImpactData) -> String {
         }
         summary
     } else {
-        "not a git repository".to_string()
+        SUMMARY_NOT_GIT_REPOSITORY.to_string()
     }
 }
 
@@ -5675,7 +5676,7 @@ fn print_map(observation: &Observation<WorkspaceMap>) -> Result<()> {
                 map.git.untracked_file_count
             )
         } else {
-            "not a git repository".to_string()
+            SUMMARY_NOT_GIT_REPOSITORY.to_string()
         }
     );
     println!("  languages: {}", join_or_none(&map.stack.languages));
@@ -6607,6 +6608,11 @@ rename to new name.txt
     }
 
     #[test]
+    fn summary_label_constants_match_human_contract() {
+        assert_eq!(SUMMARY_NOT_GIT_REPOSITORY, "not a git repository");
+    }
+
+    #[test]
     fn log_label_constants_match_operation_log_contract() {
         assert_eq!(
             [LOG_KIND_OBSERVE, LOG_KIND_CHANGE, LOG_KIND_VERIFY],
@@ -7105,7 +7111,7 @@ rename to new name.txt
             (INDEX_STATUS_STALE, "co-change index is stale"),
             (INDEX_STATUS_MISSING, "co-change index is missing"),
             (INDEX_STATUS_INVALID, "co-change index is invalid"),
-            (INDEX_STATUS_NOT_GIT_REPO, "not a git repository"),
+            (INDEX_STATUS_NOT_GIT_REPO, SUMMARY_NOT_GIT_REPOSITORY),
             ("custom", "custom"),
         ] {
             assert_eq!(
@@ -7234,7 +7240,7 @@ rename to new name.txt
             related: vec![],
             ..data
         };
-        assert_eq!(related_summary(&data), "not a git repository");
+        assert_eq!(related_summary(&data), SUMMARY_NOT_GIT_REPOSITORY);
     }
 
     #[test]
@@ -7273,7 +7279,7 @@ rename to new name.txt
             omitted_seed_files: 0,
             ..data
         };
-        assert_eq!(impact_summary(&data), "not a git repository");
+        assert_eq!(impact_summary(&data), SUMMARY_NOT_GIT_REPOSITORY);
     }
 
     #[test]
@@ -7528,14 +7534,17 @@ rename to new name.txt
 
         let data = DiffData {
             is_repo: false,
-            summary: "not a git repository".to_string(),
+            summary: SUMMARY_NOT_GIT_REPOSITORY.to_string(),
             file_count: 0,
             files: vec![],
             omitted_files: 0,
             patch: None,
         };
 
-        assert_eq!(diff_summary(&data, false, false), "not a git repository");
+        assert_eq!(
+            diff_summary(&data, false, false),
+            SUMMARY_NOT_GIT_REPOSITORY
+        );
     }
 
     #[test]
