@@ -432,6 +432,20 @@ cat <<'JSON'
   "mode": "direct:on-demand:GitCli",
   "related": [
     {
+      "path": ".workspace/log.jsonl",
+      "score": 0.99,
+      "cochanges": 4,
+      "weight": 2.0,
+      "evidence": [{"hash": "9999999999999999"}]
+    },
+    {
+      "path": "../outside.rs",
+      "score": 0.95,
+      "cochanges": 3,
+      "weight": 1.9,
+      "evidence": [{"hash": "eeeeeeeeeeeeeeee"}]
+    },
+    {
       "path": "src/b.rs",
       "score": 0.75,
       "cochanges": 2,
@@ -461,12 +475,16 @@ JSON
     );
 
     assert_eq!(related["kind"], "workspace_related");
+    let related_paths = paths_at(&related, &["data", "related"]);
     assert!(
         related["data"]["relationship_source"]
             .as_str()
             .expect("relationship source should be a string")
             .starts_with("related-cli:")
     );
+    assert!(!related_paths.contains(&".workspace/log.jsonl".to_string()));
+    assert!(!related_paths.contains(&"../outside.rs".to_string()));
+    assert!(related_paths.contains(&"src/b.rs".to_string()));
     assert_eq!(related["data"]["related"][0]["path"], "src/b.rs");
     assert_eq!(related["data"]["related"][0]["cochanged_commits"], 2);
     assert_eq!(
@@ -488,6 +506,10 @@ JSON
             .starts_with("related-cli:direct:aggregate")
     );
     assert!(strings_at(&impact, &["data", "seed_files"]).contains(&"src/a.rs".to_string()));
+    let impacted_paths = paths_at(&impact, &["data", "impacted"]);
+    assert!(!impacted_paths.contains(&".workspace/log.jsonl".to_string()));
+    assert!(!impacted_paths.contains(&"../outside.rs".to_string()));
+    assert!(impacted_paths.contains(&"src/b.rs".to_string()));
     assert_eq!(impact["data"]["impacted"][0]["path"], "src/b.rs");
 }
 

@@ -1778,10 +1778,14 @@ fn related_data_from_related_cli(
     max_files_per_commit: usize,
     rank: RankingMethod,
 ) -> RelatedData {
-    let commits_matched = output
+    let related = output
         .related
+        .into_iter()
+        .filter_map(related_file_from_related_cli)
+        .collect::<Vec<_>>();
+    let commits_matched = related
         .iter()
-        .map(|item| item.cochanges)
+        .map(|item| item.cochanged_commits)
         .max()
         .unwrap_or(0);
     RelatedData {
@@ -1795,17 +1799,14 @@ fn related_data_from_related_cli(
         ignored_large_commits: 0,
         max_commits,
         max_files_per_commit,
-        related: output
-            .related
-            .into_iter()
-            .map(related_file_from_related_cli)
-            .collect(),
+        related,
     }
 }
 
-fn related_file_from_related_cli(item: RelatedCliItem) -> RelatedFile {
-    RelatedFile {
-        path: normalize_repo_path(&item.path),
+fn related_file_from_related_cli(item: RelatedCliItem) -> Option<RelatedFile> {
+    let path = normalize_repo_path(&item.path);
+    should_include_repo_file(&path).then(|| RelatedFile {
+        path,
         score: round3(item.score),
         cochanged_commits: item.cochanges,
         weighted_cochanges: round3(item.weight),
@@ -1814,7 +1815,7 @@ fn related_file_from_related_cli(item: RelatedCliItem) -> RelatedFile {
             .iter()
             .map(|evidence| short_commit(&evidence.hash).to_string())
             .collect(),
-    }
+    })
 }
 
 fn build_cochange_index(
@@ -2106,7 +2107,7 @@ fn impact_by_related_cli(
         )?;
         for item in output.related {
             let path = normalize_repo_path(&item.path);
-            if seed_set.contains(&path) {
+            if !should_include_repo_file(&path) || seed_set.contains(&path) {
                 continue;
             }
             let accumulator = accumulators.entry(path).or_default();
@@ -2935,15 +2936,19 @@ fn normalize_repo_path(path: &str) -> String {
     path.trim()
         .trim_start_matches("./")
         .replace('\\', "/")
-        .trim_matches('/')
+        .trim_end_matches('/')
         .to_string()
 }
 
 fn should_include_repo_file(path: &str) -> bool {
     !path.is_empty()
+        && !path.starts_with('/')
         && path != LOG_DIR
         && !path.starts_with(&format!("{LOG_DIR}/"))
         && !path.starts_with(".git/")
+        && path
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
 fn short_commit(hash: &str) -> String {
@@ -3959,6 +3964,18 @@ not json
             .expect("zero limit should parse");
 
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn excludes_non_observable_repo_paths() {
+        assert!(should_include_repo_file("src/main.rs"));
+        assert!(should_include_repo_file("space name.txt"));
+        assert!(!should_include_repo_file(".workspace/log.jsonl"));
+        assert!(!should_include_repo_file(".git/config"));
+        assert!(!should_include_repo_file("../outside.rs"));
+        assert!(!should_include_repo_file("src/../outside.rs"));
+        assert!(!should_include_repo_file("/tmp/outside.rs"));
+        assert!(!should_include_repo_file("src//main.rs"));
     }
 
     #[test]
