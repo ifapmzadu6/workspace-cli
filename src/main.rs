@@ -2467,9 +2467,7 @@ fn cochange_index_from_commits(
                 let accumulator = accumulators.entry(key).or_default();
                 accumulator.cochanged_commits += 1;
                 accumulator.weighted_cochanges += weight;
-                if accumulator.sample_commits.len() < MAX_SAMPLE_COMMITS {
-                    accumulator.sample_commits.push(short_commit(&commit.hash));
-                }
+                push_sample_commit(&mut accumulator.sample_commits, short_commit(&commit.hash));
             }
         }
     }
@@ -2801,12 +2799,12 @@ fn impact_by_related_cli(
             accumulator.weighted_cochanges += item.weight;
             accumulator.seed_files.insert(seed.clone());
             for evidence in item.evidence {
-                if accumulator.sample_commits.len() >= MAX_SAMPLE_COMMITS {
+                if !push_sample_commit(
+                    &mut accumulator.sample_commits,
+                    short_commit(&evidence.hash),
+                ) {
                     break;
                 }
-                accumulator
-                    .sample_commits
-                    .push(short_commit(&evidence.hash).to_string());
             }
         }
     }
@@ -3214,9 +3212,7 @@ fn rank_cochanges(
             let accumulator = accumulators.entry(file).or_default();
             accumulator.cochanged_commits += 1;
             accumulator.weighted_cochanges += weight;
-            if accumulator.sample_commits.len() < MAX_SAMPLE_COMMITS {
-                accumulator.sample_commits.push(short_commit(&commit.hash));
-            }
+            push_sample_commit(&mut accumulator.sample_commits, short_commit(&commit.hash));
         }
     }
 
@@ -3423,9 +3419,7 @@ fn rank_cochange_impact(
             accumulator.cochanged_commits += 1;
             accumulator.weighted_cochanges += weight;
             accumulator.seed_files.extend(matched_seeds.iter().cloned());
-            if accumulator.sample_commits.len() < MAX_SAMPLE_COMMITS {
-                accumulator.sample_commits.push(short_commit(&commit.hash));
-            }
+            push_sample_commit(&mut accumulator.sample_commits, short_commit(&commit.hash));
         }
     }
 
@@ -3496,11 +3490,8 @@ fn rank_cochange_impact_from_index(
         accumulator.weighted_cochanges += edge.weighted_cochanges;
         accumulator.seed_files.insert(seed);
         for commit in &edge.sample_commits {
-            if accumulator.sample_commits.len() >= MAX_SAMPLE_COMMITS {
+            if !push_unique_sample_commit(&mut accumulator.sample_commits, commit) {
                 break;
-            }
-            if !accumulator.sample_commits.contains(commit) {
-                accumulator.sample_commits.push(commit.clone());
             }
         }
     }
@@ -3568,11 +3559,8 @@ fn rank_cochange_impact_pagerank_from_index(
                     direct_weight += edge.weighted_cochanges;
                     direct_seeds.insert(seed.clone());
                     for commit in &edge.sample_commits {
-                        if sample_commits.len() >= MAX_SAMPLE_COMMITS {
+                        if !push_unique_sample_commit(&mut sample_commits, commit) {
                             break;
-                        }
-                        if !sample_commits.contains(commit) {
-                            sample_commits.push(commit.clone());
                         }
                     }
                 }
@@ -3857,6 +3845,24 @@ fn has_windows_drive_prefix(path: &str) -> bool {
 
 fn short_commit(hash: &str) -> String {
     hash.chars().take(12).collect()
+}
+
+fn push_sample_commit(sample_commits: &mut Vec<String>, commit: String) -> bool {
+    if sample_commits.len() >= MAX_SAMPLE_COMMITS {
+        return false;
+    }
+    sample_commits.push(commit);
+    true
+}
+
+fn push_unique_sample_commit(sample_commits: &mut Vec<String>, commit: &str) -> bool {
+    if sample_commits.len() >= MAX_SAMPLE_COMMITS {
+        return false;
+    }
+    if !sample_commits.iter().any(|existing| existing == commit) {
+        sample_commits.push(commit.to_string());
+    }
+    true
 }
 
 fn round3(value: f64) -> f64 {
@@ -6822,6 +6828,22 @@ src/b.rs
             .unwrap();
         assert_eq!(indirect.cochanged_commits, 0);
         assert_eq!(indirect.seed_files, vec!["src/a.rs"]);
+    }
+
+    #[test]
+    fn sample_commit_helpers_bound_and_deduplicate() {
+        let mut samples = Vec::new();
+        for index in 0..(MAX_SAMPLE_COMMITS + 1) {
+            let pushed = push_sample_commit(&mut samples, format!("commit-{index}"));
+            assert_eq!(pushed, index < MAX_SAMPLE_COMMITS);
+        }
+        assert_eq!(samples.len(), MAX_SAMPLE_COMMITS);
+
+        let mut unique_samples = vec!["commit-a".to_string()];
+        assert!(push_unique_sample_commit(&mut unique_samples, "commit-a"));
+        assert_eq!(unique_samples, vec!["commit-a"]);
+        assert!(push_unique_sample_commit(&mut unique_samples, "commit-b"));
+        assert_eq!(unique_samples, vec!["commit-a", "commit-b"]);
     }
 
     #[test]
