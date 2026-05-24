@@ -348,6 +348,29 @@ fn index_related_impact_and_status_cover_cochange_flow() {
     assert!(impacted_paths.contains(&"tests/b_test.rs".to_string()));
 }
 
+#[test]
+fn impact_decodes_git_quoted_seed_paths() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    let seed = "src/tab\tname.rs";
+
+    write_file(root, seed, "seed\n");
+    write_file(root, "src/neighbor.rs", "neighbor\n");
+    commit_all(root, "seed with neighbor");
+    append_file(root, seed, "changed\n");
+
+    let impact = run_workspace(root, &["impact", "--diff", "--by", "cochange", "--json"]);
+    let seed_files = strings_at(&impact, &["data", "seed_files"]);
+    let impacted_paths = paths_at(&impact, &["data", "impacted"]);
+
+    assert_eq!(impact["kind"], "workspace_impact");
+    assert!(
+        seed_files.contains(&seed.to_string()),
+        "seed files should decode git quoting: {seed_files:?}"
+    );
+    assert!(impacted_paths.contains(&"src/neighbor.rs".to_string()));
+}
+
 #[cfg(unix)]
 #[test]
 fn related_can_delegate_to_related_cli() {
@@ -656,6 +679,48 @@ fn diff_quotes_read_suggestions_for_paths_that_need_shell_quoting() {
     assert_eq!(diff["kind"], "workspace_diff");
     assert!(strings_at(&diff, &["data", "files"]).contains(&"space name.txt".to_string()));
     assert!(next.contains(&"workspace read 'space name.txt'".to_string()));
+}
+
+#[test]
+fn diff_decodes_git_quoted_name_only_paths() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    let path = "src/tab\tname.txt";
+
+    write_file(root, path, "old\n");
+    commit_all(root, "initial tab path");
+    write_file(root, path, "new\n");
+
+    let diff = run_workspace(root, &["diff", "--summary", "--json"]);
+    let files = strings_at(&diff, &["data", "files"]);
+    let next = strings_at(&diff, &["next_observations"]);
+
+    assert_eq!(diff["kind"], "workspace_diff");
+    assert!(
+        files.contains(&path.to_string()),
+        "files should decode git quoting: {files:?}"
+    );
+    assert!(next.contains(&format!("workspace read '{path}'")));
+}
+
+#[test]
+fn status_decodes_git_quoted_paths() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    let path = "src/tab\tname.txt";
+
+    write_file(root, path, "old\n");
+    commit_all(root, "initial tab path");
+    write_file(root, path, "new\n");
+
+    let status = run_workspace(root, &["status", "--json"]);
+    let dirty = strings_at(&status, &["data", "git", "dirty_files"]);
+
+    assert_eq!(status["kind"], "workspace_status");
+    assert!(
+        dirty.contains(&path.to_string()),
+        "dirty files should decode git quoting: {dirty:?}"
+    );
 }
 
 #[test]

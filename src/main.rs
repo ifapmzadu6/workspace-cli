@@ -1111,11 +1111,7 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
 fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     let data = if workspace.is_git_repo {
         let summary = git_observable_diff_output(workspace, ["--stat"])?;
-        let files = git_observable_diff_output(workspace, ["--name-only"])?
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(ToOwned::to_owned)
-            .collect::<Vec<_>>();
+        let files = git_name_only_paths(&git_observable_diff_output(workspace, ["--name-only"])?);
         let patch = if args.summary {
             None
         } else {
@@ -2220,11 +2216,11 @@ fn git_changed_files(workspace: &Workspace) -> Result<Vec<String>> {
         if line.len() < 4 {
             continue;
         }
-        if &line[..2] == "??" {
-            let path = normalize_repo_path(&line[3..]);
-            if should_include_repo_file(&path) {
-                files.insert(path);
-            }
+        if &line[..2] == "??"
+            && let Some(path) = git_status_path(&line[3..])
+            && should_include_repo_file(&path)
+        {
+            files.insert(path);
         }
     }
 
@@ -2236,8 +2232,7 @@ fn collect_git_name_only<const N: usize>(
     args: [&str; N],
     files: &mut BTreeSet<String>,
 ) -> Result<()> {
-    for line in git_output(workspace, args)?.lines() {
-        let path = normalize_repo_path(line);
+    for path in git_name_only_paths(&git_output(workspace, args)?) {
         if should_include_repo_file(&path) {
             files.insert(path);
         }
@@ -2296,8 +2291,9 @@ fn parse_git_log_name_only(output: &str) -> Vec<GitCommitFiles> {
             continue;
         }
 
-        let path = normalize_repo_path(line.trim());
-        if should_include_repo_file(&path) {
+        if let Some(path) = git_name_only_path(line)
+            && should_include_repo_file(&path)
+        {
             current_files.insert(path);
         }
     }
@@ -2317,6 +2313,35 @@ fn push_commit(
             files: std::mem::take(current_files).into_iter().collect(),
         });
     }
+}
+
+fn git_name_only_paths(output: &str) -> Vec<String> {
+    output.lines().filter_map(git_name_only_path).collect()
+}
+
+fn git_name_only_path(line: &str) -> Option<String> {
+    let raw = line.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let decoded = if raw.starts_with('"') {
+        let (path, rest) = unquote_git_path(raw)?;
+        if !rest.trim().is_empty() {
+            return None;
+        }
+        path
+    } else {
+        raw.to_string()
+    };
+    let normalized = normalize_repo_path(&decoded);
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn git_status_path(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let path = raw.rsplit_once(" -> ").map_or(raw, |(_, path)| path);
+    git_name_only_path(path)
 }
 
 fn rank_cochanges(
@@ -2969,7 +2994,9 @@ fn git_summary(workspace: &Workspace) -> Result<GitSummary> {
             continue;
         }
         let code = &line[..2];
-        let path = line[3..].to_string();
+        let Some(path) = git_status_path(&line[3..]) else {
+            continue;
+        };
         if path == LOG_DIR || path.starts_with(&format!("{LOG_DIR}/")) {
             continue;
         }
@@ -3768,6 +3795,31 @@ mod tests {
         assert_eq!(shell_hint("space name.txt"), "'space name.txt'");
         assert_eq!(shell_hint("weird$path.txt"), "'weird$path.txt'");
         assert_eq!(shell_hint("quote'name.txt"), "'quote'\\''name.txt'");
+    }
+
+    #[test]
+    fn decodes_git_quoted_path_lines() {
+        assert_eq!(git_name_only_path("src/main.rs").unwrap(), "src/main.rs");
+        assert_eq!(
+            git_name_only_path("\"src/tab\\tname.txt\"").unwrap(),
+            "src/tab\tname.txt"
+        );
+        assert_eq!(
+            git_name_only_paths("src/a.rs\n\"src/tab\\tname.txt\"\n"),
+            vec!["src/a.rs", "src/tab\tname.txt"]
+        );
+    }
+
+    #[test]
+    fn decodes_git_status_paths() {
+        assert_eq!(
+            git_status_path("\"src/tab\\tname.txt\"").unwrap(),
+            "src/tab\tname.txt"
+        );
+        assert_eq!(
+            git_status_path("\"old\\tname.txt\" -> \"new\\tname.txt\"").unwrap(),
+            "new\tname.txt"
+        );
     }
 
     #[test]
