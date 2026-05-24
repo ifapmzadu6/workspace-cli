@@ -515,6 +515,27 @@ fn diff_includes_staged_changes() {
 }
 
 #[test]
+fn diff_does_not_suggest_reading_deleted_files() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "deleted.txt", "gone\n");
+    write_file(root, "kept.txt", "old\n");
+    commit_all(root, "initial files");
+    fs::remove_file(root.join("deleted.txt")).expect("file should be removed");
+    write_file(root, "kept.txt", "new\n");
+
+    let diff = run_workspace(root, &["diff", "--summary", "--json"]);
+    let next = strings_at(&diff, &["next_observations"]);
+
+    assert_eq!(diff["kind"], "workspace_diff");
+    assert!(strings_at(&diff, &["data", "files"]).contains(&"deleted.txt".to_string()));
+    assert!(strings_at(&diff, &["data", "files"]).contains(&"kept.txt".to_string()));
+    assert!(!next.contains(&"workspace read deleted.txt".to_string()));
+    assert!(next.contains(&"workspace read kept.txt".to_string()));
+}
+
+#[test]
 fn patch_does_not_apply_when_transaction_storage_fails() {
     let temp = init_git_repo();
     let root = temp.path();

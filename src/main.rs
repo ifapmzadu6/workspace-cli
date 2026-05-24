@@ -1144,6 +1144,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     let next_observations = data
         .files
         .iter()
+        .filter(|path| workspace.resolve_path(Path::new(path)).is_file())
         .take(5)
         .map(|path| format!("workspace read {}", path))
         .collect();
