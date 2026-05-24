@@ -482,6 +482,48 @@ fn patch_reports_files_from_binary_patch_headers() {
 }
 
 #[test]
+fn patch_reports_files_from_quoted_git_paths() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "README.md", "# demo\n");
+    commit_all(root, "initial commit");
+
+    let quoted_path = "src/tab\tname.txt";
+    write_file(root, quoted_path, "quoted\n");
+    run(root, "git", &["add", quoted_path]);
+    let diff = Command::new("git")
+        .current_dir(root)
+        .args(["diff", "--cached"])
+        .output()
+        .expect("git diff should run");
+    assert!(
+        diff.status.success(),
+        "git diff failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&diff.stdout),
+        String::from_utf8_lossy(&diff.stderr)
+    );
+    fs::write(root.join("quoted.patch"), diff.stdout).expect("quoted patch should be written");
+    run(root, "git", &["reset", "-q"]);
+    fs::remove_file(root.join(quoted_path)).expect("staged quoted file should be removed");
+
+    let patch = run_workspace(
+        root,
+        &[
+            "patch",
+            "--description",
+            "add quoted path",
+            "quoted.patch",
+            "--json",
+        ],
+    );
+
+    assert_eq!(patch["kind"], "workspace_patch");
+    assert!(strings_at(&patch, &["data", "files_changed"]).contains(&quoted_path.to_string()));
+    assert!(root.join(quoted_path).exists());
+}
+
+#[test]
 fn run_records_nonzero_exit_without_failing_cli() {
     let temp = TempDir::new().expect("temp dir should be created");
 

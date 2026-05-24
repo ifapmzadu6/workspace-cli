@@ -3048,19 +3048,19 @@ fn parse_line_range(value: &str) -> Result<(usize, usize)> {
 fn extract_patch_files(patch_content: &str) -> Vec<String> {
     let mut files = BTreeSet::new();
     for line in patch_content.lines() {
-        if let Some(path) = line.strip_prefix("+++ b/").and_then(clean_patch_path) {
+        if let Some(path) = line.strip_prefix("+++ ").and_then(clean_patch_path) {
             files.insert(path);
-        } else if let Some(path) = line.strip_prefix("--- a/").and_then(clean_patch_path) {
+        } else if let Some(path) = line.strip_prefix("--- ").and_then(clean_patch_path) {
             files.insert(path);
         } else if let Some(path) = line.strip_prefix("rename from ").and_then(clean_patch_path) {
             files.insert(path);
         } else if let Some(path) = line.strip_prefix("rename to ").and_then(clean_patch_path) {
             files.insert(path);
         } else if let Some((old_path, new_path)) = diff_git_paths(line) {
-            if let Some(path) = clean_patch_path(old_path) {
+            if let Some(path) = clean_diff_git_path(&old_path) {
                 files.insert(path);
             }
-            if let Some(path) = clean_patch_path(new_path) {
+            if let Some(path) = clean_diff_git_path(&new_path) {
                 files.insert(path);
             }
         }
@@ -3068,19 +3068,95 @@ fn extract_patch_files(patch_content: &str) -> Vec<String> {
     files.into_iter().collect()
 }
 
-fn diff_git_paths(line: &str) -> Option<(&str, &str)> {
+fn diff_git_paths(line: &str) -> Option<(String, String)> {
     let rest = line.strip_prefix("diff --git ")?;
+    if rest.starts_with('"') {
+        let (old_path, rest) = unquote_git_path(rest)?;
+        let (new_path, rest) = unquote_git_path(rest.trim_start())?;
+        if rest.trim().is_empty() {
+            return Some((old_path, new_path));
+        }
+        return None;
+    }
+
     let rest = rest.strip_prefix("a/")?;
-    rest.rsplit_once(" b/")
+    let (old_path, new_path) = rest.rsplit_once(" b/")?;
+    Some((old_path.to_string(), new_path.to_string()))
 }
 
 fn clean_patch_path(raw: &str) -> Option<String> {
-    let path = raw.split_once('\t').map_or(raw, |(path, _)| path);
+    let raw = raw.trim();
+    let path = if raw.starts_with('"') {
+        unquote_git_path(raw)?.0
+    } else {
+        raw.split_once('\t')
+            .map_or(raw, |(path, _)| path)
+            .to_string()
+    };
+    clean_diff_git_path(&path)
+}
+
+fn clean_diff_git_path(raw: &str) -> Option<String> {
+    let path = raw
+        .strip_prefix("a/")
+        .or_else(|| raw.strip_prefix("b/"))
+        .unwrap_or(raw);
     if path.is_empty() || path == "/dev/null" {
         None
     } else {
         Some(path.to_string())
     }
+}
+
+fn unquote_git_path(raw: &str) -> Option<(String, &str)> {
+    let bytes = raw.as_bytes();
+    if bytes.first() != Some(&b'"') {
+        return None;
+    }
+
+    let mut output = Vec::new();
+    let mut index = 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => {
+                let path = String::from_utf8(output).ok()?;
+                return Some((path, &raw[index + 1..]));
+            }
+            b'\\' => {
+                index += 1;
+                if index >= bytes.len() {
+                    return None;
+                }
+                match bytes[index] {
+                    b'a' => output.push(0x07),
+                    b'b' => output.push(0x08),
+                    b'f' => output.push(0x0c),
+                    b'n' => output.push(b'\n'),
+                    b'r' => output.push(b'\r'),
+                    b't' => output.push(b'\t'),
+                    b'v' => output.push(0x0b),
+                    b'\\' => output.push(b'\\'),
+                    b'"' => output.push(b'"'),
+                    b'0'..=b'7' => {
+                        let mut value = bytes[index] - b'0';
+                        for _ in 0..2 {
+                            if index + 1 >= bytes.len() || !matches!(bytes[index + 1], b'0'..=b'7')
+                            {
+                                break;
+                            }
+                            index += 1;
+                            value = value * 8 + (bytes[index] - b'0');
+                        }
+                        output.push(value);
+                    }
+                    byte => output.push(byte),
+                }
+            }
+            byte => output.push(byte),
+        }
+        index += 1;
+    }
+    None
 }
 
 fn run_git_apply<const N: usize>(
@@ -3587,6 +3663,20 @@ similarity index 100%
             extract_patch_files(patch),
             vec!["assets/logo.png", "new data.bin", "old data.bin"]
         );
+    }
+
+    #[test]
+    fn extracts_patch_files_from_quoted_git_paths() {
+        let patch = "\
+diff --git \"a/src/tab\\tname.txt\" \"b/src/tab\\tname.txt\"
+new file mode 100644
+index 0000000..587be6b
+--- /dev/null
++++ \"b/src/tab\\tname.txt\"
+@@ -0,0 +1 @@
++x
+";
+        assert_eq!(extract_patch_files(patch), vec!["src/tab\tname.txt"]);
     }
 
     #[test]
