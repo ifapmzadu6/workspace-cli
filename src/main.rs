@@ -1233,36 +1233,15 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
 }
 
 fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
-    let patch_path = workspace.resolve_existing_workspace_path(&args.patch_file)?;
-    let files_changed = extract_patch_files_from_path(&patch_path)
-        .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
-    validate_patch_targets(&files_changed)?;
-    run_git_apply(workspace, &patch_path, ["--check"])?;
-    ensure_log_writable(workspace)?;
-
-    let transaction_id = new_id("tx");
-    let transaction_dir = workspace.transaction_dir();
-    fs::create_dir_all(&transaction_dir).with_context(|| {
-        format!(
-            "failed to create transaction directory {}",
-            transaction_dir.display()
-        )
-    })?;
-    let stored_patch = transaction_dir.join(format!("{transaction_id}.patch"));
-    store_transaction_patch(&patch_path, &stored_patch)?;
-    if let Err(error) = run_git_apply(workspace, &patch_path, []) {
-        let _ = fs::remove_file(&stored_patch);
-        return Err(error);
-    }
-
+    let patch = apply_patch_transaction(workspace, &args.patch_file)?;
     let data = patch_data(
         workspace,
-        &transaction_id,
-        &patch_path,
-        &stored_patch,
-        &files_changed,
+        &patch.transaction_id,
+        &patch.patch_path,
+        &patch.stored_patch,
+        &patch.files_changed,
     );
-    let observation = patch_observation(data, &files_changed);
+    let observation = patch_observation(data, &patch.files_changed);
 
     append_log(
         workspace,
@@ -1272,9 +1251,52 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         &args
             .description
             .unwrap_or_else(|| observation.summary.clone()),
-        Some(&transaction_id),
+        Some(&patch.transaction_id),
     )?;
     output_observation(args.json, &observation, print_patch)
+}
+
+fn apply_patch_transaction(
+    workspace: &Workspace,
+    patch_file: &Path,
+) -> Result<AppliedPatchTransaction> {
+    let patch_path = workspace.resolve_existing_workspace_path(patch_file)?;
+    let files_changed = extract_patch_files_from_path(&patch_path)
+        .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
+    validate_patch_targets(&files_changed)?;
+    run_git_apply(workspace, &patch_path, ["--check"])?;
+    ensure_log_writable(workspace)?;
+
+    let transaction_id = new_id("tx");
+    let stored_patch = store_transaction_patch_for_id(workspace, &transaction_id, &patch_path)?;
+    if let Err(error) = run_git_apply(workspace, &patch_path, []) {
+        let _ = fs::remove_file(&stored_patch);
+        return Err(error);
+    }
+
+    Ok(AppliedPatchTransaction {
+        transaction_id,
+        patch_path,
+        stored_patch,
+        files_changed,
+    })
+}
+
+fn store_transaction_patch_for_id(
+    workspace: &Workspace,
+    transaction_id: &str,
+    patch_path: &Path,
+) -> Result<PathBuf> {
+    let transaction_dir = workspace.transaction_dir();
+    fs::create_dir_all(&transaction_dir).with_context(|| {
+        format!(
+            "failed to create transaction directory {}",
+            transaction_dir.display()
+        )
+    })?;
+    let stored_patch = transaction_dir.join(format!("{transaction_id}.patch"));
+    store_transaction_patch(patch_path, &stored_patch)?;
+    Ok(stored_patch)
 }
 
 fn store_transaction_patch(source: &Path, destination: &Path) -> Result<()> {
@@ -1378,7 +1400,32 @@ fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
 }
 
 fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
-    let stored_patch = transaction_patch_path(workspace, &args.transaction_id)?;
+    let rollback = apply_rollback_transaction(workspace, &args.transaction_id)?;
+    let data = rollback_data(
+        workspace,
+        &args.transaction_id,
+        &rollback.rollback_transaction_id,
+        &rollback.stored_patch,
+        &rollback.files_changed,
+    );
+    let observation = rollback_observation(data, &rollback.files_changed);
+
+    append_log(
+        workspace,
+        LOG_KIND_CHANGE,
+        LOG_OP_ROLLBACK,
+        &args.transaction_id,
+        &observation.summary,
+        Some(&rollback.rollback_transaction_id),
+    )?;
+    output_observation(args.json, &observation, print_rollback)
+}
+
+fn apply_rollback_transaction(
+    workspace: &Workspace,
+    transaction_id: &str,
+) -> Result<AppliedRollbackTransaction> {
+    let stored_patch = transaction_patch_path(workspace, transaction_id)?;
     if !stored_patch.exists() {
         bail!(
             "transaction patch not found: {}",
@@ -1392,30 +1439,29 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
     ensure_log_writable(workspace)?;
     run_git_apply(workspace, &stored_patch, ["--reverse"])?;
 
-    let rollback_transaction_id = new_id("rb");
-    let data = rollback_data(
-        workspace,
-        &args.transaction_id,
-        &rollback_transaction_id,
-        &stored_patch,
-        &files_changed,
-    );
-    let observation = rollback_observation(data, &files_changed);
-
-    append_log(
-        workspace,
-        LOG_KIND_CHANGE,
-        LOG_OP_ROLLBACK,
-        &args.transaction_id,
-        &observation.summary,
-        Some(&rollback_transaction_id),
-    )?;
-    output_observation(args.json, &observation, print_rollback)
+    Ok(AppliedRollbackTransaction {
+        rollback_transaction_id: new_id("rb"),
+        stored_patch,
+        files_changed,
+    })
 }
 
 struct ObservedChangedFiles {
     files: Vec<String>,
     omitted_files: usize,
+}
+
+struct AppliedPatchTransaction {
+    transaction_id: String,
+    patch_path: PathBuf,
+    stored_patch: PathBuf,
+    files_changed: Vec<String>,
+}
+
+struct AppliedRollbackTransaction {
+    rollback_transaction_id: String,
+    stored_patch: PathBuf,
+    files_changed: Vec<String>,
 }
 
 fn observed_changed_files(files_changed: &[String]) -> ObservedChangedFiles {
@@ -7958,6 +8004,29 @@ rename to new name.txt
         assert!(observation.truncated);
         assert!(observation.evidence.is_empty());
         assert_eq!(observation.next_observations, log_followup_observations());
+    }
+
+    #[test]
+    fn store_transaction_patch_for_id_creates_transaction_directory() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: true,
+        };
+        let source = temp.path().join("change.patch");
+        fs::write(&source, "patch content\n").expect("source patch should be written");
+
+        let stored_patch = store_transaction_patch_for_id(&workspace, "tx-42", &source)
+            .expect("patch should be stored for transaction");
+
+        assert_eq!(
+            stored_patch,
+            temp.path().join(TRANSACTION_DIR).join("tx-42.patch")
+        );
+        assert_eq!(
+            fs::read_to_string(&stored_patch).expect("stored patch should be readable"),
+            "patch content\n"
+        );
     }
 
     #[test]
