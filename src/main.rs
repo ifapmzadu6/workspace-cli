@@ -2388,14 +2388,74 @@ fn read_cochange_index_from_path(path: &Path) -> Result<CochangeIndex> {
 }
 
 fn write_cochange_index(path: &Path, index: &CochangeIndex) -> Result<()> {
-    let file = fs::File::create(path)
-        .with_context(|| format!("failed to create co-change index {}", path.display()))?;
+    let temp_path = temp_sibling_path(path, "cochange-index")?;
+    write_cochange_index_temp(&temp_path, index)?;
+    if let Err(error) = fs::rename(&temp_path, path)
+        .with_context(|| format!("failed to replace co-change index {}", path.display()))
+    {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn temp_sibling_path(path: &Path, prefix: &str) -> Result<PathBuf> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow!("co-change index path has no file name: {}", path.display()))?;
+    let mut temp_name = file_name.to_os_string();
+    temp_name.push(format!(".{}.tmp", new_id(prefix)));
+    Ok(path.with_file_name(temp_name))
+}
+
+fn write_cochange_index_temp(path: &Path, index: &CochangeIndex) -> Result<()> {
+    let file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to create temporary co-change index {}",
+                    path.display()
+                )
+            });
+        }
+    };
     let mut writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(&mut writer, index)
-        .with_context(|| format!("failed to serialize co-change index {}", path.display()))?;
-    writer
-        .flush()
-        .with_context(|| format!("failed to flush co-change index {}", path.display()))
+    let result = (|| {
+        serde_json::to_writer_pretty(&mut writer, index).with_context(|| {
+            format!(
+                "failed to serialize temporary co-change index {}",
+                path.display()
+            )
+        })?;
+        writer.flush().with_context(|| {
+            format!(
+                "failed to flush temporary co-change index {}",
+                path.display()
+            )
+        })?;
+        let file = writer.into_inner().with_context(|| {
+            format!(
+                "failed to finish temporary co-change index {}",
+                path.display()
+            )
+        })?;
+        file.sync_all().with_context(|| {
+            format!(
+                "failed to sync temporary co-change index {}",
+                path.display()
+            )
+        })
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(path);
+    }
+    result
 }
 
 fn impact_by_cochange(
@@ -5532,6 +5592,66 @@ src/b.rs
         assert_eq!(loaded.head, index.head);
         assert_eq!(loaded.file_commit_counts, index.file_commit_counts);
         assert_eq!(loaded.edges.len(), index.edges.len());
+    }
+
+    #[test]
+    fn cochange_index_write_replaces_existing_file_without_leftover_temp() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let path = temp.path().join("cochange.json");
+        let old_commits = vec![GitCommitFiles {
+            hash: "aaaaaaaaaaaa".to_string(),
+            files: vec!["src/old.rs".to_string(), "src/shared.rs".to_string()],
+        }];
+        let new_commits = vec![GitCommitFiles {
+            hash: "bbbbbbbbbbbb".to_string(),
+            files: vec!["src/new.rs".to_string(), "src/shared.rs".to_string()],
+        }];
+        let old_index = cochange_index_from_commits(&old_commits, 100, 10, Some("old".to_string()));
+        let new_index = cochange_index_from_commits(&new_commits, 100, 10, Some("new".to_string()));
+
+        write_cochange_index(&path, &old_index).expect("old index should be written");
+        write_cochange_index(&path, &new_index).expect("new index should replace old index");
+        let loaded = read_cochange_index_from_path(&path).expect("index should be read");
+        let leftovers = fs::read_dir(temp.path())
+            .expect("temp dir should be readable")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".cochange-index-")
+            })
+            .count();
+
+        assert_eq!(loaded.head, Some("new".to_string()));
+        assert_eq!(loaded.file_commit_counts, new_index.file_commit_counts);
+        assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn cochange_index_temp_create_failure_preserves_existing_temp_file() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let temp_path = temp.path().join("cochange.json.tmp");
+        fs::write(&temp_path, "existing temp").expect("existing temp should be written");
+        let commits = vec![GitCommitFiles {
+            hash: "aaaaaaaaaaaa".to_string(),
+            files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+        }];
+        let index = cochange_index_from_commits(&commits, 100, 10, Some("head".to_string()));
+
+        let Err(error) = write_cochange_index_temp(&temp_path, &index) else {
+            panic!("temp create should fail");
+        };
+        let error = format!("{error:#}");
+
+        assert!(
+            error.contains("failed to create temporary co-change index"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            fs::read_to_string(&temp_path).expect("existing temp should remain"),
+            "existing temp"
+        );
     }
 
     #[test]
