@@ -260,6 +260,19 @@ fn read_truncates_large_content() {
 }
 
 #[test]
+fn read_succeeds_when_operation_log_is_not_writable() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    write_file(temp.path(), "note.txt", "hello\n");
+    fs::create_dir_all(temp.path().join(".workspace/log.jsonl"))
+        .expect("log path directory should be created");
+
+    let read = run_workspace(temp.path(), &["read", "note.txt", "--json"]);
+
+    assert_eq!(read["kind"], "workspace_read");
+    assert_eq!(read["data"]["content"], "hello\n");
+}
+
+#[test]
 fn related_rejects_paths_outside_workspace() {
     let parent = TempDir::new().expect("parent temp dir should be created");
     let root = parent.path().join("workspace");
@@ -1189,6 +1202,33 @@ fn status_reports_operation_log_parse_errors() {
     );
     assert!(
         error.contains("failed to parse operation log") && error.contains("line 2"),
+        "unexpected recent operations error: {error}"
+    );
+}
+
+#[test]
+fn status_succeeds_when_operation_log_is_not_writable() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "README.md", "# demo\n");
+    commit_all(root, "initial commit");
+    fs::create_dir_all(root.join(".workspace/log.jsonl"))
+        .expect("log path directory should be created");
+
+    let status = run_workspace(root, &["status", "--json"]);
+    let error = status["data"]["recent_operations_error"]
+        .as_str()
+        .expect("status should expose the log read error");
+
+    assert_eq!(status["kind"], "workspace_status");
+    assert!(
+        status["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("operation log unreadable")
+    );
+    assert!(
+        error.contains("failed to read log"),
         "unexpected recent operations error: {error}"
     );
 }

@@ -70,6 +70,8 @@ workspace rollback  Roll back a workspace patch transaction
 Observation commands support `--json` and return structured output with
 `summary`, `data`, `evidence`, and `next_observations` so an LLM agent can use
 the result directly. Operation logs are stored in `.workspace/log.jsonl`.
+Read-only observation commands still return their observation if log recording
+is unavailable; mutation and verification commands require a writable log.
 
 ### Validation
 

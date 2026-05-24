@@ -691,14 +691,7 @@ fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
         next_observations,
     };
 
-    append_log(
-        workspace,
-        "observe",
-        "map",
-        &observation.scope,
-        &observation.summary,
-        None,
-    )?;
+    append_observation_log(workspace, "map", &observation.scope, &observation.summary);
     output_observation(args.json, &observation, print_map)
 }
 
@@ -748,14 +741,12 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
         ],
     };
 
-    append_log(
+    append_observation_log(
         workspace,
-        "observe",
         "status",
         &observation.scope,
         &observation.summary,
-        None,
-    )?;
+    );
     output_observation(args.json, &observation, print_status)
 }
 
@@ -802,14 +793,7 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
         next_observations,
     };
 
-    append_log(
-        workspace,
-        "observe",
-        "search",
-        &args.query,
-        &observation.summary,
-        None,
-    )?;
+    append_observation_log(workspace, "search", &args.query, &observation.summary);
     output_observation(args.json, &observation, print_search)
 }
 
@@ -844,14 +828,12 @@ fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> 
         ],
     };
 
-    append_log(
+    append_observation_log(
         workspace,
-        "observe",
         "index status",
         &observation.scope,
         &observation.summary,
-        None,
-    )?;
+    );
     output_observation(args.json, &observation, print_index_status)
 }
 
@@ -957,14 +939,7 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
         next_observations,
     };
 
-    append_log(
-        workspace,
-        "observe",
-        "related",
-        &target,
-        &observation.summary,
-        None,
-    )?;
+    append_observation_log(workspace, "related", &target, &observation.summary);
     output_observation(args.json, &observation, print_related)
 }
 
@@ -1030,14 +1005,12 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
         next_observations,
     };
 
-    append_log(
+    append_observation_log(
         workspace,
-        "observe",
         "impact",
         &observation.scope,
         &observation.summary,
-        None,
-    )?;
+    );
     output_observation(args.json, &observation, print_impact)
 }
 
@@ -1098,14 +1071,7 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
         ],
     };
 
-    append_log(
-        workspace,
-        "observe",
-        "read",
-        &rel_path,
-        &observation.summary,
-        None,
-    )?;
+    append_observation_log(workspace, "read", &rel_path, &observation.summary);
     output_observation(args.json, &observation, print_read)
 }
 
@@ -1174,14 +1140,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
         next_observations,
     };
 
-    append_log(
-        workspace,
-        "observe",
-        "diff",
-        &observation.scope,
-        &observation.summary,
-        None,
-    )?;
+    append_observation_log(workspace, "diff", &observation.scope, &observation.summary);
     output_observation(args.json, &observation, print_diff)
 }
 
@@ -3399,6 +3358,10 @@ fn append_log(
     let mut file = open_log_for_append(workspace)?;
     writeln!(file, "{line}")?;
     Ok(())
+}
+
+fn append_observation_log(workspace: &Workspace, op: &str, scope: &str, summary: &str) {
+    let _ = append_log(workspace, "observe", op, scope, summary, None);
 }
 
 fn ensure_log_writable(workspace: &Workspace) -> Result<()> {
