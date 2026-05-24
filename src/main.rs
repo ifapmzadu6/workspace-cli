@@ -37,6 +37,29 @@ const MAX_PATCH_LINE_BYTES: usize = 64_000;
 const MAX_GIT_OUTPUT_LINE_BYTES: usize = 64_000;
 const MAX_SAMPLE_COMMITS: usize = 5;
 const MAX_LOG_LINE_BYTES: usize = 64_000;
+const MAP_ENTRYPOINT_NAMES: &[&str] = &[
+    "src/main.rs",
+    "src/lib.rs",
+    "src/index.ts",
+    "src/main.ts",
+    "src/index.js",
+    "index.js",
+    "main.go",
+    "app.py",
+    "main.py",
+];
+const MAP_CONFIG_NAMES: &[&str] = &[
+    "Cargo.toml",
+    "package.json",
+    "tsconfig.json",
+    "go.mod",
+    "pyproject.toml",
+    "requirements.txt",
+    "Makefile",
+    "justfile",
+    ".env.example",
+];
+const MAP_STACK_ONLY_NAMES: &[&str] = &["pnpm-lock.yaml", "yarn.lock"];
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Parser)]
@@ -396,6 +419,44 @@ impl MapOmittedCounts {
 struct ImportantFile {
     path: String,
     reason: String,
+}
+
+#[derive(Default)]
+struct MapSignals {
+    languages: BTreeSet<String>,
+    named_files: BTreeSet<String>,
+    directories: BoundedMapItems,
+    tests: BoundedMapItems,
+    config_extras: BoundedMapItems,
+    docs: BoundedMapItems,
+}
+
+#[derive(Default)]
+struct BoundedMapItems {
+    items: BTreeSet<String>,
+    total_items: usize,
+}
+
+impl BoundedMapItems {
+    fn push(&mut self, item: String) {
+        if !self.items.insert(item) {
+            return;
+        }
+        self.total_items += 1;
+        if self.items.len() > MAX_MAP_LIST_ITEMS
+            && let Some(last) = self.items.iter().next_back().cloned()
+        {
+            self.items.remove(&last);
+        }
+    }
+
+    fn observed(&self) -> Vec<String> {
+        self.items.iter().cloned().collect()
+    }
+
+    fn total_items(&self) -> usize {
+        self.total_items
+    }
 }
 
 #[derive(Serialize)]
@@ -1743,8 +1804,7 @@ fn validate_patch_transaction_id(transaction_id: &str) -> Result<()> {
 
 fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Result<WorkspaceMap> {
     let git = git_summary(workspace)?;
-    let mut files = Vec::new();
-    let mut directories = BTreeSet::new();
+    let mut signals = MapSignals::default();
     let mut file_count = 0usize;
     let mut directory_count = 0usize;
     let mut large_file_count = 0usize;
@@ -1753,6 +1813,7 @@ fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Resul
 
     for entry in WalkDir::new(&workspace.root)
         .max_depth(depth)
+        .sort_by_file_name()
         .into_iter()
         .filter_entry(|entry| {
             entry.path() == workspace.root || should_descend(entry.path(), include_hidden)
@@ -1766,7 +1827,7 @@ fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Resul
         let rel = workspace.relative(path);
         if entry.file_type().is_dir() {
             directory_count += 1;
-            directories.insert(rel);
+            signals.directories.push(rel);
             continue;
         }
         if !entry.file_type().is_file() {
@@ -1787,29 +1848,22 @@ fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Resul
         if let Ok(modified) = metadata.modified() {
             push_recent_candidate(&mut recent_candidates, modified, rel.clone());
         }
-        files.push(rel);
+        record_map_file(&mut signals, &rel);
     }
 
-    recent_candidates.sort_by_key(|item| std::cmp::Reverse(item.0));
+    sort_recent_candidates(&mut recent_candidates);
     let recent_files = recent_candidates
         .into_iter()
-        .take(12)
+        .take(MAX_RECENT_FILES)
         .map(|(_, path)| path)
         .collect::<Vec<_>>();
 
-    let stack = detect_stack(workspace, &files)?;
-    let mut structure = detect_structure(&files, directories.into_iter().collect());
-    let commands = detect_commands(workspace, &files)?;
+    let stack = detect_stack(workspace, &signals)?;
+    let (structure, mut omitted) = detect_structure(&signals);
+    let commands = detect_commands(workspace, &signals)?;
     let important_files = important_files(&structure, &stack);
     sort_large_files(&mut large_files);
-    let omitted = MapOmittedCounts {
-        directories: truncate_vec(&mut structure.directories, MAX_MAP_LIST_ITEMS),
-        entrypoints: truncate_vec(&mut structure.entrypoints, MAX_MAP_LIST_ITEMS),
-        tests: truncate_vec(&mut structure.tests, MAX_MAP_LIST_ITEMS),
-        configs: truncate_vec(&mut structure.configs, MAX_MAP_LIST_ITEMS),
-        docs: truncate_vec(&mut structure.docs, MAX_MAP_LIST_ITEMS),
-        large_files: large_file_count.saturating_sub(large_files.len()),
-    };
+    omitted.large_files = large_file_count.saturating_sub(large_files.len());
 
     Ok(WorkspaceMap {
         root: workspace.root.to_string_lossy().into_owned(),
@@ -1848,8 +1902,12 @@ fn push_recent_candidate(
     path: String,
 ) {
     recent_candidates.push((modified, path));
-    recent_candidates.sort_by_key(|item| std::cmp::Reverse(item.0));
+    sort_recent_candidates(recent_candidates);
     recent_candidates.truncate(MAX_RECENT_FILES);
+}
+
+fn sort_recent_candidates(recent_candidates: &mut [(SystemTime, String)]) {
+    recent_candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 }
 
 fn push_large_file_candidate(large_files: &mut Vec<LargeFile>, item: LargeFile) {
@@ -1873,44 +1931,63 @@ fn should_descend(path: &Path, include_hidden: bool) -> bool {
     include_hidden || !name.starts_with('.')
 }
 
-fn detect_stack(workspace: &Workspace, files: &[String]) -> Result<StackSummary> {
-    let file_set = files.iter().map(String::as_str).collect::<BTreeSet<_>>();
-    let mut languages = BTreeSet::new();
+fn record_map_file(signals: &mut MapSignals, path: &str) {
+    match Path::new(path).extension().and_then(OsStr::to_str) {
+        Some("rs") => {
+            signals.languages.insert("rust".to_string());
+        }
+        Some("ts") | Some("tsx") => {
+            signals.languages.insert("typescript".to_string());
+        }
+        Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => {
+            signals.languages.insert("javascript".to_string());
+        }
+        Some("py") => {
+            signals.languages.insert("python".to_string());
+        }
+        Some("go") => {
+            signals.languages.insert("go".to_string());
+        }
+        Some("java") => {
+            signals.languages.insert("java".to_string());
+        }
+        Some("md") => {
+            signals.languages.insert("markdown".to_string());
+        }
+        _ => {}
+    }
+
+    if is_named_map_file(path) {
+        signals.named_files.insert(path.to_string());
+    }
+    if is_test_file(path) {
+        signals.tests.push(path.to_string());
+    }
+    if path.ends_with(".config.js") && !MAP_CONFIG_NAMES.contains(&path) {
+        signals.config_extras.push(path.to_string());
+    }
+
+    let lower = path.to_lowercase();
+    if lower == "readme.md" || lower.starts_with("docs/") || lower.ends_with(".md") {
+        signals.docs.push(path.to_string());
+    }
+}
+
+fn is_named_map_file(path: &str) -> bool {
+    MAP_ENTRYPOINT_NAMES.contains(&path)
+        || MAP_CONFIG_NAMES.contains(&path)
+        || MAP_STACK_ONLY_NAMES.contains(&path)
+}
+
+fn detect_stack(workspace: &Workspace, signals: &MapSignals) -> Result<StackSummary> {
     let mut package_managers = BTreeSet::new();
     let mut frameworks = BTreeSet::new();
 
-    for file in files {
-        match Path::new(file).extension().and_then(OsStr::to_str) {
-            Some("rs") => {
-                languages.insert("rust".to_string());
-            }
-            Some("ts") | Some("tsx") => {
-                languages.insert("typescript".to_string());
-            }
-            Some("js") | Some("jsx") | Some("mjs") | Some("cjs") => {
-                languages.insert("javascript".to_string());
-            }
-            Some("py") => {
-                languages.insert("python".to_string());
-            }
-            Some("go") => {
-                languages.insert("go".to_string());
-            }
-            Some("java") => {
-                languages.insert("java".to_string());
-            }
-            Some("md") => {
-                languages.insert("markdown".to_string());
-            }
-            _ => {}
-        }
-    }
-
-    if file_set.contains("Cargo.toml") {
+    if signals.named_files.contains("Cargo.toml") {
         package_managers.insert("cargo".to_string());
         frameworks.insert("rust-cli".to_string());
     }
-    if file_set.contains("package.json") {
+    if signals.named_files.contains("package.json") {
         package_managers.insert("npm".to_string());
         let package_json = workspace.root.join("package.json");
         if let Ok(detected_frameworks) = detect_package_json_frameworks(&package_json) {
@@ -1919,96 +1996,71 @@ fn detect_stack(workspace: &Workspace, files: &[String]) -> Result<StackSummary>
             }
         }
     }
-    if file_set.contains("pnpm-lock.yaml") {
+    if signals.named_files.contains("pnpm-lock.yaml") {
         package_managers.insert("pnpm".to_string());
     }
-    if file_set.contains("yarn.lock") {
+    if signals.named_files.contains("yarn.lock") {
         package_managers.insert("yarn".to_string());
     }
-    if file_set.contains("go.mod") {
+    if signals.named_files.contains("go.mod") {
         package_managers.insert("go".to_string());
     }
-    if file_set.contains("pyproject.toml") {
+    if signals.named_files.contains("pyproject.toml") {
         package_managers.insert("python/pyproject".to_string());
     }
-    if file_set.contains("requirements.txt") {
+    if signals.named_files.contains("requirements.txt") {
         package_managers.insert("pip".to_string());
     }
 
     Ok(StackSummary {
-        languages: languages.into_iter().collect(),
+        languages: signals.languages.iter().cloned().collect(),
         package_managers: package_managers.into_iter().collect(),
         frameworks: frameworks.into_iter().collect(),
     })
 }
 
-fn detect_structure(files: &[String], directories: Vec<String>) -> StructureSummary {
-    let file_set = files.iter().map(String::as_str).collect::<BTreeSet<_>>();
-    let entrypoint_names = [
-        "src/main.rs",
-        "src/lib.rs",
-        "src/index.ts",
-        "src/main.ts",
-        "src/index.js",
-        "index.js",
-        "main.go",
-        "app.py",
-        "main.py",
-    ];
-    let config_names = [
-        "Cargo.toml",
-        "package.json",
-        "tsconfig.json",
-        "go.mod",
-        "pyproject.toml",
-        "requirements.txt",
-        "Makefile",
-        "justfile",
-        ".env.example",
-    ];
-
-    let entrypoints = entrypoint_names
+fn detect_structure(signals: &MapSignals) -> (StructureSummary, MapOmittedCounts) {
+    let entrypoints = MAP_ENTRYPOINT_NAMES
         .iter()
-        .filter(|path| file_set.contains(**path))
+        .filter(|path| signals.named_files.contains(**path))
         .map(|path| (*path).to_string())
         .collect::<Vec<_>>();
-    let mut tests = files
+    let mut configs = MAP_CONFIG_NAMES
         .iter()
-        .filter(|path| is_test_file(path))
-        .cloned()
-        .collect::<Vec<_>>();
-    tests.sort();
-    let mut configs = config_names
-        .iter()
-        .filter(|path| file_set.contains(**path))
+        .filter(|path| signals.named_files.contains(**path))
         .map(|path| (*path).to_string())
         .collect::<Vec<_>>();
-    let mut config_extras = files
-        .iter()
-        .filter(|path| path.ends_with(".config.js") && !config_names.contains(&path.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    config_extras.sort();
+    let config_count = configs.len() + signals.config_extras.total_items();
+    let config_extras = signals.config_extras.observed();
     configs.extend(config_extras);
-    let mut docs = files
-        .iter()
-        .filter(|path| {
-            let lower = path.to_lowercase();
-            lower == "readme.md" || lower.starts_with("docs/") || lower.ends_with(".md")
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    docs.sort();
-    let mut directories = directories;
-    directories.sort();
+    truncate_vec(&mut configs, MAX_MAP_LIST_ITEMS);
 
-    StructureSummary {
-        directories,
+    let structure = StructureSummary {
+        directories: signals.directories.observed(),
         entrypoints,
-        tests,
+        tests: signals.tests.observed(),
         configs,
-        docs,
-    }
+        docs: signals.docs.observed(),
+    };
+    let omitted = MapOmittedCounts {
+        directories: signals
+            .directories
+            .total_items()
+            .saturating_sub(structure.directories.len()),
+        entrypoints: 0,
+        tests: signals
+            .tests
+            .total_items()
+            .saturating_sub(structure.tests.len()),
+        configs: config_count.saturating_sub(structure.configs.len()),
+        docs: signals
+            .docs
+            .total_items()
+            .saturating_sub(structure.docs.len()),
+        large_files: 0,
+    };
+
+    (structure, omitted)
 }
 
 fn detect_package_json_frameworks(path: &Path) -> Result<Vec<String>> {
@@ -2068,17 +2120,19 @@ fn read_json_file(path: &Path) -> Result<Value> {
     serde_json::from_reader(BufReader::new(file)).context("failed to parse JSON")
 }
 
-fn detect_commands(workspace: &Workspace, files: &[String]) -> Result<BTreeMap<String, String>> {
+fn detect_commands(
+    workspace: &Workspace,
+    signals: &MapSignals,
+) -> Result<BTreeMap<String, String>> {
     let mut commands = BTreeMap::new();
-    let file_set = files.iter().map(String::as_str).collect::<BTreeSet<_>>();
 
-    if file_set.contains("Cargo.toml") {
+    if signals.named_files.contains("Cargo.toml") {
         commands.insert("build".to_string(), "cargo build".to_string());
         commands.insert("test".to_string(), "cargo test".to_string());
         commands.insert("run".to_string(), "cargo run --".to_string());
     }
 
-    if file_set.contains("package.json") {
+    if signals.named_files.contains("package.json") {
         let package_json = workspace.root.join("package.json");
         if let Ok(value) = read_json_file(&package_json)
             && let Some(scripts) = value.get("scripts").and_then(Value::as_object)
@@ -2091,12 +2145,12 @@ fn detect_commands(workspace: &Workspace, files: &[String]) -> Result<BTreeMap<S
         }
     }
 
-    if file_set.contains("Makefile") {
+    if signals.named_files.contains("Makefile") {
         commands
             .entry("make".to_string())
             .or_insert("make".to_string());
     }
-    if file_set.contains("justfile") {
+    if signals.named_files.contains("justfile") {
         commands
             .entry("just".to_string())
             .or_insert("just".to_string());
@@ -5779,6 +5833,7 @@ not json
 
     #[test]
     fn detects_structure_in_stable_priority_order() {
+        let mut signals = MapSignals::default();
         let files = vec![
             "tests/z_test.rs".to_string(),
             "index.js".to_string(),
@@ -5789,13 +5844,19 @@ not json
             "Cargo.toml".to_string(),
             "docs/guide.md".to_string(),
         ];
-        let structure = detect_structure(&files, vec!["z".to_string(), "a".to_string()]);
+        for file in files {
+            record_map_file(&mut signals, &file);
+        }
+        signals.directories.push("z".to_string());
+        signals.directories.push("a".to_string());
+        let (structure, omitted) = detect_structure(&signals);
 
         assert_eq!(structure.directories, vec!["a", "z"]);
         assert_eq!(structure.entrypoints, vec!["src/main.rs", "index.js"]);
         assert_eq!(structure.configs, vec!["Cargo.toml", "vite.config.js"]);
         assert_eq!(structure.tests, vec!["tests/a_test.rs", "tests/z_test.rs"]);
         assert_eq!(structure.docs, vec!["README.md", "docs/guide.md"]);
+        assert!(!omitted.any());
     }
 
     #[test]
@@ -5825,6 +5886,30 @@ not json
         assert_eq!(candidates.len(), MAX_RECENT_FILES);
         assert_eq!(candidates[0].1, "file_019.txt");
         assert_eq!(candidates[MAX_RECENT_FILES - 1].1, "file_008.txt");
+    }
+
+    #[test]
+    fn orders_recent_file_candidates_deterministically_on_time_ties() {
+        let mut candidates = Vec::new();
+        push_recent_candidate(&mut candidates, UNIX_EPOCH, "b.txt".to_string());
+        push_recent_candidate(&mut candidates, UNIX_EPOCH, "a.txt".to_string());
+
+        assert_eq!(candidates[0].1, "a.txt");
+        assert_eq!(candidates[1].1, "b.txt");
+    }
+
+    #[test]
+    fn keeps_map_item_candidates_bounded_and_sorted() {
+        let mut items = BoundedMapItems::default();
+        for index in (0..90).rev() {
+            items.push(format!("item_{index:03}"));
+        }
+
+        let observed = items.observed();
+        assert_eq!(items.total_items(), 90);
+        assert_eq!(observed.len(), MAX_MAP_LIST_ITEMS);
+        assert_eq!(observed[0], "item_000");
+        assert_eq!(observed[MAX_MAP_LIST_ITEMS - 1], "item_079");
     }
 
     #[test]
