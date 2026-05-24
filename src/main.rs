@@ -1334,9 +1334,8 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
 
 fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
     let patch_path = workspace.resolve_existing_workspace_path(&args.patch_file)?;
-    let patch_content = fs::read_to_string(&patch_path)
+    let files_changed = extract_patch_files_from_path(&patch_path)
         .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
-    let files_changed = extract_patch_files(&patch_content);
     validate_patch_targets(&files_changed)?;
     run_git_apply(workspace, &patch_path, ["--check"])?;
     ensure_log_writable(workspace)?;
@@ -1350,7 +1349,7 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         )
     })?;
     let stored_patch = transaction_dir.join(format!("{transaction_id}.patch"));
-    fs::write(&stored_patch, &patch_content)
+    fs::copy(&patch_path, &stored_patch)
         .with_context(|| format!("failed to store patch {}", stored_patch.display()))?;
     if let Err(error) = run_git_apply(workspace, &patch_path, []) {
         let _ = fs::remove_file(&stored_patch);
@@ -1518,9 +1517,8 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         );
     }
 
-    let patch_content = fs::read_to_string(&stored_patch)
+    let files_changed = extract_patch_files_from_path(&stored_patch)
         .with_context(|| format!("failed to read stored patch {}", stored_patch.display()))?;
-    let files_changed = extract_patch_files(&patch_content);
     run_git_apply(workspace, &stored_patch, ["--reverse", "--check"])?;
     ensure_log_writable(workspace)?;
     run_git_apply(workspace, &stored_patch, ["--reverse"])?;
@@ -3991,27 +3989,57 @@ fn ensure_no_pending_utf8(pending_utf8: &[u8]) -> Result<()> {
     }
 }
 
+#[cfg(test)]
 fn extract_patch_files(patch_content: &str) -> Vec<String> {
     let mut files = BTreeSet::new();
     for line in patch_content.lines() {
-        if let Some(path) = line.strip_prefix("+++ ").and_then(clean_patch_path) {
-            files.insert(path);
-        } else if let Some(path) = line.strip_prefix("--- ").and_then(clean_patch_path) {
-            files.insert(path);
-        } else if let Some(path) = line.strip_prefix("rename from ").and_then(clean_patch_path) {
-            files.insert(path);
-        } else if let Some(path) = line.strip_prefix("rename to ").and_then(clean_patch_path) {
-            files.insert(path);
-        } else if let Some((old_path, new_path)) = diff_git_paths(line) {
-            if let Some(path) = clean_diff_git_path(&old_path) {
-                files.insert(path);
-            }
-            if let Some(path) = clean_diff_git_path(&new_path) {
-                files.insert(path);
-            }
-        }
+        collect_patch_file_line(line, &mut files);
     }
     files.into_iter().collect()
+}
+
+fn extract_patch_files_from_path(path: &Path) -> Result<Vec<String>> {
+    let file = fs::File::open(path)?;
+    extract_patch_files_from_reader(file)
+}
+
+fn extract_patch_files_from_reader<R: Read>(reader: R) -> Result<Vec<String>> {
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+    let mut files = BTreeSet::new();
+
+    loop {
+        line.clear();
+        let bytes_read = reader
+            .read_line(&mut line)
+            .context("failed to read patch")?;
+        if bytes_read == 0 {
+            break;
+        }
+        let line = line.trim_end_matches('\n').trim_end_matches('\r');
+        collect_patch_file_line(line, &mut files);
+    }
+
+    Ok(files.into_iter().collect())
+}
+
+fn collect_patch_file_line(line: &str, files: &mut BTreeSet<String>) {
+    if let Some(path) = line.strip_prefix("+++ ").and_then(clean_patch_path) {
+        files.insert(path);
+    } else if let Some(path) = line.strip_prefix("--- ").and_then(clean_patch_path) {
+        files.insert(path);
+    } else if let Some(path) = line.strip_prefix("rename from ").and_then(clean_patch_path) {
+        files.insert(path);
+    } else if let Some(path) = line.strip_prefix("rename to ").and_then(clean_patch_path) {
+        files.insert(path);
+    } else if let Some((old_path, new_path)) = diff_git_paths(line) {
+        if let Some(path) = clean_diff_git_path(&old_path) {
+            files.insert(path);
+        }
+        if let Some(path) = clean_diff_git_path(&new_path) {
+            files.insert(path);
+        }
+    }
 }
 
 fn validate_patch_targets(files_changed: &[String]) -> Result<()> {
@@ -4892,6 +4920,23 @@ index 0000000..587be6b
 +x
 ";
         assert_eq!(extract_patch_files(patch), vec!["src/tab\tname.txt"]);
+    }
+
+    #[test]
+    fn extracts_patch_files_from_reader() {
+        let patch = "\
+diff --git a/src/a.rs b/src/a.rs
+--- a/src/a.rs
++++ b/src/a.rs
+diff --git a/old name.txt b/new name.txt
+similarity index 100%
+rename from old name.txt
+rename to new name.txt
+";
+        let files = extract_patch_files_from_reader(std::io::Cursor::new(patch))
+            .expect("patch reader should parse");
+
+        assert_eq!(files, vec!["new name.txt", "old name.txt", "src/a.rs"]);
     }
 
     #[test]
