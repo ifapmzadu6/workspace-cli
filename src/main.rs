@@ -1265,16 +1265,7 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
             related: vec![],
         }
     };
-    let summary = if data.is_repo {
-        format!(
-            "{} related file(s) for {} using {} history",
-            data.related.len(),
-            data.target,
-            data.method
-        )
-    } else {
-        "not a git repository".to_string()
-    };
+    let summary = related_summary(&data);
     let evidence = related_evidence(&data);
     let next_observations = read_next_observations(
         workspace,
@@ -1331,20 +1322,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
         }
     };
     let seed_files_truncated = data.omitted_seed_files > 0;
-    let summary = if data.is_repo {
-        let mut summary = format!(
-            "{} impacted file(s) from {} seed file(s) using {} history",
-            data.impacted.len(),
-            data.seed_file_count,
-            data.method
-        );
-        if seed_files_truncated {
-            summary.push_str(" (seed files truncated)");
-        }
-        summary
-    } else {
-        "not a git repository".to_string()
-    };
+    let summary = impact_summary(&data);
     let evidence = impact_evidence(&data);
     let next_observations = read_next_observations(
         workspace,
@@ -1777,6 +1755,36 @@ fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
         .take(MAX_NEXT_OBSERVATIONS)
         .map(|item| workspace_read_lines_command(&item.path, item.line, item.line))
         .collect()
+}
+
+fn related_summary(data: &RelatedData) -> String {
+    if data.is_repo {
+        format!(
+            "{} related file(s) for {} using {} history",
+            data.related.len(),
+            data.target,
+            data.method
+        )
+    } else {
+        "not a git repository".to_string()
+    }
+}
+
+fn impact_summary(data: &ImpactData) -> String {
+    if data.is_repo {
+        let mut summary = format!(
+            "{} impacted file(s) from {} seed file(s) using {} history",
+            data.impacted.len(),
+            data.seed_file_count,
+            data.method
+        );
+        if data.omitted_seed_files > 0 {
+            summary.push_str(" (seed files truncated)");
+        }
+        summary
+    } else {
+        "not a git repository".to_string()
+    }
 }
 
 fn search_summary(data: &SearchData) -> String {
@@ -6024,6 +6032,79 @@ rename to new name.txt
         assert_eq!(next.len(), MAX_NEXT_OBSERVATIONS);
         assert_eq!(next[0], "workspace read file_00.txt --lines 1:1");
         assert_eq!(next[4], "workspace read file_04.txt --lines 5:5");
+    }
+
+    #[test]
+    fn related_summary_reports_repo_state() {
+        let data = RelatedData {
+            target: "src/main.rs".to_string(),
+            method: "cochange".to_string(),
+            ranking: "direct".to_string(),
+            relationship_source: "git history".to_string(),
+            is_repo: true,
+            commits_scanned: 3,
+            commits_matched: 1,
+            ignored_large_commits: 0,
+            max_commits: 500,
+            max_files_per_commit: 100,
+            related: vec![RelatedFile {
+                path: "tests/cli.rs".to_string(),
+                score: 1.0,
+                cochanged_commits: 1,
+                weighted_cochanges: 1.0,
+                sample_commits: vec!["abc123".to_string()],
+            }],
+        };
+        assert_eq!(
+            related_summary(&data),
+            "1 related file(s) for src/main.rs using cochange history"
+        );
+
+        let data = RelatedData {
+            is_repo: false,
+            related: vec![],
+            ..data
+        };
+        assert_eq!(related_summary(&data), "not a git repository");
+    }
+
+    #[test]
+    fn impact_summary_reports_seed_truncation() {
+        let data = ImpactData {
+            source: "diff".to_string(),
+            method: "cochange".to_string(),
+            ranking: "direct".to_string(),
+            relationship_source: "git history".to_string(),
+            is_repo: true,
+            seed_files: vec!["src/main.rs".to_string()],
+            seed_file_count: 3,
+            omitted_seed_files: 2,
+            commits_scanned: 5,
+            commits_matched: 2,
+            ignored_large_commits: 0,
+            max_commits: 500,
+            max_files_per_commit: 100,
+            impacted: vec![ImpactFile {
+                path: "tests/cli.rs".to_string(),
+                score: 1.0,
+                cochanged_commits: 1,
+                weighted_cochanges: 1.0,
+                seed_files: vec!["src/main.rs".to_string()],
+                sample_commits: vec!["abc123".to_string()],
+            }],
+        };
+        assert_eq!(
+            impact_summary(&data),
+            "1 impacted file(s) from 3 seed file(s) using cochange history (seed files truncated)"
+        );
+
+        let data = ImpactData {
+            is_repo: false,
+            impacted: vec![],
+            omitted_seed_files: 0,
+            ..data
+        };
+        assert_eq!(impact_summary(&data), "not a git repository");
     }
 
     #[test]
