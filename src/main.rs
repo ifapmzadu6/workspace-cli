@@ -31,6 +31,7 @@ const MAX_MAP_LARGE_FILES: usize = 40;
 const MAX_DIFF_SUMMARY: usize = 12_000;
 const MAX_DIFF_PATCH: usize = 48_000;
 const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
+const MAX_SAMPLE_COMMITS: usize = 5;
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Parser)]
@@ -1855,6 +1856,7 @@ fn related_by_cochange(
             output,
             max_commits,
             max_files_per_commit,
+            max_results,
             rank,
         ));
     }
@@ -1904,13 +1906,15 @@ fn related_data_from_related_cli(
     output: RelatedCliOutput,
     max_commits: usize,
     max_files_per_commit: usize,
+    max_results: usize,
     rank: RankingMethod,
 ) -> RelatedData {
-    let related = output
+    let mut related = output
         .related
         .into_iter()
         .filter_map(related_file_from_related_cli)
         .collect::<Vec<_>>();
+    related.truncate(max_results);
     let commits_matched = related
         .iter()
         .map(|item| item.cochanged_commits)
@@ -1941,6 +1945,7 @@ fn related_file_from_related_cli(item: RelatedCliItem) -> Option<RelatedFile> {
         sample_commits: item
             .evidence
             .iter()
+            .take(MAX_SAMPLE_COMMITS)
             .map(|evidence| short_commit(&evidence.hash).to_string())
             .collect(),
     })

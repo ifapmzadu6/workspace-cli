@@ -564,8 +564,20 @@ cat <<'JSON'
           "subject": "a with b",
           "file_count": 2,
           "weight": 1.5
-        }
+        },
+        {"hash": "2234567890abcdef"},
+        {"hash": "3234567890abcdef"},
+        {"hash": "4234567890abcdef"},
+        {"hash": "5234567890abcdef"},
+        {"hash": "6234567890abcdef"}
       ]
+    },
+    {
+      "path": "src/c.rs",
+      "score": 0.50,
+      "cochanges": 1,
+      "weight": 1.0,
+      "evidence": [{"hash": "cccccccccccccccc"}]
     }
   ]
 }
@@ -597,6 +609,29 @@ JSON
         related["data"]["related"][0]["sample_commits"][0],
         "1234567890ab"
     );
+    assert_eq!(
+        related["data"]["related"][0]["sample_commits"]
+            .as_array()
+            .expect("sample commits should be an array")
+            .len(),
+        5
+    );
+
+    let limited_related = run_workspace_with_related_bin(
+        root,
+        &[
+            "related",
+            "src/a.rs",
+            "--by",
+            "cochange",
+            "--max-results",
+            "1",
+            "--json",
+        ],
+        &fake_related,
+    );
+    let limited_related_paths = paths_at(&limited_related, &["data", "related"]);
+    assert_eq!(limited_related_paths, vec!["src/b.rs".to_string()]);
 
     append_file(root, "src/a.rs", "local change\n");
     let impact = run_workspace_with_related_bin(

@@ -129,6 +129,8 @@ Set `WORKSPACE_RELATED_DISABLE=1` to force the internal implementation.
 Set `WORKSPACE_RELATED_HISTORY_BACKEND` to pass a different
 `related-cli --history-backend` value. When unset, `workspace` uses `git` for
 exact history semantics.
+`workspace` still enforces `--max-results` and bounded sample commit evidence on
+`related-cli` output before returning an observation.
 
 Large formatting commits, dependency updates, lockfile churn, and initial import
 commits can add noise. Use `--max-files-per-commit` to exclude broad commits.
