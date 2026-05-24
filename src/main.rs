@@ -3248,7 +3248,7 @@ fn rg_search(
     query: &str,
     max_results: usize,
 ) -> Result<(Vec<SearchMatch>, usize, usize)> {
-    let output = match Command::new("rg")
+    let mut child = match Command::new("rg")
         .current_dir(&workspace.root)
         .args([
             "--json",
@@ -3268,75 +3268,118 @@ fn rg_search(
             query,
             ".",
         ])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
     {
-        Ok(output) => output,
+        Ok(child) => child,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return fallback_text_search(workspace, query, max_results);
         }
         Err(error) => return Err(error).context("failed to run ripgrep"),
     };
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture ripgrep stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture ripgrep stderr"))?;
+    let stderr_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+    let search_result = parse_rg_json_output(stdout, max_results);
+    let status = child.wait().context("failed to wait for ripgrep")?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("ripgrep stderr reader thread panicked"))??;
 
-    if !output.status.success() && output.status.code() != Some(1) {
-        bail!(
-            "ripgrep failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+    if !status.success() && status.code() != Some(1) {
+        bail!("ripgrep failed: {}", stderr.text.trim());
     }
 
+    search_result
+}
+
+fn parse_rg_json_output<R: Read>(
+    reader: R,
+    max_results: usize,
+) -> Result<(Vec<SearchMatch>, usize, usize)> {
     let mut matches = Vec::new();
     let mut total_matches = 0usize;
     let mut truncated_match_texts = 0usize;
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        let value: Value = serde_json::from_str(line).context("failed to parse ripgrep JSON")?;
-        if value.get("type").and_then(Value::as_str) != Some("match") {
-            continue;
-        }
-        total_matches += 1;
-        if matches.len() >= max_results {
-            continue;
-        }
-        let data = value.get("data").unwrap_or(&Value::Null);
-        let path = data
-            .get("path")
-            .and_then(|path| path.get("text"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim_start_matches("./")
-            .to_string();
-        let raw_text = data
-            .get("lines")
-            .and_then(|lines| lines.get("text"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim_end_matches('\n')
-            .to_string();
-        let (text, text_truncated) = truncate_search_match_text(&raw_text);
-        if text_truncated {
-            truncated_match_texts += 1;
-        }
-        let line_number = data
-            .get("line_number")
-            .and_then(Value::as_u64)
-            .unwrap_or_default();
-        let column = data
-            .get("submatches")
-            .and_then(Value::as_array)
-            .and_then(|items| items.first())
-            .and_then(|item| item.get("start"))
-            .and_then(Value::as_u64)
-            .map(|start| start + 1)
-            .unwrap_or_default();
+    let reader = BufReader::new(reader);
 
-        matches.push(SearchMatch {
-            path,
-            line: line_number,
-            column,
-            text,
-        });
+    for line in reader.lines() {
+        let line = line.context("failed to read ripgrep JSON output")?;
+        if !parse_rg_json_line(
+            &line,
+            max_results,
+            &mut matches,
+            &mut total_matches,
+            &mut truncated_match_texts,
+        )? {
+            continue;
+        }
     }
 
     Ok((matches, total_matches, truncated_match_texts))
+}
+
+fn parse_rg_json_line(
+    line: &str,
+    max_results: usize,
+    matches: &mut Vec<SearchMatch>,
+    total_matches: &mut usize,
+    truncated_match_texts: &mut usize,
+) -> Result<bool> {
+    let value: Value = serde_json::from_str(line).context("failed to parse ripgrep JSON")?;
+    if value.get("type").and_then(Value::as_str) != Some("match") {
+        return Ok(false);
+    }
+    *total_matches += 1;
+    if matches.len() >= max_results {
+        return Ok(true);
+    }
+    let data = value.get("data").unwrap_or(&Value::Null);
+    let path = data
+        .get("path")
+        .and_then(|path| path.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim_start_matches("./")
+        .to_string();
+    let raw_text = data
+        .get("lines")
+        .and_then(|lines| lines.get("text"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim_end_matches('\n')
+        .to_string();
+    let (text, text_truncated) = truncate_search_match_text(&raw_text);
+    if text_truncated {
+        *truncated_match_texts += 1;
+    }
+    let line_number = data
+        .get("line_number")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let column = data
+        .get("submatches")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|item| item.get("start"))
+        .and_then(Value::as_u64)
+        .map(|start| start + 1)
+        .unwrap_or_default();
+
+    matches.push(SearchMatch {
+        path,
+        line: line_number,
+        column,
+        text,
+    });
+    Ok(true)
 }
 
 fn fallback_text_search(

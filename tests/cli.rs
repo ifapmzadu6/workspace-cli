@@ -275,6 +275,28 @@ fn search_reports_total_matches_when_results_are_truncated() {
 }
 
 #[test]
+fn search_counts_many_matches_with_limited_results() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    let content = (0..250)
+        .map(|index| format!("needle {index}\n"))
+        .collect::<String>();
+    write_file(temp.path(), "many.txt", &content);
+
+    let search = run_workspace(
+        temp.path(),
+        &["search", "needle", "--max-results", "3", "--json"],
+    );
+    let matches = search["data"]["matches"]
+        .as_array()
+        .expect("matches should be an array");
+
+    assert_eq!(search["kind"], "workspace_search");
+    assert_eq!(search["data"]["total_matches"], 250);
+    assert_eq!(matches.len(), 3);
+    assert_eq!(search["truncated"], true);
+}
+
+#[test]
 fn search_quotes_read_suggestions_for_paths_that_need_shell_quoting() {
     let temp = TempDir::new().expect("temp dir should be created");
     write_file(temp.path(), "space name.txt", "needle\n");
