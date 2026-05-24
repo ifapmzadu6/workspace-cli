@@ -1111,35 +1111,40 @@ impl Workspace {
 fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
     let map = observed_map(workspace, &args)?;
     let observation = map_observation(map);
-
-    append_observation_log(
+    output_logged_observation(
         workspace,
+        args.json,
         LOG_OP_MAP,
         &observation.scope,
-        &observation.summary,
-    );
-    output_observation(args.json, &observation, print_map)
+        &observation,
+        print_map,
+    )
 }
 
 fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
     let data = observed_status(workspace)?;
     let observation = status_observation(data);
-
-    append_observation_log(
+    output_logged_observation(
         workspace,
+        args.json,
         LOG_OP_STATUS,
         &observation.scope,
-        &observation.summary,
-    );
-    output_observation(args.json, &observation, print_status)
+        &observation,
+        print_status,
+    )
 }
 
 fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
     let data = observed_search(workspace, &args)?;
     let observation = search_observation(workspace, data);
-
-    append_observation_log(workspace, LOG_OP_SEARCH, &args.query, &observation.summary);
-    output_observation(args.json, &observation, print_search)
+    output_logged_observation(
+        workspace,
+        args.json,
+        LOG_OP_SEARCH,
+        &args.query,
+        &observation,
+        print_search,
+    )
 }
 
 fn cmd_index(workspace: &Workspace, args: IndexArgs) -> Result<()> {
@@ -1152,14 +1157,14 @@ fn cmd_index(workspace: &Workspace, args: IndexArgs) -> Result<()> {
 fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> {
     let data = observed_index_status(workspace);
     let observation = index_status_observation(data);
-
-    append_observation_log(
+    output_logged_observation(
         workspace,
+        args.json,
         LOG_OP_INDEX_STATUS,
         &observation.scope,
-        &observation.summary,
-    );
-    output_observation(args.json, &observation, print_index_status)
+        &observation,
+        print_index_status,
+    )
 }
 
 fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<()> {
@@ -1180,49 +1185,54 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
 fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
     let related = observed_related_args(workspace, &args)?;
     let observation = related_observation(workspace, &related.target, related.data);
-
-    append_observation_log(
+    output_logged_observation(
         workspace,
+        args.json,
         LOG_OP_RELATED,
         &related.target,
-        &observation.summary,
-    );
-    output_observation(args.json, &observation, print_related)
+        &observation,
+        print_related,
+    )
 }
 
 fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
     let data = observed_impact_args(workspace, &args)?;
     let observation = impact_observation(workspace, data);
-
-    append_observation_log(
+    output_logged_observation(
         workspace,
+        args.json,
         LOG_OP_IMPACT,
         &observation.scope,
-        &observation.summary,
-    );
-    output_observation(args.json, &observation, print_impact)
+        &observation,
+        print_impact,
+    )
 }
 
 fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
     let read = observed_read_args(workspace, &args)?;
     let scope = read.data.path.clone();
     let observation = read_observation(read);
-
-    append_observation_log(workspace, LOG_OP_READ, &scope, &observation.summary);
-    output_observation(args.json, &observation, print_read)
+    output_logged_observation(
+        workspace,
+        args.json,
+        LOG_OP_READ,
+        &scope,
+        &observation,
+        print_read,
+    )
 }
 
 fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     let diff = observed_diff(workspace, args.summary)?;
     let observation = diff_observation(workspace, diff);
-
-    append_observation_log(
+    output_logged_observation(
         workspace,
+        args.json,
         LOG_OP_DIFF,
         &observation.scope,
-        &observation.summary,
-    );
-    output_observation(args.json, &observation, print_diff)
+        &observation,
+        print_diff,
+    )
 }
 
 fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
@@ -5715,6 +5725,22 @@ fn append_observation_log(workspace: &Workspace, op: &str, scope: &str, summary:
     let _ = append_log(workspace, LOG_KIND_OBSERVE, op, scope, summary, None);
 }
 
+fn output_logged_observation<T, F>(
+    workspace: &Workspace,
+    json: bool,
+    op: &str,
+    scope: &str,
+    observation: &Observation<T>,
+    print_human: F,
+) -> Result<()>
+where
+    T: Serialize,
+    F: FnOnce(&Observation<T>) -> Result<()>,
+{
+    append_observation_log(workspace, op, scope, &observation.summary);
+    output_observation(json, observation, print_human)
+}
+
 fn ensure_log_writable(workspace: &Workspace) -> Result<()> {
     open_log_for_append(workspace).map(|_| ())
 }
@@ -8249,6 +8275,45 @@ rename to new name.txt
         assert_eq!(data.entries.len(), 2);
         assert_eq!(data.entries[0].op, LOG_OP_STATUS);
         assert_eq!(data.entries[1].op, LOG_OP_SEARCH);
+    }
+
+    #[test]
+    fn output_logged_observation_records_observe_log_before_output() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        let observation = Observation {
+            kind: WORKSPACE_LOG_KIND.to_string(),
+            scope: LOG_FILE.to_string(),
+            summary: "test summary".to_string(),
+            data: LogData {
+                log_path: LOG_FILE.to_string(),
+                omitted_lines: 0,
+                entries: vec![],
+            },
+            evidence: vec![],
+            truncated: false,
+            next_observations: vec![],
+        };
+
+        output_logged_observation(
+            &workspace,
+            false,
+            LOG_OP_STATUS,
+            LOG_FILE,
+            &observation,
+            |_| Ok(()),
+        )
+        .expect("observation should be logged and output");
+
+        let log = read_log(&workspace, 10).expect("log should be readable");
+        assert_eq!(log.entries.len(), 1);
+        assert_eq!(log.entries[0].kind, LOG_KIND_OBSERVE);
+        assert_eq!(log.entries[0].op, LOG_OP_STATUS);
+        assert_eq!(log.entries[0].scope, LOG_FILE);
+        assert_eq!(log.entries[0].summary, "test summary");
     }
 
     #[test]
