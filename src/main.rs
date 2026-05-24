@@ -28,6 +28,7 @@ const MAX_CHANGED_FILES: usize = 80;
 const MAX_GIT_STATUS_FILES: usize = 80;
 const MAX_MAP_LIST_ITEMS: usize = 80;
 const MAX_MAP_LARGE_FILES: usize = 40;
+const MAX_RECENT_FILES: usize = 12;
 const MAX_DIFF_SUMMARY: usize = 12_000;
 const MAX_DIFF_PATCH: usize = 48_000;
 const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
@@ -1594,6 +1595,7 @@ fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Resul
     let mut directories = BTreeSet::new();
     let mut file_count = 0usize;
     let mut directory_count = 0usize;
+    let mut large_file_count = 0usize;
     let mut large_files = Vec::new();
     let mut recent_candidates = Vec::new();
 
@@ -1621,13 +1623,17 @@ fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Resul
         file_count += 1;
         let metadata = entry.metadata()?;
         if metadata.len() > 1_000_000 {
-            large_files.push(LargeFile {
-                path: rel.clone(),
-                bytes: metadata.len(),
-            });
+            large_file_count += 1;
+            push_large_file_candidate(
+                &mut large_files,
+                LargeFile {
+                    path: rel.clone(),
+                    bytes: metadata.len(),
+                },
+            );
         }
         if let Ok(modified) = metadata.modified() {
-            recent_candidates.push((modified, rel.clone()));
+            push_recent_candidate(&mut recent_candidates, modified, rel.clone());
         }
         files.push(rel);
     }
@@ -1643,14 +1649,14 @@ fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Resul
     let mut structure = detect_structure(&files, directories.into_iter().collect());
     let commands = detect_commands(workspace, &files)?;
     let important_files = important_files(&structure, &stack);
-    large_files.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
+    sort_large_files(&mut large_files);
     let omitted = MapOmittedCounts {
         directories: truncate_vec(&mut structure.directories, MAX_MAP_LIST_ITEMS),
         entrypoints: truncate_vec(&mut structure.entrypoints, MAX_MAP_LIST_ITEMS),
         tests: truncate_vec(&mut structure.tests, MAX_MAP_LIST_ITEMS),
         configs: truncate_vec(&mut structure.configs, MAX_MAP_LIST_ITEMS),
         docs: truncate_vec(&mut structure.docs, MAX_MAP_LIST_ITEMS),
-        large_files: truncate_vec(&mut large_files, MAX_MAP_LARGE_FILES),
+        large_files: large_file_count.saturating_sub(large_files.len()),
     };
 
     Ok(WorkspaceMap {
@@ -1676,6 +1682,26 @@ fn truncate_vec<T>(items: &mut Vec<T>, max_len: usize) -> usize {
         items.truncate(max_len);
     }
     omitted
+}
+
+fn push_recent_candidate(
+    recent_candidates: &mut Vec<(SystemTime, String)>,
+    modified: SystemTime,
+    path: String,
+) {
+    recent_candidates.push((modified, path));
+    recent_candidates.sort_by_key(|item| std::cmp::Reverse(item.0));
+    recent_candidates.truncate(MAX_RECENT_FILES);
+}
+
+fn push_large_file_candidate(large_files: &mut Vec<LargeFile>, item: LargeFile) {
+    large_files.push(item);
+    sort_large_files(large_files);
+    large_files.truncate(MAX_MAP_LARGE_FILES);
+}
+
+fn sort_large_files(large_files: &mut [LargeFile]) {
+    large_files.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
 }
 
 fn should_descend(path: &Path, include_hidden: bool) -> bool {
@@ -5083,6 +5109,40 @@ not json
         assert_eq!(structure.configs, vec!["Cargo.toml", "vite.config.js"]);
         assert_eq!(structure.tests, vec!["tests/a_test.rs", "tests/z_test.rs"]);
         assert_eq!(structure.docs, vec!["README.md", "docs/guide.md"]);
+    }
+
+    #[test]
+    fn keeps_recent_file_candidates_bounded() {
+        let mut candidates = Vec::new();
+        for index in 0..20 {
+            push_recent_candidate(
+                &mut candidates,
+                UNIX_EPOCH + std::time::Duration::from_secs(index),
+                format!("file_{index:03}.txt"),
+            );
+        }
+
+        assert_eq!(candidates.len(), MAX_RECENT_FILES);
+        assert_eq!(candidates[0].1, "file_019.txt");
+        assert_eq!(candidates[MAX_RECENT_FILES - 1].1, "file_008.txt");
+    }
+
+    #[test]
+    fn keeps_large_file_candidates_bounded_and_sorted() {
+        let mut large_files = Vec::new();
+        for index in 0..45 {
+            push_large_file_candidate(
+                &mut large_files,
+                LargeFile {
+                    path: format!("file_{index:03}.bin"),
+                    bytes: 1_000_000 + index,
+                },
+            );
+        }
+
+        assert_eq!(large_files.len(), MAX_MAP_LARGE_FILES);
+        assert_eq!(large_files[0].path, "file_044.bin");
+        assert_eq!(large_files[MAX_MAP_LARGE_FILES - 1].path, "file_005.bin");
     }
 
     #[test]
