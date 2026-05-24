@@ -51,6 +51,19 @@ const WORKSPACE_LOG_COMMAND: &str = "workspace log";
 const WORKSPACE_RELATED_INDEX_COMMAND: &str = "workspace related <file> --by cochange --use-index";
 const WORKSPACE_IMPACT_INDEX_COMMAND: &str = "workspace impact --diff --by cochange --use-index";
 const WORKSPACE_IMPACT_COCHANGE_COMMAND: &str = "workspace impact --diff --by cochange";
+const WORKSPACE_MAP_KIND: &str = "workspace_map";
+const WORKSPACE_STATUS_KIND: &str = "workspace_status";
+const WORKSPACE_SEARCH_KIND: &str = "workspace_search";
+const WORKSPACE_INDEX_STATUS_KIND: &str = "workspace_index_status";
+const WORKSPACE_INDEX_COCHANGE_KIND: &str = "workspace_index_cochange";
+const WORKSPACE_RELATED_KIND: &str = "workspace_related";
+const WORKSPACE_IMPACT_KIND: &str = "workspace_impact";
+const WORKSPACE_READ_KIND: &str = "workspace_read";
+const WORKSPACE_DIFF_KIND: &str = "workspace_diff";
+const WORKSPACE_PATCH_KIND: &str = "workspace_patch";
+const WORKSPACE_RUN_KIND: &str = "workspace_run";
+const WORKSPACE_LOG_KIND: &str = "workspace_log";
+const WORKSPACE_ROLLBACK_KIND: &str = "workspace_rollback";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -1037,7 +1050,7 @@ fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
     let evidence = map_evidence(&map);
     let next_observations = map_next_observations(&map);
     let observation = Observation {
-        kind: "workspace_map".to_string(),
+        kind: WORKSPACE_MAP_KIND.to_string(),
         scope: map.root.clone(),
         summary,
         data: map,
@@ -1069,7 +1082,7 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
     let truncated = status_truncated(&data);
     let summary = status_summary(&data, truncated);
     let observation = Observation {
-        kind: "workspace_status".to_string(),
+        kind: WORKSPACE_STATUS_KIND.to_string(),
         scope: data.root.clone(),
         summary,
         data,
@@ -1101,7 +1114,7 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
     let summary = search_summary(&data);
     let next_observations = search_next_observations(&data.matches);
     let observation = Observation {
-        kind: "workspace_search".to_string(),
+        kind: WORKSPACE_SEARCH_KIND.to_string(),
         scope: workspace.root.to_string_lossy().into_owned(),
         summary,
         data,
@@ -1125,7 +1138,7 @@ fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> 
     let data = cochange_index_status(workspace);
     let summary = index_status_summary(&data);
     let observation = Observation {
-        kind: "workspace_index_status".to_string(),
+        kind: WORKSPACE_INDEX_STATUS_KIND.to_string(),
         scope: data.path.clone(),
         summary,
         data,
@@ -1172,7 +1185,7 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
     };
     let summary = index_cochange_summary(&data);
     let observation = Observation {
-        kind: "workspace_index_cochange".to_string(),
+        kind: WORKSPACE_INDEX_COCHANGE_KIND.to_string(),
         scope: data.path.clone(),
         summary,
         data,
@@ -1230,7 +1243,7 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
         data.related.iter().map(|file| file.path.as_str()),
     );
     let observation = Observation {
-        kind: "workspace_related".to_string(),
+        kind: WORKSPACE_RELATED_KIND.to_string(),
         scope: target.clone(),
         summary,
         data,
@@ -1287,7 +1300,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
         data.impacted.iter().map(|file| file.path.as_str()),
     );
     let observation = Observation {
-        kind: "workspace_impact".to_string(),
+        kind: WORKSPACE_IMPACT_KIND.to_string(),
         scope: data.source.clone(),
         summary,
         data,
@@ -1331,7 +1344,7 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
     let evidence = read_evidence(&data);
     let next_observations = read_followup_observations(&data.path);
     let observation = Observation {
-        kind: "workspace_read".to_string(),
+        kind: WORKSPACE_READ_KIND.to_string(),
         scope: data.path.clone(),
         summary,
         data,
@@ -1389,7 +1402,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     let next_observations =
         read_next_observations(workspace, data.files.iter().map(String::as_str));
     let observation = Observation {
-        kind: "workspace_diff".to_string(),
+        kind: WORKSPACE_DIFF_KIND.to_string(),
         scope: workspace.root.to_string_lossy().into_owned(),
         summary,
         data,
@@ -1442,7 +1455,7 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         data.omitted_files,
     );
     let observation = Observation {
-        kind: "workspace_patch".to_string(),
+        kind: WORKSPACE_PATCH_KIND.to_string(),
         scope: data.patch_file.clone(),
         summary,
         data,
@@ -1543,7 +1556,7 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
     };
     let summary = run_summary(data.exit_code, data.duration_ms, truncated);
     let observation = Observation {
-        kind: "workspace_run".to_string(),
+        kind: WORKSPACE_RUN_KIND.to_string(),
         scope: data.command.clone(),
         summary,
         data,
@@ -1573,7 +1586,7 @@ fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
     let truncated = log_truncated(&data);
     let summary = log_summary(&data);
     let observation = Observation {
-        kind: "workspace_log".to_string(),
+        kind: WORKSPACE_LOG_KIND.to_string(),
         scope: data.log_path.clone(),
         summary,
         data,
@@ -1617,7 +1630,7 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         data.omitted_files,
     );
     let observation = Observation {
-        kind: "workspace_rollback".to_string(),
+        kind: WORKSPACE_ROLLBACK_KIND.to_string(),
         scope: data.transaction_id.clone(),
         summary,
         data,
@@ -6156,6 +6169,42 @@ rename to new name.txt
         assert_eq!(
             rollback_followup_observations(),
             vec!["workspace diff --summary"]
+        );
+    }
+
+    #[test]
+    fn observation_kind_constants_match_json_contract() {
+        assert_eq!(
+            [
+                WORKSPACE_MAP_KIND,
+                WORKSPACE_STATUS_KIND,
+                WORKSPACE_SEARCH_KIND,
+                WORKSPACE_INDEX_STATUS_KIND,
+                WORKSPACE_INDEX_COCHANGE_KIND,
+                WORKSPACE_RELATED_KIND,
+                WORKSPACE_IMPACT_KIND,
+                WORKSPACE_READ_KIND,
+                WORKSPACE_DIFF_KIND,
+                WORKSPACE_PATCH_KIND,
+                WORKSPACE_RUN_KIND,
+                WORKSPACE_LOG_KIND,
+                WORKSPACE_ROLLBACK_KIND,
+            ],
+            [
+                "workspace_map",
+                "workspace_status",
+                "workspace_search",
+                "workspace_index_status",
+                "workspace_index_cochange",
+                "workspace_related",
+                "workspace_impact",
+                "workspace_read",
+                "workspace_diff",
+                "workspace_patch",
+                "workspace_run",
+                "workspace_log",
+                "workspace_rollback",
+            ]
         );
     }
 
