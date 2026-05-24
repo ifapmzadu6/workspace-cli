@@ -437,6 +437,27 @@ diff --git a/note.txt b/note.txt
     );
 }
 
+#[test]
+fn log_parse_errors_include_line_number() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(
+        root,
+        ".workspace/log.jsonl",
+        "{\"id\":\"ok\",\"timestamp_unix_ms\":1,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"ok\",\"transaction_id\":null}\nnot json\n",
+    );
+
+    let stderr = run_workspace_failure(root, &["log", "--json"]);
+    assert!(
+        stderr.contains("failed to parse operation log"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("line 2"),
+        "expected line number in stderr: {stderr}"
+    );
+}
+
 fn paths_at(value: &Value, path: &[&str]) -> Vec<String> {
     let mut cursor = value;
     for segment in path {
