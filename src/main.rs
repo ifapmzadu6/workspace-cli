@@ -420,6 +420,44 @@ struct SearchMatch {
     text: String,
 }
 
+struct FallbackSearchResult {
+    matches: Vec<SearchMatch>,
+    total_matches: usize,
+    truncated_match_texts: usize,
+}
+
+struct FallbackLineSearch {
+    line_number: u64,
+    byte_offset: usize,
+    scan_tail: Vec<u8>,
+    matched: bool,
+    match_column: u64,
+    display_text: String,
+    display_char_count: usize,
+    display_truncated: bool,
+    pending_utf8: Vec<u8>,
+    pending_line_cr: bool,
+    saw_bytes: bool,
+}
+
+impl FallbackLineSearch {
+    fn new(line_number: u64) -> Self {
+        Self {
+            line_number,
+            byte_offset: 0,
+            scan_tail: Vec::new(),
+            matched: false,
+            match_column: 0,
+            display_text: String::new(),
+            display_char_count: 0,
+            display_truncated: false,
+            pending_utf8: Vec::new(),
+            pending_line_cr: false,
+            saw_bytes: false,
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct RelatedData {
     target: String,
@@ -3329,31 +3367,202 @@ fn fallback_text_search(
             continue;
         }
 
-        let Ok(content) = fs::read_to_string(&path) else {
+        let remaining_results = max_results.saturating_sub(matches.len());
+        let Ok(file_result) = fallback_text_search_file(&path, &rel_path, query, remaining_results)
+        else {
             continue;
         };
-        for (line_index, line) in content.lines().enumerate() {
-            let Some(column_index) = line.find(query) else {
-                continue;
-            };
-            total_matches += 1;
-            if matches.len() >= max_results {
-                continue;
-            }
-            let (text, text_truncated) = truncate_search_match_text(line);
-            if text_truncated {
-                truncated_match_texts += 1;
-            }
-            matches.push(SearchMatch {
-                path: rel_path.clone(),
-                line: (line_index + 1) as u64,
-                column: (column_index + 1) as u64,
-                text,
-            });
-        }
+        total_matches += file_result.total_matches;
+        truncated_match_texts += file_result.truncated_match_texts;
+        matches.extend(file_result.matches);
     }
 
     Ok((matches, total_matches, truncated_match_texts))
+}
+
+fn fallback_text_search_file(
+    path: &Path,
+    rel_path: &str,
+    query: &str,
+    max_results: usize,
+) -> Result<FallbackSearchResult> {
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let query_bytes = query.as_bytes();
+    let mut result = FallbackSearchResult {
+        matches: Vec::new(),
+        total_matches: 0,
+        truncated_match_texts: 0,
+    };
+    let mut line = FallbackLineSearch::new(1);
+
+    loop {
+        let (bytes_to_consume, reached_line_end) = {
+            let buffer = reader.fill_buf()?;
+            if buffer.is_empty() {
+                if line.pending_line_cr {
+                    fallback_push_line_bytes(&mut line, b"\r", query_bytes)?;
+                    line.pending_line_cr = false;
+                }
+                if line.saw_bytes {
+                    fallback_finish_line(
+                        &mut line,
+                        rel_path,
+                        query_bytes,
+                        max_results,
+                        &mut result,
+                    )?;
+                }
+                break;
+            }
+
+            let (line_segment, consume_len, segment_reaches_line_end) =
+                match buffer.iter().position(|byte| *byte == b'\n') {
+                    Some(newline_index) => (&buffer[..newline_index], newline_index + 1, true),
+                    None => (buffer, buffer.len(), false),
+                };
+
+            fallback_push_line_segment(
+                &mut line,
+                line_segment,
+                segment_reaches_line_end,
+                query_bytes,
+            )?;
+
+            if segment_reaches_line_end {
+                fallback_finish_line(&mut line, rel_path, query_bytes, max_results, &mut result)?;
+            }
+
+            (consume_len, segment_reaches_line_end)
+        };
+
+        reader.consume(bytes_to_consume);
+        if reached_line_end {
+            line = FallbackLineSearch::new(line.line_number + 1);
+        }
+    }
+
+    Ok(result)
+}
+
+fn fallback_push_line_segment(
+    line: &mut FallbackLineSearch,
+    line_segment: &[u8],
+    segment_reaches_line_end: bool,
+    query: &[u8],
+) -> Result<()> {
+    if line.pending_line_cr {
+        if line_segment.is_empty() && segment_reaches_line_end {
+            line.pending_line_cr = false;
+        } else {
+            fallback_push_line_bytes(line, b"\r", query)?;
+            line.pending_line_cr = false;
+        }
+    }
+
+    let selected_segment = if line_segment.ends_with(b"\r") {
+        if segment_reaches_line_end {
+            &line_segment[..line_segment.len() - 1]
+        } else {
+            line.pending_line_cr = true;
+            &line_segment[..line_segment.len() - 1]
+        }
+    } else {
+        line_segment
+    };
+
+    fallback_push_line_bytes(line, selected_segment, query)
+}
+
+fn fallback_push_line_bytes(
+    line: &mut FallbackLineSearch,
+    bytes: &[u8],
+    query: &[u8],
+) -> Result<()> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+
+    line.saw_bytes = true;
+    fallback_scan_query(line, bytes, query);
+    fallback_append_display_bytes(line, bytes)?;
+    line.byte_offset += bytes.len();
+    Ok(())
+}
+
+fn fallback_scan_query(line: &mut FallbackLineSearch, bytes: &[u8], query: &[u8]) {
+    if line.matched || query.is_empty() {
+        return;
+    }
+
+    let mut scan = Vec::with_capacity(line.scan_tail.len() + bytes.len());
+    scan.extend_from_slice(&line.scan_tail);
+    scan.extend_from_slice(bytes);
+    if let Some(index) = scan.windows(query.len()).position(|window| window == query) {
+        line.matched = true;
+        line.match_column =
+            line.byte_offset.saturating_sub(line.scan_tail.len()) as u64 + index as u64 + 1;
+    }
+
+    let tail_len = query.len().saturating_sub(1).min(scan.len());
+    line.scan_tail = scan[scan.len() - tail_len..].to_vec();
+}
+
+fn fallback_append_display_bytes(line: &mut FallbackLineSearch, bytes: &[u8]) -> Result<()> {
+    line.pending_utf8.extend_from_slice(bytes);
+    let valid_len = match std::str::from_utf8(&line.pending_utf8) {
+        Ok(_) => line.pending_utf8.len(),
+        Err(error) if error.error_len().is_none() => error.valid_up_to(),
+        Err(error) => bail!("file is not valid UTF-8: {error}"),
+    };
+
+    if valid_len == 0 {
+        return Ok(());
+    }
+
+    if !line.display_truncated {
+        let valid_text = std::str::from_utf8(&line.pending_utf8[..valid_len])?;
+        line.display_truncated = append_limited_text(
+            &mut line.display_text,
+            &mut line.display_char_count,
+            MAX_SEARCH_MATCH_TEXT,
+            valid_text,
+        );
+    }
+    line.pending_utf8.drain(..valid_len);
+    Ok(())
+}
+
+fn fallback_finish_line(
+    line: &mut FallbackLineSearch,
+    rel_path: &str,
+    query: &[u8],
+    max_results: usize,
+    result: &mut FallbackSearchResult,
+) -> Result<()> {
+    ensure_no_pending_utf8(&line.pending_utf8)?;
+    if query.is_empty() {
+        line.matched = true;
+        line.match_column = 1;
+    }
+    if !line.matched {
+        return Ok(());
+    }
+
+    result.total_matches += 1;
+    if result.matches.len() >= max_results {
+        return Ok(());
+    }
+    if line.display_truncated {
+        result.truncated_match_texts += 1;
+    }
+    result.matches.push(SearchMatch {
+        path: rel_path.to_string(),
+        line: line.line_number,
+        column: line.match_column,
+        text: std::mem::take(&mut line.display_text),
+    });
+    Ok(())
 }
 
 fn truncate_search_match_text(text: &str) -> (String, bool) {
@@ -3506,8 +3715,17 @@ fn read_line_range_bounded(path: &Path, start: usize, end: usize) -> Result<Read
 }
 
 fn append_bounded_text(output: &mut String, char_count: &mut usize, text: &str) -> bool {
+    append_limited_text(output, char_count, MAX_READ_CONTENT, text)
+}
+
+fn append_limited_text(
+    output: &mut String,
+    char_count: &mut usize,
+    max_chars: usize,
+    text: &str,
+) -> bool {
     for ch in text.chars() {
-        if *char_count >= MAX_READ_CONTENT {
+        if *char_count >= max_chars {
             output.push_str("\n[output truncated]\n");
             return true;
         }
@@ -4455,6 +4673,66 @@ index 0000000..587be6b
         assert_eq!(matches[0].path, "a.txt");
         assert_eq!(matches[0].line, 1);
         assert_eq!(matches[0].column, 1);
+    }
+
+    #[test]
+    fn fallback_text_search_truncates_large_matching_lines() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let line = format!("needle {} tail\n", "a".repeat(30_000));
+        fs::write(temp.path().join("large.txt"), &line).expect("file should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let (matches, total_matches, truncated_match_texts) =
+            fallback_text_search(&workspace, "needle", 10).expect("fallback search should work");
+
+        assert_eq!(total_matches, 1);
+        assert_eq!(truncated_match_texts, 1);
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].text.contains("[output truncated]"));
+        assert!(!matches[0].text.contains("tail"));
+    }
+
+    #[test]
+    fn fallback_text_search_matches_across_read_buffer() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let line = format!("{}needle\n", "a".repeat(8190));
+        fs::write(temp.path().join("large.txt"), &line).expect("file should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let (matches, total_matches, truncated_match_texts) =
+            fallback_text_search(&workspace, "needle", 10).expect("fallback search should work");
+
+        assert_eq!(total_matches, 1);
+        assert_eq!(truncated_match_texts, 1);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].line, 1);
+        assert_eq!(matches[0].column, 8191);
+    }
+
+    #[test]
+    fn fallback_text_search_skips_invalid_utf8_files() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::write(temp.path().join("invalid.bin"), b"needle \xff\n")
+            .expect("file should be written");
+        fs::write(temp.path().join("valid.txt"), "needle valid\n").expect("file should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let (matches, total_matches, truncated_match_texts) =
+            fallback_text_search(&workspace, "needle", 10).expect("fallback search should work");
+
+        assert_eq!(total_matches, 1);
+        assert_eq!(truncated_match_texts, 0);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].path, "valid.txt");
     }
 
     #[test]
