@@ -251,6 +251,12 @@ workspace log
 workspace rollback <change-id>
 ```
 
+### `workspace map`
+
+Builds a structural map of the workspace. Large list fields are bounded in JSON
+output; omitted counts are reported under `data.omitted` and the observation is
+marked as `truncated`.
+
 ### `workspace status`
 
 Summarizes the current workspace state:

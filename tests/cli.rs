@@ -89,6 +89,15 @@ fn write_file(root: &Path, path: &str, content: &str) {
     fs::write(path, content).expect("file should be written");
 }
 
+fn write_sized_file(root: &Path, path: &str, len: u64) {
+    let path = root.join(path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("parent directory should be created");
+    }
+    let file = fs::File::create(path).expect("file should be created");
+    file.set_len(len).expect("file size should be set");
+}
+
 fn append_file(root: &Path, path: &str, content: &str) {
     use std::io::Write;
 
@@ -173,6 +182,64 @@ fn map_does_not_suggest_reading_workspace_root() {
     assert_eq!(map["kind"], "workspace_map");
     assert!(important.contains(&".".to_string()));
     assert!(!next.contains(&"workspace read .".to_string()));
+}
+
+#[test]
+fn map_truncates_large_observation_lists() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    let root = temp.path();
+
+    for index in 0..90 {
+        write_file(root, &format!("dir_{index:03}/file.txt"), "content\n");
+        write_file(root, &format!("docs/page_{index:03}.md"), "doc\n");
+        write_file(root, &format!("tests/case_{index:03}.rs"), "test\n");
+    }
+    for index in 0..45 {
+        write_sized_file(root, &format!("large/blob_{index:03}.bin"), 1_000_001);
+    }
+
+    let map = run_workspace(root, &["map", "--json"]);
+
+    assert_eq!(map["kind"], "workspace_map");
+    assert_eq!(map["truncated"], true);
+    assert!(
+        map["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("map truncated")
+    );
+    assert_eq!(
+        map["data"]["structure"]["directories"]
+            .as_array()
+            .expect("directories should be an array")
+            .len(),
+        80
+    );
+    assert_eq!(
+        map["data"]["structure"]["docs"]
+            .as_array()
+            .expect("docs should be an array")
+            .len(),
+        80
+    );
+    assert_eq!(
+        map["data"]["structure"]["tests"]
+            .as_array()
+            .expect("tests should be an array")
+            .len(),
+        80
+    );
+    assert_eq!(
+        map["data"]["stats"]["large_files"]
+            .as_array()
+            .expect("large files should be an array")
+            .len(),
+        40
+    );
+    assert_eq!(map["data"]["omitted"]["directories"], 13);
+    assert_eq!(map["data"]["omitted"]["docs"], 10);
+    assert_eq!(map["data"]["omitted"]["tests"], 10);
+    assert_eq!(map["data"]["omitted"]["large_files"], 5);
 }
 
 #[test]

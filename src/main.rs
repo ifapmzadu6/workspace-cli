@@ -22,6 +22,8 @@ const INDEX_DIR: &str = ".workspace/index";
 const COCHANGE_INDEX_FILE: &str = ".workspace/index/cochange.json";
 const MAX_CAPTURED_OUTPUT: usize = 24_000;
 const MAX_READ_CONTENT: usize = 24_000;
+const MAX_MAP_LIST_ITEMS: usize = 80;
+const MAX_MAP_LARGE_FILES: usize = 40;
 const MAX_DIFF_SUMMARY: usize = 12_000;
 const MAX_DIFF_PATCH: usize = 48_000;
 const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
@@ -317,6 +319,7 @@ struct WorkspaceMap {
     stats: WorkspaceStats,
     important_files: Vec<ImportantFile>,
     recent_files: Vec<String>,
+    omitted: MapOmittedCounts,
 }
 
 #[derive(Serialize)]
@@ -346,6 +349,27 @@ struct WorkspaceStats {
 struct LargeFile {
     path: String,
     bytes: u64,
+}
+
+#[derive(Serialize, Default)]
+struct MapOmittedCounts {
+    directories: usize,
+    entrypoints: usize,
+    tests: usize,
+    configs: usize,
+    docs: usize,
+    large_files: usize,
+}
+
+impl MapOmittedCounts {
+    fn any(&self) -> bool {
+        self.directories > 0
+            || self.entrypoints > 0
+            || self.tests > 0
+            || self.configs > 0
+            || self.docs > 0
+            || self.large_files > 0
+    }
 }
 
 #[derive(Serialize)]
@@ -678,11 +702,15 @@ impl Workspace {
 
 fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
     let map = build_map(workspace, args.depth, args.include_hidden)?;
-    let summary = format!(
+    let truncated = map.omitted.any();
+    let mut summary = format!(
         "{} file(s), languages: {}",
         map.stats.file_count,
         join_or_none(&map.stack.languages)
     );
+    if truncated {
+        summary.push_str(" (map truncated)");
+    }
     let evidence = map_evidence(&map);
     let next_observations = map_next_observations(&map);
     let observation = Observation {
@@ -691,7 +719,7 @@ fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
         summary,
         data: map,
         evidence,
-        truncated: false,
+        truncated,
         next_observations,
     };
 
@@ -1435,9 +1463,18 @@ fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Resul
         .collect::<Vec<_>>();
 
     let stack = detect_stack(workspace, &files)?;
-    let structure = detect_structure(&files, directories.into_iter().collect());
+    let mut structure = detect_structure(&files, directories.into_iter().collect());
     let commands = detect_commands(workspace, &files)?;
     let important_files = important_files(&structure, &stack);
+    large_files.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
+    let omitted = MapOmittedCounts {
+        directories: truncate_vec(&mut structure.directories, MAX_MAP_LIST_ITEMS),
+        entrypoints: truncate_vec(&mut structure.entrypoints, MAX_MAP_LIST_ITEMS),
+        tests: truncate_vec(&mut structure.tests, MAX_MAP_LIST_ITEMS),
+        configs: truncate_vec(&mut structure.configs, MAX_MAP_LIST_ITEMS),
+        docs: truncate_vec(&mut structure.docs, MAX_MAP_LIST_ITEMS),
+        large_files: truncate_vec(&mut large_files, MAX_MAP_LARGE_FILES),
+    };
 
     Ok(WorkspaceMap {
         root: workspace.root.to_string_lossy().into_owned(),
@@ -1452,7 +1489,16 @@ fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Resul
         },
         important_files,
         recent_files,
+        omitted,
     })
+}
+
+fn truncate_vec<T>(items: &mut Vec<T>, max_len: usize) -> usize {
+    let omitted = items.len().saturating_sub(max_len);
+    if omitted > 0 {
+        items.truncate(max_len);
+    }
+    omitted
 }
 
 fn should_descend(path: &Path, include_hidden: bool) -> bool {
