@@ -435,6 +435,21 @@ fn index_related_impact_and_status_cover_cochange_flow() {
     let index = run_workspace(root, &["index", "cochange", "--json"]);
     assert_eq!(index["kind"], "workspace_index_cochange");
     assert_eq!(index["data"]["commits_indexed"], 3);
+    assert_eq!(index["data"]["file_count"], 4);
+    assert_eq!(index["data"]["edge_count"], 3);
+    assert!(index["data"].get("edges").is_none());
+    assert!(index["data"].get("file_commit_counts").is_none());
+    let saved_index = fs::read_to_string(root.join(".workspace/index/cochange.json"))
+        .expect("saved co-change index should be readable");
+    let saved_index: Value =
+        serde_json::from_str(&saved_index).expect("saved co-change index should be JSON");
+    assert_eq!(
+        saved_index["edges"]
+            .as_array()
+            .expect("saved index should retain edges")
+            .len(),
+        3
+    );
 
     let fresh_status = run_workspace(root, &["status", "--json"]);
     assert_eq!(fresh_status["data"]["index_status"]["status"], "fresh");

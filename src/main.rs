@@ -569,6 +569,21 @@ struct IndexStatusData {
     error: Option<String>,
 }
 
+#[derive(Serialize)]
+struct IndexCochangeData {
+    path: String,
+    version: u32,
+    generated_at_unix_ms: u128,
+    head: Option<String>,
+    max_commits: usize,
+    max_files_per_commit: usize,
+    commits_scanned: usize,
+    commits_indexed: usize,
+    ignored_large_commits: usize,
+    file_count: usize,
+    edge_count: usize,
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 struct CochangeIndex {
     version: u32,
@@ -927,16 +942,28 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
     fs::write(&index_path, serde_json::to_string_pretty(&index)?)
         .with_context(|| format!("failed to write index {}", index_path.display()))?;
 
+    let data = IndexCochangeData {
+        path: workspace.relative(&index_path),
+        version: index.version,
+        generated_at_unix_ms: index.generated_at_unix_ms,
+        head: index.head.clone(),
+        max_commits: index.max_commits,
+        max_files_per_commit: index.max_files_per_commit,
+        commits_scanned: index.commits_scanned,
+        commits_indexed: index.commits_indexed,
+        ignored_large_commits: index.ignored_large_commits,
+        file_count: index.file_commit_counts.len(),
+        edge_count: index.edges.len(),
+    };
     let summary = format!(
         "indexed {} co-change edge(s) from {} commit(s)",
-        index.edges.len(),
-        index.commits_indexed
+        data.edge_count, data.commits_indexed
     );
     let observation = Observation {
         kind: "workspace_index_cochange".to_string(),
-        scope: workspace.relative(&index_path),
+        scope: data.path.clone(),
         summary,
-        data: index,
+        data,
         evidence: vec![],
         truncated: false,
         next_observations: vec![
@@ -3735,15 +3762,16 @@ fn print_search(observation: &Observation<SearchData>) -> Result<()> {
     Ok(())
 }
 
-fn print_index_cochange(observation: &Observation<CochangeIndex>) -> Result<()> {
+fn print_index_cochange(observation: &Observation<IndexCochangeData>) -> Result<()> {
     let data = &observation.data;
     println!("{}", observation.summary);
+    println!("  path: {}", data.path);
     println!("  head: {}", data.head.as_deref().unwrap_or("unknown"));
     println!("  scanned: {} commit(s)", data.commits_scanned);
     println!("  indexed: {} commit(s)", data.commits_indexed);
     println!("  ignored broad commits: {}", data.ignored_large_commits);
-    println!("  files: {}", data.file_commit_counts.len());
-    println!("  edges: {}", data.edges.len());
+    println!("  files: {}", data.file_count);
+    println!("  edges: {}", data.edge_count);
     Ok(())
 }
 

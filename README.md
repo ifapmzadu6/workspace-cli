@@ -147,7 +147,9 @@ workspace related src/config.rs --by cochange --rank pagerank
 ```
 
 `workspace index status` reports whether the saved index exists and whether it
-is fresh for the current Git `HEAD`.
+is fresh for the current Git `HEAD`. `workspace index cochange --json` returns a
+bounded summary of the saved index; the full edge list is persisted under
+`.workspace/index/cochange.json` for later related/impact queries.
 
 `--use-index` and `--rank pagerank` use the saved co-change graph to propagate
 from seed files through the graph. This can surface files that were not directly
