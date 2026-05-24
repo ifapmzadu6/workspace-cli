@@ -1,5 +1,7 @@
 # workspace cli
 
+[![CI](https://github.com/ifapmzadu6/workspace-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/ifapmzadu6/workspace-cli/actions/workflows/ci.yml)
+
 `workspace cli` is a CLI runtime for humans and LLM agents to read, change,
 verify, and track a project workspace through the same operation surface.
 
@@ -79,6 +81,9 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 cargo build
 ```
+
+The same gates, plus `python3 tools/measure_effect.py`, run in GitHub Actions
+on pushes to `main` and pull requests.
 
 In addition to unit tests, the repository has integration tests that run the
 real `workspace` binary inside temporary workspaces. The tests cover
