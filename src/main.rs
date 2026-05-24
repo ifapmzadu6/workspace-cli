@@ -1519,13 +1519,12 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         omitted_files: observed_files.omitted_files,
     };
     let truncated = data.omitted_files > 0;
-    let mut summary = format!(
-        "applied patch transaction {} touching {} file(s)",
-        data.transaction_id, data.file_count
+    let summary = transaction_file_summary(
+        "applied patch",
+        &data.transaction_id,
+        data.file_count,
+        data.omitted_files,
     );
-    if truncated {
-        summary.push_str(" (files truncated)");
-    }
     let observation = Observation {
         kind: "workspace_patch".to_string(),
         scope: data.patch_file.clone(),
@@ -1716,13 +1715,12 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         omitted_files: observed_files.omitted_files,
     };
     let truncated = data.omitted_files > 0;
-    let mut summary = format!(
-        "rolled back transaction {} touching {} file(s)",
-        data.transaction_id, data.file_count
+    let summary = transaction_file_summary(
+        "rolled back",
+        &data.transaction_id,
+        data.file_count,
+        data.omitted_files,
     );
-    if truncated {
-        summary.push_str(" (files truncated)");
-    }
     let observation = Observation {
         kind: "workspace_rollback".to_string(),
         scope: data.transaction_id.clone(),
@@ -1836,6 +1834,20 @@ fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool)
         summary.push_str(" (patch truncated)");
     }
     if data.omitted_files > 0 {
+        summary.push_str(" (files truncated)");
+    }
+    summary
+}
+
+fn transaction_file_summary(
+    action: &str,
+    transaction_id: &str,
+    file_count: usize,
+    omitted_files: usize,
+) -> String {
+    let mut summary =
+        format!("{action} transaction {transaction_id} touching {file_count} file(s)");
+    if omitted_files > 0 {
         summary.push_str(" (files truncated)");
     }
     summary
@@ -6070,6 +6082,18 @@ rename to new name.txt
         };
 
         assert_eq!(diff_summary(&data, false, false), "not a git repository");
+    }
+
+    #[test]
+    fn transaction_file_summary_reports_truncated_files() {
+        assert_eq!(
+            transaction_file_summary("applied patch", "tx-123", 3, 0),
+            "applied patch transaction tx-123 touching 3 file(s)"
+        );
+        assert_eq!(
+            transaction_file_summary("rolled back", "tx-123", 3, 2),
+            "rolled back transaction tx-123 touching 3 file(s) (files truncated)"
+        );
     }
 
     #[test]
