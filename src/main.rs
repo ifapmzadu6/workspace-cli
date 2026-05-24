@@ -3333,10 +3333,11 @@ fn rank_cochanges_pagerank_from_index(
     let target = normalize_repo_path(target);
     let seeds = BTreeSet::from([target.clone()]);
     let hits = personalized_pagerank(index, &seeds, 40, 0.85);
+    let edge_lookup = cochange_edge_lookup(index);
     let mut related = hits
         .into_iter()
         .map(|hit| {
-            let direct_edge = find_cochange_edge(index, &target, &hit.path);
+            let direct_edge = find_cochange_edge(&edge_lookup, &target, &hit.path);
             RelatedFile {
                 path: hit.path,
                 score: round3(hit.score),
@@ -3552,6 +3553,7 @@ fn rank_cochange_impact_pagerank_from_index(
         .filter(|file| !file.is_empty())
         .collect::<BTreeSet<_>>();
     let hits = personalized_pagerank(index, &seed_files, 40, 0.85);
+    let edge_lookup = cochange_edge_lookup(index);
     let mut impacted = hits
         .into_iter()
         .map(|hit| {
@@ -3561,7 +3563,7 @@ fn rank_cochange_impact_pagerank_from_index(
             let mut sample_commits = Vec::new();
 
             for seed in &seed_files {
-                if let Some(edge) = find_cochange_edge(index, seed, &hit.path) {
+                if let Some(edge) = find_cochange_edge(&edge_lookup, seed, &hit.path) {
                     direct_commits += edge.cochanged_commits;
                     direct_weight += edge.weighted_cochanges;
                     direct_seeds.insert(seed.clone());
@@ -3705,13 +3707,32 @@ fn personalized_pagerank(
     hits
 }
 
-fn find_cochange_edge<'a>(index: &'a CochangeIndex, a: &str, b: &str) -> Option<&'a CochangeEdge> {
+fn cochange_edge_lookup(index: &CochangeIndex) -> BTreeMap<(String, String), &CochangeEdge> {
+    let mut lookup = BTreeMap::new();
+    for edge in &index.edges {
+        lookup
+            .entry(ordered_edge_key(&edge.a, &edge.b))
+            .or_insert(edge);
+    }
+    lookup
+}
+
+fn find_cochange_edge<'a>(
+    lookup: &BTreeMap<(String, String), &'a CochangeEdge>,
+    a: &str,
+    b: &str,
+) -> Option<&'a CochangeEdge> {
     let a = normalize_repo_path(a);
     let b = normalize_repo_path(b);
-    index
-        .edges
-        .iter()
-        .find(|edge| (edge.a == a && edge.b == b) || (edge.a == b && edge.b == a))
+    lookup.get(&ordered_edge_key(&a, &b)).copied()
+}
+
+fn ordered_edge_key(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
 }
 
 fn compare_related_by_weight(a: &RelatedFile, b: &RelatedFile) -> std::cmp::Ordering {
@@ -6708,6 +6729,44 @@ src/b.rs
             ranking.impacted[0].seed_files,
             vec!["src/a.rs", "src/other.rs"]
         );
+    }
+
+    #[test]
+    fn cochange_edge_lookup_preserves_first_matching_edge() {
+        let index = CochangeIndex {
+            version: 1,
+            generated_at_unix_ms: 0,
+            head: None,
+            max_commits: 10,
+            max_files_per_commit: 10,
+            commits_scanned: 2,
+            commits_indexed: 2,
+            ignored_large_commits: 0,
+            file_commit_counts: BTreeMap::new(),
+            edges: vec![
+                CochangeEdge {
+                    a: "src/a.rs".to_string(),
+                    b: "src/b.rs".to_string(),
+                    cochanged_commits: 1,
+                    weighted_cochanges: 1.0,
+                    sample_commits: vec!["aaaaaaaaaaaa".to_string()],
+                },
+                CochangeEdge {
+                    a: "src/b.rs".to_string(),
+                    b: "src/a.rs".to_string(),
+                    cochanged_commits: 2,
+                    weighted_cochanges: 2.0,
+                    sample_commits: vec!["bbbbbbbbbbbb".to_string()],
+                },
+            ],
+        };
+
+        let lookup = cochange_edge_lookup(&index);
+        let edge =
+            find_cochange_edge(&lookup, "src/b.rs", "src/a.rs").expect("edge should be found");
+
+        assert_eq!(edge.cochanged_commits, 1);
+        assert_eq!(edge.sample_commits, vec!["aaaaaaaaaaaa"]);
     }
 
     #[test]
