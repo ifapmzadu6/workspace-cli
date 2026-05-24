@@ -438,6 +438,28 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn rollback_rejects_invalid_transaction_ids() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+
+    for transaction_id in [
+        "/tmp/not-a-transaction",
+        "../tx-123",
+        "rb-123",
+        "tx-",
+        "tx-not-digits",
+    ] {
+        let stderr = run_workspace_failure(root, &["rollback", transaction_id, "--json"]);
+        assert!(
+            stderr.contains("invalid transaction id"),
+            "unexpected stderr for {transaction_id:?}: {stderr}"
+        );
+    }
+}
+
+#[test]
 fn log_parse_errors_include_line_number() {
     let temp = init_git_repo();
     let root = temp.path();

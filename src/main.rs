@@ -1284,9 +1284,7 @@ fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
 }
 
 fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
-    let stored_patch = workspace
-        .transaction_dir()
-        .join(format!("{}.patch", args.transaction_id));
+    let stored_patch = transaction_patch_path(workspace, &args.transaction_id)?;
     if !stored_patch.exists() {
         bail!(
             "transaction patch not found: {}",
@@ -1338,6 +1336,23 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         Some(&rollback_transaction_id),
     )?;
     output_observation(args.json, &observation, print_rollback)
+}
+
+fn transaction_patch_path(workspace: &Workspace, transaction_id: &str) -> Result<PathBuf> {
+    validate_patch_transaction_id(transaction_id)?;
+    Ok(workspace
+        .transaction_dir()
+        .join(format!("{transaction_id}.patch")))
+}
+
+fn validate_patch_transaction_id(transaction_id: &str) -> Result<()> {
+    let Some(rest) = transaction_id.strip_prefix("tx-") else {
+        bail!("invalid transaction id {transaction_id:?}; expected tx-<digits>");
+    };
+    if rest.is_empty() || !rest.bytes().all(|byte| byte.is_ascii_digit()) {
+        bail!("invalid transaction id {transaction_id:?}; expected tx-<digits>");
+    }
+    Ok(())
 }
 
 fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Result<WorkspaceMap> {
