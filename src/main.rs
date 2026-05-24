@@ -1427,8 +1427,7 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         )
     })?;
     let stored_patch = transaction_dir.join(format!("{transaction_id}.patch"));
-    fs::copy(&patch_path, &stored_patch)
-        .with_context(|| format!("failed to store patch {}", stored_patch.display()))?;
+    store_transaction_patch(&patch_path, &stored_patch)?;
     if let Err(error) = run_git_apply(workspace, &patch_path, []) {
         let _ = fs::remove_file(&stored_patch);
         return Err(error);
@@ -1484,6 +1483,56 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         Some(&transaction_id),
     )?;
     output_observation(args.json, &observation, print_patch)
+}
+
+fn store_transaction_patch(source: &Path, destination: &Path) -> Result<()> {
+    let temp_path = temp_sibling_path(destination, "patch-store")?;
+    copy_file_to_temp_path(source, &temp_path)?;
+    if let Err(error) = fs::rename(&temp_path, destination)
+        .with_context(|| format!("failed to store patch {}", destination.display()))
+    {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn copy_file_to_temp_path(source: &Path, temp_path: &Path) -> Result<u64> {
+    let source_file = fs::File::open(source)
+        .with_context(|| format!("failed to read patch {}", source.display()))?;
+    let temp_file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(temp_path)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to create stored patch {}", temp_path.display()));
+        }
+    };
+
+    let result = copy_file_contents(source_file, temp_file, temp_path);
+    if result.is_err() {
+        let _ = fs::remove_file(temp_path);
+    }
+    result
+}
+
+fn copy_file_contents(source_file: fs::File, temp_file: fs::File, temp_path: &Path) -> Result<u64> {
+    let mut reader = BufReader::new(source_file);
+    let mut writer = BufWriter::new(temp_file);
+    let bytes_copied = std::io::copy(&mut reader, &mut writer)
+        .with_context(|| format!("failed to copy stored patch {}", temp_path.display()))?;
+    writer
+        .flush()
+        .with_context(|| format!("failed to flush stored patch {}", temp_path.display()))?;
+    let file = writer
+        .into_inner()
+        .with_context(|| format!("failed to finish stored patch {}", temp_path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync stored patch {}", temp_path.display()))?;
+    Ok(bytes_copied)
 }
 
 fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
@@ -5358,6 +5407,55 @@ rename to new name.txt
             "unexpected error: {error}"
         );
         assert!(error.contains("exceeded"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn transaction_patch_store_replaces_destination_without_leftover_temp() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let source = temp.path().join("change.patch");
+        let destination = temp.path().join("tx-1.patch");
+        fs::write(&source, "patch content\n").expect("source patch should be written");
+
+        store_transaction_patch(&source, &destination).expect("patch should be stored");
+        let leftovers = fs::read_dir(temp.path())
+            .expect("temp dir should be readable")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".patch-store-")
+            })
+            .count();
+
+        assert_eq!(
+            fs::read_to_string(&destination).expect("stored patch should be readable"),
+            "patch content\n"
+        );
+        assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn transaction_patch_temp_create_failure_preserves_existing_temp_file() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let source = temp.path().join("change.patch");
+        let temp_path = temp.path().join("tx-1.patch.tmp");
+        fs::write(&source, "patch content\n").expect("source patch should be written");
+        fs::write(&temp_path, "existing temp").expect("existing temp should be written");
+
+        let Err(error) = copy_file_to_temp_path(&source, &temp_path) else {
+            panic!("temp create should fail");
+        };
+        let error = format!("{error:#}");
+
+        assert!(
+            error.contains("failed to create stored patch"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            fs::read_to_string(&temp_path).expect("existing temp should remain"),
+            "existing temp"
+        );
     }
 
     #[test]
