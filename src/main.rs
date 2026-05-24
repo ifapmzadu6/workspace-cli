@@ -1920,6 +1920,15 @@ fn push_bounded_sorted<T>(
     }
 }
 
+fn sort_and_truncate<T>(
+    items: &mut Vec<T>,
+    max_len: usize,
+    compare: fn(&T, &T) -> std::cmp::Ordering,
+) {
+    items.sort_by(compare);
+    items.truncate(max_len);
+}
+
 fn push_recent_candidate(
     recent_candidates: &mut Vec<(SystemTime, String)>,
     modified: SystemTime,
@@ -3327,8 +3336,7 @@ fn rank_cochanges_pagerank_from_index(
         })
         .collect::<Vec<_>>();
 
-    related.sort_by(compare_related_by_score);
-    related.truncate(max_results);
+    sort_and_truncate(&mut related, max_results, compare_related_by_score);
 
     CochangeRanking {
         related,
@@ -3526,8 +3534,7 @@ fn rank_cochange_impact_pagerank_from_index(
         })
         .collect::<Vec<_>>();
 
-    impacted.sort_by(compare_impact_by_score);
-    impacted.truncate(max_results);
+    sort_and_truncate(&mut impacted, max_results, compare_impact_by_score);
     let commits_matched = indexed_seed_commit_count(index, &seed_files);
 
     ImpactRanking {
@@ -6210,6 +6217,17 @@ not json
 
         push_bounded_sorted(&mut items, 9, 3, |a, b| a.cmp(b));
         assert_eq!(items, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn sort_and_truncate_orders_and_bounds_items() {
+        let mut items = vec![3, 1, 4, 2, 0];
+        sort_and_truncate(&mut items, 3, |a, b| a.cmp(b));
+
+        assert_eq!(items, vec![0, 1, 2]);
+
+        sort_and_truncate(&mut items, 0, |a, b| a.cmp(b));
+        assert!(items.is_empty());
     }
 
     #[test]
