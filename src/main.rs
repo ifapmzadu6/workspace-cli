@@ -1531,15 +1531,14 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         return Err(error);
     }
 
-    let mut observed_files_changed = files_changed.clone();
-    let omitted_files = truncate_vec(&mut observed_files_changed, MAX_CHANGED_FILES);
+    let observed_files = observed_changed_files(&files_changed);
     let data = PatchData {
         transaction_id: transaction_id.clone(),
         patch_file: workspace.relative(&patch_path),
         stored_patch: workspace.relative(&stored_patch),
         file_count: files_changed.len(),
-        files_changed: observed_files_changed,
-        omitted_files,
+        files_changed: observed_files.files,
+        omitted_files: observed_files.omitted_files,
     };
     let truncated = data.omitted_files > 0;
     let mut summary = format!(
@@ -1554,15 +1553,7 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         scope: data.patch_file.clone(),
         summary,
         data,
-        evidence: files_changed
-            .iter()
-            .take(MAX_CHANGED_FILES)
-            .map(|path| Evidence {
-                path: path.clone(),
-                lines: None,
-                reason: "patch file target".to_string(),
-            })
-            .collect(),
+        evidence: changed_file_evidence(&files_changed, "patch file target"),
         truncated,
         next_observations: vec![
             "workspace diff --summary".to_string(),
@@ -1737,15 +1728,14 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
     run_git_apply(workspace, &stored_patch, ["--reverse"])?;
 
     let rollback_transaction_id = new_id("rb");
-    let mut observed_files_changed = files_changed.clone();
-    let omitted_files = truncate_vec(&mut observed_files_changed, MAX_CHANGED_FILES);
+    let observed_files = observed_changed_files(&files_changed);
     let data = RollbackData {
         transaction_id: args.transaction_id.clone(),
         rollback_transaction_id: rollback_transaction_id.clone(),
         stored_patch: workspace.relative(&stored_patch),
         file_count: files_changed.len(),
-        files_changed: observed_files_changed,
-        omitted_files,
+        files_changed: observed_files.files,
+        omitted_files: observed_files.omitted_files,
     };
     let truncated = data.omitted_files > 0;
     let mut summary = format!(
@@ -1760,15 +1750,7 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         scope: data.transaction_id.clone(),
         summary,
         data,
-        evidence: files_changed
-            .iter()
-            .take(MAX_CHANGED_FILES)
-            .map(|path| Evidence {
-                path: path.clone(),
-                lines: None,
-                reason: "rollback target".to_string(),
-            })
-            .collect(),
+        evidence: changed_file_evidence(&files_changed, "rollback target"),
         truncated,
         next_observations: vec!["workspace diff --summary".to_string()],
     };
@@ -1782,6 +1764,32 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         Some(&rollback_transaction_id),
     )?;
     output_observation(args.json, &observation, print_rollback)
+}
+
+struct ObservedChangedFiles {
+    files: Vec<String>,
+    omitted_files: usize,
+}
+
+fn observed_changed_files(files_changed: &[String]) -> ObservedChangedFiles {
+    let mut files = files_changed.to_vec();
+    let omitted_files = truncate_vec(&mut files, MAX_CHANGED_FILES);
+    ObservedChangedFiles {
+        files,
+        omitted_files,
+    }
+}
+
+fn changed_file_evidence(files_changed: &[String], reason: &str) -> Vec<Evidence> {
+    files_changed
+        .iter()
+        .take(MAX_CHANGED_FILES)
+        .map(|path| Evidence {
+            path: path.clone(),
+            lines: None,
+            reason: reason.to_string(),
+        })
+        .collect()
 }
 
 fn transaction_patch_path(workspace: &Workspace, transaction_id: &str) -> Result<PathBuf> {
@@ -5851,6 +5859,28 @@ rename to new name.txt
             "unexpected error: {error}"
         );
         assert!(error.contains("exceeded"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn observed_changed_files_and_evidence_are_bounded() {
+        let files = (0..(MAX_CHANGED_FILES + 2))
+            .map(|index| format!("file_{index:03}.txt"))
+            .collect::<Vec<_>>();
+
+        let observed = observed_changed_files(&files);
+        let evidence = changed_file_evidence(&files, "patch file target");
+
+        assert_eq!(observed.files.len(), MAX_CHANGED_FILES);
+        assert_eq!(observed.files[0], "file_000.txt");
+        assert_eq!(
+            observed.files[MAX_CHANGED_FILES - 1],
+            format!("file_{:03}.txt", MAX_CHANGED_FILES - 1)
+        );
+        assert_eq!(observed.omitted_files, 2);
+        assert_eq!(evidence.len(), MAX_CHANGED_FILES);
+        assert_eq!(evidence[0].path, "file_000.txt");
+        assert_eq!(evidence[0].reason, "patch file target");
+        assert!(evidence.iter().all(|item| item.lines.is_none()));
     }
 
     #[test]
