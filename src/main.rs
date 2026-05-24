@@ -362,6 +362,7 @@ struct StatusData {
 #[derive(Serialize)]
 struct SearchData {
     query: String,
+    total_matches: usize,
     matches: Vec<SearchMatch>,
 }
 
@@ -757,7 +758,7 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
 }
 
 fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
-    let (matches, truncated) = rg_search(workspace, &args.query, args.max_results)?;
+    let (matches, total_matches) = rg_search(workspace, &args.query, args.max_results)?;
     let evidence = matches
         .iter()
         .take(12)
@@ -769,13 +770,20 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
         .collect::<Vec<_>>();
     let data = SearchData {
         query: args.query.clone(),
+        total_matches,
         matches,
     };
-    let summary = format!(
-        "{} match(es) for {:?}",
-        data.matches.len() + usize::from(truncated),
-        data.query
-    );
+    let truncated = data.total_matches > data.matches.len();
+    let summary = if truncated {
+        format!(
+            "{} match(es) for {:?}, showing {}",
+            data.total_matches,
+            data.query,
+            data.matches.len()
+        )
+    } else {
+        format!("{} match(es) for {:?}", data.total_matches, data.query)
+    };
     let next_observations = data
         .matches
         .iter()
@@ -2971,8 +2979,8 @@ fn rg_search(
     workspace: &Workspace,
     query: &str,
     max_results: usize,
-) -> Result<(Vec<SearchMatch>, bool)> {
-    let output = Command::new("rg")
+) -> Result<(Vec<SearchMatch>, usize)> {
+    let output = match Command::new("rg")
         .current_dir(&workspace.root)
         .args([
             "--json",
@@ -2993,7 +3001,13 @@ fn rg_search(
             ".",
         ])
         .output()
-        .context("failed to run ripgrep")?;
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return fallback_text_search(workspace, query, max_results);
+        }
+        Err(error) => return Err(error).context("failed to run ripgrep"),
+    };
 
     if !output.status.success() && output.status.code() != Some(1) {
         bail!(
@@ -3003,10 +3017,14 @@ fn rg_search(
     }
 
     let mut matches = Vec::new();
-    let mut truncated = false;
+    let mut total_matches = 0usize;
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let value: Value = serde_json::from_str(line).context("failed to parse ripgrep JSON")?;
         if value.get("type").and_then(Value::as_str) != Some("match") {
+            continue;
+        }
+        total_matches += 1;
+        if matches.len() >= max_results {
             continue;
         }
         let data = value.get("data").unwrap_or(&Value::Null);
@@ -3037,10 +3055,6 @@ fn rg_search(
             .map(|start| start + 1)
             .unwrap_or_default();
 
-        if matches.len() >= max_results {
-            truncated = true;
-            break;
-        }
         matches.push(SearchMatch {
             path,
             line: line_number,
@@ -3049,7 +3063,57 @@ fn rg_search(
         });
     }
 
-    Ok((matches, truncated))
+    Ok((matches, total_matches))
+}
+
+fn fallback_text_search(
+    workspace: &Workspace,
+    query: &str,
+    max_results: usize,
+) -> Result<(Vec<SearchMatch>, usize)> {
+    let mut matches = Vec::new();
+    let mut total_matches = 0usize;
+    let mut file_paths = Vec::new();
+
+    for entry in WalkDir::new(&workspace.root)
+        .into_iter()
+        .filter_entry(|entry| entry.path() == workspace.root || should_descend(entry.path(), false))
+    {
+        let entry = entry?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        file_paths.push(entry.into_path());
+    }
+    file_paths.sort();
+
+    for path in file_paths {
+        let rel_path = workspace.relative(&path);
+        if !should_include_repo_file(&rel_path) {
+            continue;
+        }
+
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for (line_index, line) in content.lines().enumerate() {
+            let Some(column_index) = line.find(query) else {
+                continue;
+            };
+            total_matches += 1;
+            if matches.len() >= max_results {
+                continue;
+            }
+            matches.push(SearchMatch {
+                path: rel_path.clone(),
+                line: (line_index + 1) as u64,
+                column: (column_index + 1) as u64,
+                text: line.to_string(),
+            });
+        }
+    }
+
+    Ok((matches, total_matches))
 }
 
 fn parse_line_range(value: &str) -> Result<(usize, usize)> {
@@ -3715,6 +3779,30 @@ index 0000000..587be6b
 +x
 ";
         assert_eq!(extract_patch_files(patch), vec!["src/tab\tname.txt"]);
+    }
+
+    #[test]
+    fn fallback_text_search_counts_all_matching_lines() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::write(temp.path().join("a.txt"), "needle one\nneedle two\n")
+            .expect("file should be written");
+        fs::write(temp.path().join("b.txt"), "needle three\n").expect("file should be written");
+        fs::create_dir(temp.path().join(".workspace")).expect("workspace dir should be created");
+        fs::write(temp.path().join(".workspace/log.jsonl"), "needle ignored\n")
+            .expect("log should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let (matches, total_matches) =
+            fallback_text_search(&workspace, "needle", 2).expect("fallback search should work");
+
+        assert_eq!(total_matches, 3);
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].path, "a.txt");
+        assert_eq!(matches[0].line, 1);
+        assert_eq!(matches[0].column, 1);
     }
 
     #[test]

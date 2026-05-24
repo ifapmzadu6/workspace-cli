@@ -163,6 +163,38 @@ fn map_and_read_emit_observations() {
 }
 
 #[test]
+fn search_reports_total_matches_when_results_are_truncated() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    write_file(temp.path(), "a.txt", "needle one\nneedle two\n");
+    write_file(temp.path(), "b.txt", "needle three\n");
+
+    let search = run_workspace(
+        temp.path(),
+        &["search", "needle", "--max-results", "2", "--json"],
+    );
+    let matches = search["data"]["matches"]
+        .as_array()
+        .expect("matches should be an array");
+
+    assert_eq!(search["kind"], "workspace_search");
+    assert_eq!(search["data"]["total_matches"], 3);
+    assert_eq!(matches.len(), 2);
+    assert_eq!(search["truncated"], true);
+    assert!(
+        search["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("3 match(es)")
+    );
+    assert!(
+        search["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("showing 2")
+    );
+}
+
+#[test]
 fn read_rejects_paths_outside_workspace() {
     let workspace = TempDir::new().expect("workspace temp dir should be created");
     let outside = TempDir::new().expect("outside temp dir should be created");
