@@ -1185,16 +1185,16 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
 
 fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     let (data, summary_truncated, patch_truncated) = if workspace.is_git_repo {
-        let raw_summary = git_observable_diff_output(workspace, ["--stat"])?;
-        let summary_truncated = raw_summary.chars().count() > MAX_DIFF_SUMMARY;
-        let summary = truncate_string(&raw_summary, MAX_DIFF_SUMMARY);
+        let summary_output =
+            git_observable_diff_output_bounded(workspace, ["--stat"], MAX_DIFF_SUMMARY)?;
+        let summary_truncated = summary_output.truncated;
+        let summary = summary_output.text;
         let files = git_name_only_paths(&git_observable_diff_output(workspace, ["--name-only"])?);
         let (patch, patch_truncated) = if args.summary {
             (None, false)
         } else {
-            let patch = git_observable_diff_output(workspace, [])?;
-            let truncated = patch.chars().count() > MAX_DIFF_PATCH;
-            (Some(truncate_string(&patch, MAX_DIFF_PATCH)), truncated)
+            let patch = git_observable_diff_output_bounded(workspace, [], MAX_DIFF_PATCH)?;
+            (Some(patch.text), patch.truncated)
         };
         (
             DiffData {
@@ -3556,6 +3556,61 @@ fn git_observable_diff_output<const N: usize>(
     git_output(workspace, args)
 }
 
+fn git_observable_diff_output_bounded<const N: usize>(
+    workspace: &Workspace,
+    extra_args: [&str; N],
+    max_bytes: usize,
+) -> Result<CapturedOutput> {
+    let mut args = vec!["diff"];
+    if git_current_head(workspace)?.is_some() {
+        args.push("HEAD");
+    }
+    args.extend(extra_args);
+    args.extend(["--", ".", ":(exclude).workspace/**"]);
+    git_output_bounded(workspace, args, max_bytes)
+}
+
+fn git_output_bounded<I, S>(
+    workspace: &Workspace,
+    args: I,
+    max_stdout_bytes: usize,
+) -> Result<CapturedOutput>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut child = Command::new("git")
+        .current_dir(&workspace.root)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to run git")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git stderr"))?;
+    let stdout_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stdout, max_stdout_bytes));
+    let stderr_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+    let status = child.wait().context("failed to wait for git")?;
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| anyhow!("git stdout reader thread panicked"))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("git stderr reader thread panicked"))??;
+    if !status.success() {
+        bail!("git failed: {}", stderr.text.trim());
+    }
+    Ok(stdout)
+}
+
 fn shell_command(command: &str) -> Command {
     #[cfg(windows)]
     {
@@ -3572,6 +3627,13 @@ fn shell_command(command: &str) -> Command {
 }
 
 fn read_captured_output<R: Read>(mut reader: R) -> Result<CapturedOutput> {
+    read_captured_output_with_limit(&mut reader, MAX_CAPTURED_OUTPUT)
+}
+
+fn read_captured_output_with_limit<R: Read>(
+    mut reader: R,
+    max_bytes: usize,
+) -> Result<CapturedOutput> {
     let mut stored = Vec::new();
     let mut buffer = [0u8; 8192];
     let mut truncated = false;
@@ -3584,7 +3646,7 @@ fn read_captured_output<R: Read>(mut reader: R) -> Result<CapturedOutput> {
             break;
         }
 
-        let remaining = MAX_CAPTURED_OUTPUT.saturating_sub(stored.len());
+        let remaining = max_bytes.saturating_sub(stored.len());
         if remaining > 0 {
             let bytes_to_store = remaining.min(bytes_read);
             stored.extend_from_slice(&buffer[..bytes_to_store]);
