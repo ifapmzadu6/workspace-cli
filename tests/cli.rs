@@ -459,6 +459,13 @@ cat <<'JSON'
       "evidence": [{"hash": "eeeeeeeeeeeeeeee"}]
     },
     {
+      "path": "C:\\outside.rs",
+      "score": 0.94,
+      "cochanges": 3,
+      "weight": 1.8,
+      "evidence": [{"hash": "dddddddddddddddd"}]
+    },
+    {
       "path": "src/b.rs",
       "score": 0.75,
       "cochanges": 2,
@@ -497,6 +504,7 @@ JSON
     );
     assert!(!related_paths.contains(&".workspace/log.jsonl".to_string()));
     assert!(!related_paths.contains(&"../outside.rs".to_string()));
+    assert!(!related_paths.contains(&"C:/outside.rs".to_string()));
     assert!(related_paths.contains(&"src/b.rs".to_string()));
     assert_eq!(related["data"]["related"][0]["path"], "src/b.rs");
     assert_eq!(related["data"]["related"][0]["cochanged_commits"], 2);
@@ -522,6 +530,7 @@ JSON
     let impacted_paths = paths_at(&impact, &["data", "impacted"]);
     assert!(!impacted_paths.contains(&".workspace/log.jsonl".to_string()));
     assert!(!impacted_paths.contains(&"../outside.rs".to_string()));
+    assert!(!impacted_paths.contains(&"C:/outside.rs".to_string()));
     assert!(impacted_paths.contains(&"src/b.rs".to_string()));
     assert_eq!(impact["data"]["impacted"][0]["path"], "src/b.rs");
 }

@@ -2955,12 +2955,18 @@ fn normalize_repo_path(path: &str) -> String {
 fn should_include_repo_file(path: &str) -> bool {
     !path.is_empty()
         && !path.starts_with('/')
+        && !has_windows_drive_prefix(path)
         && path != LOG_DIR
         && !path.starts_with(&format!("{LOG_DIR}/"))
         && !path.starts_with(".git/")
         && path
             .split('/')
             .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
 }
 
 fn short_commit(hash: &str) -> String {
@@ -3982,11 +3988,14 @@ not json
     fn excludes_non_observable_repo_paths() {
         assert!(should_include_repo_file("src/main.rs"));
         assert!(should_include_repo_file("space name.txt"));
+        assert!(should_include_repo_file("src/has:colon.rs"));
         assert!(!should_include_repo_file(".workspace/log.jsonl"));
         assert!(!should_include_repo_file(".git/config"));
         assert!(!should_include_repo_file("../outside.rs"));
         assert!(!should_include_repo_file("src/../outside.rs"));
         assert!(!should_include_repo_file("/tmp/outside.rs"));
+        assert!(!should_include_repo_file("C:/outside.rs"));
+        assert!(!should_include_repo_file("z:/outside.rs"));
         assert!(!should_include_repo_file("src//main.rs"));
     }
 
