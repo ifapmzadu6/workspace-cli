@@ -2137,18 +2137,21 @@ fn file_contains_needles(path: &Path, needles: &[(&[u8], &str)]) -> Result<Vec<b
             break;
         }
 
-        let mut scan = Vec::with_capacity(tail.len() + bytes_read);
-        scan.extend_from_slice(&tail);
-        scan.extend_from_slice(&buffer[..bytes_read]);
         for (index, (needle, _)) in needles.iter().enumerate() {
-            if !matched[index] && scan.windows(needle.len()).any(|window| window == *needle) {
+            if !matched[index]
+                && find_query_with_tail(&tail, &buffer[..bytes_read], needle).is_some()
+            {
                 matched[index] = true;
             }
         }
-        if max_needle_len > 1 {
-            let tail_len = (max_needle_len - 1).min(scan.len());
-            tail = scan[scan.len() - tail_len..].to_vec();
+        if matched.iter().all(|matched| *matched) {
+            break;
         }
+        replace_scan_tail(
+            &mut tail,
+            &buffer[..bytes_read],
+            max_needle_len.saturating_sub(1),
+        );
     }
 
     Ok(matched)
