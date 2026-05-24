@@ -2808,14 +2808,7 @@ fn impact_by_related_cli(
     for (path, item) in accumulators {
         push_bounded_sorted(
             &mut impacted,
-            ImpactFile {
-                path,
-                score: normalized_rank_score(item.score, max_score),
-                cochanged_commits: item.cochanged_commits,
-                weighted_cochanges: round3(item.weighted_cochanges),
-                seed_files: item.seed_files.into_iter().collect(),
-                sample_commits: item.sample_commits,
-            },
+            impact_file_from_related_cli_accumulator(path, item, max_score),
             max_results,
             compare_impact_by_score,
         );
@@ -3858,6 +3851,21 @@ fn impact_file_from_accumulator(
     ImpactFile {
         path,
         score: normalized_rank_score(item.weighted_cochanges, max_weight),
+        cochanged_commits: item.cochanged_commits,
+        weighted_cochanges: round3(item.weighted_cochanges),
+        seed_files: item.seed_files.into_iter().collect(),
+        sample_commits: item.sample_commits,
+    }
+}
+
+fn impact_file_from_related_cli_accumulator(
+    path: String,
+    item: RelatedCliImpactAccumulator,
+    max_score: f64,
+) -> ImpactFile {
+    ImpactFile {
+        path,
+        score: normalized_rank_score(item.score, max_score),
         cochanged_commits: item.cochanged_commits,
         weighted_cochanges: round3(item.weighted_cochanges),
         seed_files: item.seed_files.into_iter().collect(),
@@ -6979,6 +6987,31 @@ src/b.rs
         assert_eq!(file.score, 0.333);
         assert_eq!(file.cochanged_commits, 3);
         assert_eq!(file.weighted_cochanges, 0.667);
+        assert_eq!(file.seed_files, vec!["src/a.rs", "src/z.rs"]);
+        assert_eq!(file.sample_commits, vec!["aaaaaaaaaaaa"]);
+    }
+
+    #[test]
+    fn impact_file_from_related_cli_accumulator_preserves_rank_fields() {
+        let mut seed_files = BTreeSet::new();
+        seed_files.insert("src/z.rs".to_string());
+        seed_files.insert("src/a.rs".to_string());
+        let file = impact_file_from_related_cli_accumulator(
+            "src/impact.rs".to_string(),
+            RelatedCliImpactAccumulator {
+                score: 2.0 / 3.0,
+                cochanged_commits: 4,
+                weighted_cochanges: 5.0 / 3.0,
+                seed_files,
+                sample_commits: vec!["aaaaaaaaaaaa".to_string()],
+            },
+            2.0,
+        );
+
+        assert_eq!(file.path, "src/impact.rs");
+        assert_eq!(file.score, 0.333);
+        assert_eq!(file.cochanged_commits, 4);
+        assert_eq!(file.weighted_cochanges, 1.667);
         assert_eq!(file.seed_files, vec!["src/a.rs", "src/z.rs"]);
         assert_eq!(file.sample_commits, vec!["aaaaaaaaaaaa"]);
     }
