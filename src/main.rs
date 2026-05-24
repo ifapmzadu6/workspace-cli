@@ -3220,11 +3220,7 @@ fn rank_cochanges(
             &mut related,
             RelatedFile {
                 path,
-                score: if max_weight > 0.0 {
-                    round3(item.weighted_cochanges / max_weight)
-                } else {
-                    0.0
-                },
+                score: normalized_rank_score(item.weighted_cochanges, max_weight),
                 cochanged_commits: item.cochanged_commits,
                 weighted_cochanges: round3(item.weighted_cochanges),
                 sample_commits: item.sample_commits,
@@ -3294,11 +3290,7 @@ fn rank_cochanges_from_index(
             &mut related,
             RelatedFile {
                 path,
-                score: if max_weight > 0.0 {
-                    round3(edge.weighted_cochanges / max_weight)
-                } else {
-                    0.0
-                },
+                score: normalized_rank_score(edge.weighted_cochanges, max_weight),
                 cochanged_commits: edge.cochanged_commits,
                 weighted_cochanges: edge.weighted_cochanges,
                 sample_commits: edge.sample_commits.clone(),
@@ -3424,11 +3416,7 @@ fn rank_cochange_impact(
             &mut impacted,
             ImpactFile {
                 path,
-                score: if max_weight > 0.0 {
-                    round3(item.weighted_cochanges / max_weight)
-                } else {
-                    0.0
-                },
+                score: normalized_rank_score(item.weighted_cochanges, max_weight),
                 cochanged_commits: item.cochanged_commits,
                 weighted_cochanges: round3(item.weighted_cochanges),
                 seed_files: item.seed_files.into_iter().collect(),
@@ -3497,11 +3485,7 @@ fn rank_cochange_impact_from_index(
             &mut impacted,
             ImpactFile {
                 path,
-                score: if max_weight > 0.0 {
-                    round3(item.weighted_cochanges / max_weight)
-                } else {
-                    0.0
-                },
+                score: normalized_rank_score(item.weighted_cochanges, max_weight),
                 cochanged_commits: item.cochanged_commits,
                 weighted_cochanges: round3(item.weighted_cochanges),
                 seed_files: item.seed_files.into_iter().collect(),
@@ -3864,6 +3848,14 @@ fn cochange_commit_weight(rank: usize, file_count: usize) -> f64 {
 
 fn impact_seed_weight(matched_seed_count: usize) -> f64 {
     1.0 + (matched_seed_count.saturating_sub(1) as f64 * 0.25)
+}
+
+fn normalized_rank_score(weight: f64, max_weight: f64) -> f64 {
+    if max_weight > 0.0 {
+        round3(weight / max_weight)
+    } else {
+        0.0
+    }
 }
 
 fn round3(value: f64) -> f64 {
@@ -6856,6 +6848,13 @@ src/b.rs
         assert_eq!(impact_seed_weight(0), 1.0);
         assert_eq!(impact_seed_weight(1), 1.0);
         assert_eq!(impact_seed_weight(3), 1.5);
+    }
+
+    #[test]
+    fn normalized_rank_score_rounds_and_handles_zero_max() {
+        assert_eq!(normalized_rank_score(2.0, 4.0), 0.5);
+        assert_eq!(normalized_rank_score(1.0, 3.0), 0.333);
+        assert_eq!(normalized_rank_score(10.0, 0.0), 0.0);
     }
 
     #[test]
