@@ -1923,23 +1923,40 @@ fn push_recent_candidate(
     modified: SystemTime,
     path: String,
 ) {
-    recent_candidates.push((modified, path));
-    sort_recent_candidates(recent_candidates);
-    recent_candidates.truncate(MAX_RECENT_FILES);
+    push_bounded_sorted(
+        recent_candidates,
+        (modified, path),
+        MAX_RECENT_FILES,
+        compare_recent_candidate,
+    );
 }
 
 fn sort_recent_candidates(recent_candidates: &mut [(SystemTime, String)]) {
-    recent_candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    recent_candidates.sort_by(compare_recent_candidate);
+}
+
+fn compare_recent_candidate(
+    a: &(SystemTime, String),
+    b: &(SystemTime, String),
+) -> std::cmp::Ordering {
+    b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1))
 }
 
 fn push_large_file_candidate(large_files: &mut Vec<LargeFile>, item: LargeFile) {
-    large_files.push(item);
-    sort_large_files(large_files);
-    large_files.truncate(MAX_MAP_LARGE_FILES);
+    push_bounded_sorted(
+        large_files,
+        item,
+        MAX_MAP_LARGE_FILES,
+        compare_large_file_by_size,
+    );
 }
 
 fn sort_large_files(large_files: &mut [LargeFile]) {
-    large_files.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path)));
+    large_files.sort_by(compare_large_file_by_size);
+}
+
+fn compare_large_file_by_size(a: &LargeFile, b: &LargeFile) -> std::cmp::Ordering {
+    b.bytes.cmp(&a.bytes).then_with(|| a.path.cmp(&b.path))
 }
 
 fn should_descend(path: &Path, include_hidden: bool) -> bool {
