@@ -386,6 +386,39 @@ fn read_truncates_large_line_range() {
 }
 
 #[test]
+fn read_line_range_skips_large_unselected_lines() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    let content = format!("{}\ntarget\n", "a".repeat(1_000_000));
+    write_file(temp.path(), "large.txt", &content);
+
+    let read = run_workspace(
+        temp.path(),
+        &["read", "large.txt", "--lines", "2:2", "--json"],
+    );
+
+    assert_eq!(read["kind"], "workspace_read");
+    assert_eq!(read["truncated"], false);
+    assert_eq!(read["data"]["content"], "target");
+}
+
+#[test]
+fn read_line_range_handles_crlf_across_read_buffer() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    let first_line = "x".repeat(8191);
+    let content = format!("{first_line}\r\nsecond\r\n");
+    write_file(temp.path(), "crlf.txt", &content);
+
+    let read = run_workspace(
+        temp.path(),
+        &["read", "crlf.txt", "--lines", "1:1", "--json"],
+    );
+
+    assert_eq!(read["kind"], "workspace_read");
+    assert_eq!(read["truncated"], false);
+    assert_eq!(read["data"]["content"], first_line);
+}
+
+#[test]
 fn read_succeeds_when_operation_log_is_not_writable() {
     let temp = TempDir::new().expect("temp dir should be created");
     write_file(temp.path(), "note.txt", "hello\n");

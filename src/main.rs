@@ -3377,7 +3377,7 @@ fn read_text_prefix_bounded(path: &Path) -> Result<ReadContent> {
     let mut file = fs::File::open(path)?;
     let mut output = String::new();
     let mut char_count = 0usize;
-    let mut pending = Vec::new();
+    let mut pending_utf8 = Vec::new();
     let mut buffer = [0u8; 8192];
     let mut truncated = false;
 
@@ -3386,31 +3386,19 @@ fn read_text_prefix_bounded(path: &Path) -> Result<ReadContent> {
         if bytes_read == 0 {
             break;
         }
-        pending.extend_from_slice(&buffer[..bytes_read]);
-
-        let valid_len = match std::str::from_utf8(&pending) {
-            Ok(_) => pending.len(),
-            Err(error) if error.error_len().is_none() => error.valid_up_to(),
-            Err(error) => bail!("file is not valid UTF-8: {error}"),
-        };
-
-        if valid_len > 0 {
-            let valid_text = std::str::from_utf8(&pending[..valid_len])?.to_string();
-            pending.drain(..valid_len);
-            if append_bounded_text(&mut output, &mut char_count, &valid_text) {
-                truncated = true;
-                break;
-            }
+        if append_bounded_utf8_bytes(
+            &mut output,
+            &mut char_count,
+            &mut pending_utf8,
+            &buffer[..bytes_read],
+        )? {
+            truncated = true;
+            break;
         }
     }
 
-    if !truncated && !pending.is_empty() {
-        match std::str::from_utf8(&pending) {
-            Ok(text) => {
-                truncated = append_bounded_text(&mut output, &mut char_count, text);
-            }
-            Err(error) => bail!("file is not valid UTF-8: {error}"),
-        }
+    if !truncated {
+        ensure_no_pending_utf8(&pending_utf8)?;
     }
 
     Ok(ReadContent {
@@ -3424,35 +3412,91 @@ fn read_line_range_bounded(path: &Path, start: usize, end: usize) -> Result<Read
     let mut reader = BufReader::new(file);
     let mut output = String::new();
     let mut char_count = 0usize;
-    let mut line = String::new();
-    let mut line_number = 0usize;
-    let mut wrote_line = false;
+    let mut line_number = 1usize;
+    let mut wrote_selected_line = false;
+    let mut started_selected_line = false;
+    let mut pending_utf8 = Vec::new();
+    let mut pending_line_cr = false;
     let mut truncated = false;
 
-    loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            break;
-        }
-        line_number += 1;
-        if line_number < start {
-            continue;
-        }
-        if line_number > end {
-            break;
-        }
+    while line_number <= end {
+        let line_is_selected = line_number >= start;
+        let (bytes_to_consume, reached_line_end) = {
+            let buffer = reader.fill_buf()?;
+            if buffer.is_empty() {
+                if started_selected_line {
+                    ensure_no_pending_utf8(&pending_utf8)?;
+                }
+                break;
+            }
 
-        if wrote_line && append_bounded_text(&mut output, &mut char_count, "\n") {
-            truncated = true;
+            let (line_segment, consume_len, segment_reaches_line_end) =
+                match buffer.iter().position(|byte| *byte == b'\n') {
+                    Some(newline_index) => (&buffer[..newline_index], newline_index + 1, true),
+                    None => (buffer, buffer.len(), false),
+                };
+
+            if line_is_selected {
+                if !started_selected_line {
+                    if wrote_selected_line
+                        && append_bounded_text(&mut output, &mut char_count, "\n")
+                    {
+                        truncated = true;
+                    }
+                    wrote_selected_line = true;
+                    started_selected_line = true;
+                }
+
+                if !truncated && pending_line_cr {
+                    if line_segment.is_empty() && segment_reaches_line_end {
+                        pending_line_cr = false;
+                    } else if append_bounded_utf8_bytes(
+                        &mut output,
+                        &mut char_count,
+                        &mut pending_utf8,
+                        b"\r",
+                    )? {
+                        truncated = true;
+                    } else {
+                        pending_line_cr = false;
+                    }
+                }
+
+                let selected_segment = if !truncated && line_segment.ends_with(b"\r") {
+                    pending_line_cr = true;
+                    &line_segment[..line_segment.len() - 1]
+                } else {
+                    line_segment
+                };
+
+                if !truncated
+                    && append_bounded_utf8_bytes(
+                        &mut output,
+                        &mut char_count,
+                        &mut pending_utf8,
+                        selected_segment,
+                    )?
+                {
+                    truncated = true;
+                }
+
+                if !truncated && segment_reaches_line_end {
+                    pending_line_cr = false;
+                    ensure_no_pending_utf8(&pending_utf8)?;
+                }
+            }
+
+            (consume_len, segment_reaches_line_end)
+        };
+
+        reader.consume(bytes_to_consume);
+        if truncated {
             break;
         }
-        let selected_line = line.trim_end_matches('\n').trim_end_matches('\r');
-        if append_bounded_text(&mut output, &mut char_count, selected_line) {
-            truncated = true;
-            break;
+        if reached_line_end {
+            line_number += 1;
+            started_selected_line = false;
         }
-        wrote_line = true;
     }
 
     Ok(ReadContent {
@@ -3471,6 +3515,42 @@ fn append_bounded_text(output: &mut String, char_count: &mut usize, text: &str) 
         *char_count += 1;
     }
     false
+}
+
+fn append_bounded_utf8_bytes(
+    output: &mut String,
+    char_count: &mut usize,
+    pending_utf8: &mut Vec<u8>,
+    bytes: &[u8],
+) -> Result<bool> {
+    pending_utf8.extend_from_slice(bytes);
+    let valid_len = match std::str::from_utf8(pending_utf8) {
+        Ok(_) => pending_utf8.len(),
+        Err(error) if error.error_len().is_none() => error.valid_up_to(),
+        Err(error) => bail!("file is not valid UTF-8: {error}"),
+    };
+
+    if valid_len == 0 {
+        return Ok(false);
+    }
+
+    let truncated = {
+        let valid_text = std::str::from_utf8(&pending_utf8[..valid_len])?;
+        append_bounded_text(output, char_count, valid_text)
+    };
+    pending_utf8.drain(..valid_len);
+    Ok(truncated)
+}
+
+fn ensure_no_pending_utf8(pending_utf8: &[u8]) -> Result<()> {
+    if pending_utf8.is_empty() {
+        return Ok(());
+    }
+
+    match std::str::from_utf8(pending_utf8) {
+        Ok(_) => Ok(()),
+        Err(error) => bail!("file is not valid UTF-8: {error}"),
+    }
 }
 
 fn extract_patch_files(patch_content: &str) -> Vec<String> {
