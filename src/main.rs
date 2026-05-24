@@ -1260,7 +1260,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
             git_observable_diff_output_bounded(workspace, ["--stat"], MAX_DIFF_SUMMARY)?;
         let summary_truncated = summary_output.truncated;
         let summary = summary_output.text;
-        let files = git_name_only_paths(&git_observable_diff_output(workspace, ["--name-only"])?);
+        let files = git_observable_diff_name_only(workspace)?;
         let (patch, patch_truncated) = if args.summary {
             (None, false)
         } else {
@@ -2483,7 +2483,7 @@ fn collect_git_name_only<const N: usize>(
     args: [&str; N],
     files: &mut BTreeSet<String>,
 ) -> Result<()> {
-    for path in git_name_only_paths(&git_output(workspace, args)?) {
+    for path in git_output_name_only(workspace, args)? {
         if should_include_repo_file(&path) {
             files.insert(path);
         }
@@ -2566,6 +2566,71 @@ fn read_git_log_name_only<R: Read>(reader: R) -> Result<Vec<GitCommitFiles>> {
     Ok(state.finish())
 }
 
+fn git_output_name_only<I, S>(workspace: &Workspace, args: I) -> Result<Vec<String>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut child = Command::new("git")
+        .current_dir(&workspace.root)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to run git")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture git stderr"))?;
+    let stderr_reader =
+        std::thread::spawn(move || read_captured_output_with_limit(stderr, MAX_CAPTURED_OUTPUT));
+
+    let paths_result = read_git_name_only_paths(stdout);
+    let status = child.wait().context("failed to wait for git")?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("git stderr reader thread panicked"))??;
+    let paths = paths_result?;
+    if !status.success() {
+        bail!("git failed: {}", stderr.text.trim());
+    }
+    Ok(paths)
+}
+
+fn read_git_name_only_paths<R: Read>(reader: R) -> Result<Vec<String>> {
+    let mut reader = BufReader::new(reader);
+    let mut line = Vec::new();
+    let mut paths = Vec::new();
+
+    loop {
+        line.clear();
+        let bytes_read = reader
+            .read_until(b'\n', &mut line)
+            .context("failed to read git name-only output")?;
+        if bytes_read == 0 {
+            break;
+        }
+        while line
+            .last()
+            .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
+        {
+            line.pop();
+        }
+
+        let line = String::from_utf8_lossy(&line);
+        if let Some(path) = git_name_only_path(&line) {
+            paths.push(path);
+        }
+    }
+
+    Ok(paths)
+}
+
+#[cfg(test)]
 fn git_name_only_paths(output: &str) -> Vec<String> {
     output.lines().filter_map(git_name_only_path).collect()
 }
@@ -4090,17 +4155,14 @@ where
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn git_observable_diff_output<const N: usize>(
-    workspace: &Workspace,
-    extra_args: [&str; N],
-) -> Result<String> {
+fn git_observable_diff_name_only(workspace: &Workspace) -> Result<Vec<String>> {
     let mut args = vec!["diff"];
     if git_current_head(workspace)?.is_some() {
         args.push("HEAD");
     }
-    args.extend(extra_args);
+    args.push("--name-only");
     args.extend(["--", ".", ":(exclude).workspace/**"]);
-    git_output(workspace, args)
+    git_output_name_only(workspace, args)
 }
 
 fn git_observable_diff_output_bounded<const N: usize>(
@@ -4719,6 +4781,15 @@ mod tests {
             git_name_only_paths("src/a.rs\n\"src/tab\\tname.txt\"\n"),
             vec!["src/a.rs", "src/tab\tname.txt"]
         );
+    }
+
+    #[test]
+    fn reads_git_name_only_paths_incrementally() {
+        let paths =
+            read_git_name_only_paths(std::io::Cursor::new("src/a.rs\n\"src/tab\\tname.txt\"\n"))
+                .expect("name-only output should parse");
+
+        assert_eq!(paths, vec!["src/a.rs", "src/tab\tname.txt"]);
     }
 
     #[test]
