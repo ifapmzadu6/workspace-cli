@@ -2442,19 +2442,11 @@ fn cochange_index_from_commits(
     let mut ignored_large_commits = 0;
 
     for (rank, commit) in commits.iter().enumerate() {
-        let files = commit
-            .files
-            .iter()
-            .map(|file| normalize_repo_path(file))
-            .filter(|file| should_include_repo_file(file))
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        if files.len() > max_files_per_commit.max(1) {
+        let Some(files) = bounded_observable_commit_files(commit, max_files_per_commit.max(1))
+        else {
             ignored_large_commits += 1;
             continue;
-        }
+        };
         if files.len() < 2 {
             continue;
         }
@@ -2505,6 +2497,24 @@ fn cochange_index_from_commits(
         file_commit_counts,
         edges,
     }
+}
+
+fn bounded_observable_commit_files(
+    commit: &GitCommitFiles,
+    max_files_per_commit: usize,
+) -> Option<Vec<String>> {
+    let mut files = BTreeSet::new();
+    for file in &commit.files {
+        let file = normalize_repo_path(file);
+        if !should_include_repo_file(&file) {
+            continue;
+        }
+        files.insert(file);
+        if files.len() > max_files_per_commit {
+            return None;
+        }
+    }
+    Some(files.into_iter().collect())
 }
 
 fn cochange_index_status(workspace: &Workspace) -> IndexStatusData {
@@ -6501,6 +6511,26 @@ src/b.rs
         assert_eq!(index.commits_indexed, 2);
         assert_eq!(index.file_commit_counts["src/a.rs"], 2);
         assert_eq!(index.edges.len(), 2);
+    }
+
+    #[test]
+    fn cochange_index_ignores_broad_commits_without_indexing_counts() {
+        let commits = vec![GitCommitFiles {
+            hash: "aaaaaaaaaaaa".to_string(),
+            files: vec![
+                "src/a.rs".to_string(),
+                "src/b.rs".to_string(),
+                "src/c.rs".to_string(),
+            ],
+        }];
+
+        let index = cochange_index_from_commits(&commits, 100, 2, Some("head".to_string()));
+
+        assert_eq!(index.commits_scanned, 1);
+        assert_eq!(index.commits_indexed, 0);
+        assert_eq!(index.ignored_large_commits, 1);
+        assert!(index.file_commit_counts.is_empty());
+        assert!(index.edges.is_empty());
     }
 
     #[test]
