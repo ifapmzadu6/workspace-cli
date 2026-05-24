@@ -1238,17 +1238,8 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
 
 fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
     let patch = apply_patch_transaction(workspace, &args.patch_file)?;
-    let data = patch_data(
-        workspace,
-        &patch.transaction_id,
-        &patch.patch_path,
-        &patch.stored_patch,
-        &patch.files_changed,
-    );
-    let observation = patch_observation(data, &patch.files_changed);
-    let log_summary = args
-        .description
-        .unwrap_or_else(|| observation.summary.clone());
+    let observation = patch_transaction_observation(workspace, &patch);
+    let log_summary = patch_log_summary(args.description, &observation);
 
     output_recorded_observation(
         workspace,
@@ -1406,14 +1397,7 @@ fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
 
 fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
     let rollback = apply_rollback_transaction(workspace, &args.transaction_id)?;
-    let data = rollback_data(
-        workspace,
-        &args.transaction_id,
-        &rollback.rollback_transaction_id,
-        &rollback.stored_patch,
-        &rollback.files_changed,
-    );
-    let observation = rollback_observation(data, &rollback.files_changed);
+    let observation = rollback_transaction_observation(workspace, &args.transaction_id, &rollback);
 
     output_recorded_observation(
         workspace,
@@ -1470,6 +1454,39 @@ struct AppliedRollbackTransaction {
     rollback_transaction_id: String,
     stored_patch: PathBuf,
     files_changed: Vec<String>,
+}
+
+fn patch_transaction_observation(
+    workspace: &Workspace,
+    patch: &AppliedPatchTransaction,
+) -> Observation<PatchData> {
+    let data = patch_data(
+        workspace,
+        &patch.transaction_id,
+        &patch.patch_path,
+        &patch.stored_patch,
+        &patch.files_changed,
+    );
+    patch_observation(data, &patch.files_changed)
+}
+
+fn rollback_transaction_observation(
+    workspace: &Workspace,
+    transaction_id: &str,
+    rollback: &AppliedRollbackTransaction,
+) -> Observation<RollbackData> {
+    let data = rollback_data(
+        workspace,
+        transaction_id,
+        &rollback.rollback_transaction_id,
+        &rollback.stored_patch,
+        &rollback.files_changed,
+    );
+    rollback_observation(data, &rollback.files_changed)
+}
+
+fn patch_log_summary(description: Option<String>, observation: &Observation<PatchData>) -> String {
+    description.unwrap_or_else(|| observation.summary.clone())
 }
 
 fn observed_changed_files(files_changed: &[String]) -> ObservedChangedFiles {
@@ -6692,6 +6709,53 @@ rename to new name.txt
             observation.next_observations,
             rollback_followup_observations()
         );
+    }
+
+    #[test]
+    fn transaction_applied_observation_helpers_preserve_contract() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        let patch_path = temp.path().join("change.patch");
+        let stored_patch = temp.path().join(TRANSACTION_DIR).join("tx-1.patch");
+        let files = vec!["src/main.rs".to_string(), "README.md".to_string()];
+        let patch = AppliedPatchTransaction {
+            transaction_id: "tx-1".to_string(),
+            patch_path,
+            stored_patch: stored_patch.clone(),
+            files_changed: files.clone(),
+        };
+
+        let observation = patch_transaction_observation(&workspace, &patch);
+
+        assert_eq!(observation.kind, WORKSPACE_PATCH_KIND);
+        assert_eq!(observation.scope, "change.patch");
+        assert_eq!(observation.data.transaction_id, "tx-1");
+        assert_eq!(
+            observation.data.stored_patch,
+            ".workspace/transactions/tx-1.patch"
+        );
+        assert_eq!(observation.data.file_count, 2);
+        assert_eq!(
+            patch_log_summary(Some("custom summary".to_string()), &observation),
+            "custom summary"
+        );
+        assert_eq!(patch_log_summary(None, &observation), observation.summary);
+
+        let rollback = AppliedRollbackTransaction {
+            rollback_transaction_id: "rb-1".to_string(),
+            stored_patch,
+            files_changed: files,
+        };
+        let rollback_observation = rollback_transaction_observation(&workspace, "tx-1", &rollback);
+
+        assert_eq!(rollback_observation.kind, WORKSPACE_ROLLBACK_KIND);
+        assert_eq!(rollback_observation.scope, "tx-1");
+        assert_eq!(rollback_observation.data.transaction_id, "tx-1");
+        assert_eq!(rollback_observation.data.rollback_transaction_id, "rb-1");
+        assert_eq!(rollback_observation.data.file_count, 2);
     }
 
     #[test]
