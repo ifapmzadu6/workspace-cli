@@ -1,8 +1,12 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use std::env;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+
+const MAX_RELATED_CLI_STDOUT: usize = 1_000_000;
+const MAX_RELATED_CLI_STDERR: usize = 24_000;
 
 #[derive(Deserialize)]
 pub(crate) struct RelatedCliOutput {
@@ -69,7 +73,7 @@ impl RelatedCli {
         max_results: usize,
         mode: &str,
     ) -> Result<RelatedCliOutput> {
-        let output = Command::new(&self.bin)
+        let mut child = Command::new(&self.bin)
             .current_dir(repo_root)
             .arg("query")
             .arg(target)
@@ -88,20 +92,95 @@ impl RelatedCli {
             .arg("--evidence")
             .arg("3")
             .arg("--json")
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .with_context(|| format!("failed to run related-cli at {}", self.bin.display()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture related-cli stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture related-cli stderr"))?;
+        let stdout_reader = std::thread::spawn(move || {
+            read_output_bytes_with_limit(stdout, MAX_RELATED_CLI_STDOUT)
+        });
+        let stderr_reader = std::thread::spawn(move || {
+            read_output_bytes_with_limit(stderr, MAX_RELATED_CLI_STDERR)
+        });
+        let status = child
+            .wait()
+            .context("failed to wait for related-cli query")?;
+        let stdout = stdout_reader
+            .join()
+            .map_err(|_| anyhow!("related-cli stdout reader thread panicked"))??;
+        let stderr = stderr_reader
+            .join()
+            .map_err(|_| anyhow!("related-cli stderr reader thread panicked"))??;
 
-        if !output.status.success() {
+        if !status.success() {
             bail!(
                 "related-cli query failed for {}: {}",
                 target,
-                String::from_utf8_lossy(&output.stderr).trim()
+                stderr.display_text().trim()
+            );
+        }
+        if stdout.truncated {
+            bail!(
+                "related-cli JSON output exceeded {} bytes",
+                MAX_RELATED_CLI_STDOUT
             );
         }
 
-        serde_json::from_slice(&output.stdout)
+        serde_json::from_slice(&stdout.bytes)
             .with_context(|| "failed to parse related-cli JSON output")
     }
+}
+
+struct CapturedOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+impl CapturedOutput {
+    fn display_text(&self) -> String {
+        let mut text = String::from_utf8_lossy(&self.bytes).into_owned();
+        if self.truncated {
+            text.push_str("\n[output truncated]\n");
+        }
+        text
+    }
+}
+
+fn read_output_bytes_with_limit<R: Read>(
+    mut reader: R,
+    max_bytes: usize,
+) -> Result<CapturedOutput> {
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 8192];
+    let mut truncated = false;
+
+    loop {
+        let bytes_read = reader
+            .read(&mut buffer)
+            .context("failed to read related-cli output")?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let remaining = max_bytes.saturating_sub(bytes.len());
+        if remaining > 0 {
+            let bytes_to_store = remaining.min(bytes_read);
+            bytes.extend_from_slice(&buffer[..bytes_to_store]);
+        }
+        if bytes_read > remaining {
+            truncated = true;
+        }
+    }
+
+    Ok(CapturedOutput { bytes, truncated })
 }
 
 fn command_available(bin: &Path) -> bool {

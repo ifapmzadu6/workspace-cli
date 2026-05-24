@@ -65,6 +65,25 @@ fn run_workspace_with_related_bin(cwd: &Path, args: &[&str], related_bin: &Path)
     serde_json::from_slice(&output.stdout).expect("workspace output should be JSON")
 }
 
+fn run_workspace_failure_with_related_bin(cwd: &Path, args: &[&str], related_bin: &Path) -> String {
+    let output = Command::new(workspace_bin())
+        .current_dir(cwd)
+        .args(args)
+        .env("WORKSPACE_RELATED_BIN", related_bin)
+        .output()
+        .expect("workspace command should run");
+
+    assert!(
+        !output.status.success(),
+        "workspace {:?} unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
 fn run(cwd: &Path, program: &str, args: &[&str]) {
     let output = Command::new(program)
         .current_dir(cwd)
@@ -780,6 +799,44 @@ JSON
     assert!(!impacted_paths.contains(&"C:/outside.rs".to_string()));
     assert!(impacted_paths.contains(&"src/b.rs".to_string()));
     assert_eq!(impact["data"]["impacted"][0]["path"], "src/b.rs");
+}
+
+#[cfg(unix)]
+#[test]
+fn related_cli_json_output_is_bounded() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "src/a.rs", "a\n");
+    commit_all(root, "a");
+
+    let bin_dir = TempDir::new().expect("bin temp dir should be created");
+    let fake_related = bin_dir.path().join("fake-related");
+    write_executable(
+        &fake_related,
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "related 0.0.0-test"
+  exit 0
+fi
+python3 - <<'PY'
+import sys
+sys.stdout.write('{"mode":"direct:on-demand:GitCli","related":[')
+sys.stdout.write(' ' * 1100000)
+sys.stdout.write(']}')
+PY
+"#,
+    );
+
+    let stderr = run_workspace_failure_with_related_bin(
+        root,
+        &["related", "src/a.rs", "--by", "cochange", "--json"],
+        &fake_related,
+    );
+
+    assert!(
+        stderr.contains("related-cli JSON output exceeded"),
+        "stderr should report bounded related-cli output, got:\n{stderr}"
+    );
 }
 
 #[cfg(unix)]
