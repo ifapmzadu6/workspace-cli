@@ -3365,6 +3365,10 @@ fn rank_cochange_impact(
     }
 
     for (rank, commit) in commits.iter().enumerate() {
+        if !commit_mentions_observable_seed(commit, &seed_files) {
+            continue;
+        }
+
         let files = commit
             .files
             .iter()
@@ -3434,6 +3438,14 @@ fn rank_cochange_impact(
         commits_matched,
         ignored_large_commits,
     }
+}
+
+fn commit_mentions_observable_seed(commit: &GitCommitFiles, seed_files: &BTreeSet<String>) -> bool {
+    !seed_files.is_empty()
+        && commit.files.iter().any(|file| {
+            let path = normalize_repo_path(file);
+            should_include_repo_file(&path) && seed_files.contains(&path)
+        })
 }
 
 fn rank_cochange_impact_from_index(
@@ -6434,6 +6446,25 @@ src/b.rs
 
         assert_eq!(ranking.commits_matched, 1);
         assert_eq!(ranking.ignored_large_commits, 1);
+        assert!(ranking.impacted.is_empty());
+    }
+
+    #[test]
+    fn ignores_unmatched_large_impact_commits_without_counting_them() {
+        let commits = vec![GitCommitFiles {
+            hash: "aaaaaaaaaaaa".to_string(),
+            files: vec![
+                "src/other.rs".to_string(),
+                "src/b.rs".to_string(),
+                "src/c.rs".to_string(),
+            ],
+        }];
+        let seeds = vec!["src/a.rs".to_string()];
+
+        let ranking = rank_cochange_impact(&commits, &seeds, 2, 10);
+
+        assert_eq!(ranking.commits_matched, 0);
+        assert_eq!(ranking.ignored_large_commits, 0);
         assert!(ranking.impacted.is_empty());
     }
 
