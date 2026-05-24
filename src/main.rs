@@ -1133,9 +1133,7 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
 }
 
 fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
-    let (matches, total_matches, truncated_match_texts) =
-        rg_search(workspace, &args.query, args.max_results)?;
-    let data = search_data(&args.query, matches, total_matches, truncated_match_texts);
+    let data = observed_search(workspace, &args)?;
     let observation = search_observation(workspace, data);
 
     append_observation_log(workspace, LOG_OP_SEARCH, &args.query, &observation.summary);
@@ -1600,6 +1598,17 @@ fn search_data(
         truncated_match_texts,
         matches,
     }
+}
+
+fn observed_search(workspace: &Workspace, args: &SearchArgs) -> Result<SearchData> {
+    let (matches, total_matches, truncated_match_texts) =
+        rg_search(workspace, &args.query, args.max_results)?;
+    Ok(search_data(
+        &args.query,
+        matches,
+        total_matches,
+        truncated_match_texts,
+    ))
 }
 
 fn search_observation(workspace: &Workspace, data: SearchData) -> Observation<SearchData> {
@@ -7071,6 +7080,32 @@ rename to new name.txt
         assert_eq!(observation.evidence.len(), MAX_EVIDENCE_ITEMS);
         assert_eq!(observation.evidence[0].reason, EVIDENCE_REASON_TEXT_MATCH);
         assert_eq!(observation.next_observations.len(), MAX_NEXT_OBSERVATIONS);
+    }
+
+    #[test]
+    fn observed_search_preserves_total_matches_with_limited_results() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::write(temp.path().join("a.txt"), "needle one\nneedle two\n")
+            .expect("file should be written");
+        fs::write(temp.path().join("b.txt"), "other\n").expect("file should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        let args = SearchArgs {
+            json: true,
+            max_results: 1,
+            query: "needle".to_string(),
+        };
+
+        let data = observed_search(&workspace, &args).expect("search data should be observed");
+
+        assert_eq!(data.query, "needle");
+        assert_eq!(data.total_matches, 2);
+        assert_eq!(data.matches.len(), 1);
+        assert_eq!(data.matches[0].path, "a.txt");
+        assert_eq!(data.matches[0].line, 1);
+        assert_eq!(data.truncated_match_texts, 0);
     }
 
     fn test_git_summary(is_repo: bool) -> GitSummary {
