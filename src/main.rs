@@ -2324,12 +2324,7 @@ fn related_data_from_related_cli(
     max_results: usize,
     rank: RankingMethod,
 ) -> RelatedData {
-    let mut related = output
-        .related
-        .into_iter()
-        .filter_map(related_file_from_related_cli)
-        .collect::<Vec<_>>();
-    related.truncate(max_results);
+    let related = bounded_related_cli_files(output.related, max_results);
     let commits_matched = related
         .iter()
         .map(|item| item.cochanged_commits)
@@ -2348,6 +2343,19 @@ fn related_data_from_related_cli(
         max_files_per_commit,
         related,
     }
+}
+
+fn bounded_related_cli_files(items: Vec<RelatedCliItem>, max_results: usize) -> Vec<RelatedFile> {
+    let mut related = Vec::new();
+    for item in items {
+        if related.len() >= max_results {
+            break;
+        }
+        if let Some(file) = related_file_from_related_cli(item) {
+            related.push(file);
+        }
+    }
+    related
 }
 
 fn related_file_from_related_cli(item: RelatedCliItem) -> Option<RelatedFile> {
@@ -6025,6 +6033,49 @@ src/b.rs
         assert_eq!(ranking.related[0].path, "src/b.rs");
         assert_eq!(ranking.related[0].cochanged_commits, 2);
         assert_eq!(ranking.related[1].path, "tests/a_test.rs");
+    }
+
+    #[test]
+    fn bounds_related_cli_files_after_filtering_invalid_paths() {
+        let related = bounded_related_cli_files(
+            vec![
+                RelatedCliItem {
+                    path: ".workspace/log.jsonl".to_string(),
+                    score: 1.0,
+                    cochanges: 9,
+                    weight: 9.0,
+                    evidence: vec![],
+                },
+                RelatedCliItem {
+                    path: "../outside.rs".to_string(),
+                    score: 0.9,
+                    cochanges: 8,
+                    weight: 8.0,
+                    evidence: vec![],
+                },
+                RelatedCliItem {
+                    path: "src/b.rs".to_string(),
+                    score: 0.8,
+                    cochanges: 2,
+                    weight: 1.5,
+                    evidence: vec![crate::related_cli::RelatedCliEvidence {
+                        hash: "aaaaaaaaaaaa".to_string(),
+                    }],
+                },
+                RelatedCliItem {
+                    path: "src/c.rs".to_string(),
+                    score: 0.7,
+                    cochanges: 1,
+                    weight: 1.0,
+                    evidence: vec![],
+                },
+            ],
+            1,
+        );
+
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].path, "src/b.rs");
+        assert_eq!(related[0].sample_commits, vec!["aaaaaaaaaaaa"]);
     }
 
     #[test]
