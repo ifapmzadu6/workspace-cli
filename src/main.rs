@@ -1906,9 +1906,16 @@ fn push_bounded_sorted<T>(
     if max_len == 0 {
         return;
     }
-    items.push(item);
-    items.sort_by(compare);
-    items.truncate(max_len);
+    let index = items
+        .binary_search_by(|existing| compare(existing, &item))
+        .unwrap_or_else(|index| index);
+    if index >= max_len {
+        return;
+    }
+    items.insert(index, item);
+    if items.len() > max_len {
+        items.pop();
+    }
 }
 
 fn push_recent_candidate(
@@ -6029,6 +6036,19 @@ not json
         assert_eq!(large_files.len(), MAX_MAP_LARGE_FILES);
         assert_eq!(large_files[0].path, "file_044.bin");
         assert_eq!(large_files[MAX_MAP_LARGE_FILES - 1].path, "file_005.bin");
+    }
+
+    #[test]
+    fn pushes_bounded_sorted_items_by_insertion_position() {
+        let mut items = Vec::new();
+        for item in [3, 1, 4, 2, 0] {
+            push_bounded_sorted(&mut items, item, 3, |a, b| a.cmp(b));
+        }
+
+        assert_eq!(items, vec![0, 1, 2]);
+
+        push_bounded_sorted(&mut items, 9, 3, |a, b| a.cmp(b));
+        assert_eq!(items, vec![0, 1, 2]);
     }
 
     #[test]
