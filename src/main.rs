@@ -2,7 +2,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 mod related_cli;
 
-use related_cli::{RelatedCli, RelatedCliItem, RelatedCliOutput};
+use related_cli::{RelatedCli, RelatedCliEvidence, RelatedCliItem, RelatedCliOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -2408,12 +2408,7 @@ fn related_file_from_related_cli(item: RelatedCliItem) -> Option<RelatedFile> {
         score: round3(item.score),
         cochanged_commits: item.cochanges,
         weighted_cochanges: round3(item.weight),
-        sample_commits: item
-            .evidence
-            .iter()
-            .take(MAX_SAMPLE_COMMITS)
-            .map(|evidence| short_commit(&evidence.hash).to_string())
-            .collect(),
+        sample_commits: related_cli_sample_commits(&item.evidence),
     })
 }
 
@@ -2804,14 +2799,7 @@ fn impact_by_related_cli(
             accumulator.cochanged_commits += item.cochanges;
             accumulator.weighted_cochanges += item.weight;
             accumulator.seed_files.insert(seed.clone());
-            for evidence in item.evidence {
-                if !push_sample_commit(
-                    &mut accumulator.sample_commits,
-                    short_commit(&evidence.hash),
-                ) {
-                    break;
-                }
-            }
+            push_related_cli_sample_commits(&mut accumulator.sample_commits, &item.evidence);
         }
     }
 
@@ -3786,6 +3774,23 @@ fn push_unique_sample_commit(sample_commits: &mut Vec<String>, commit: &str) -> 
         sample_commits.push(commit.to_string());
     }
     true
+}
+
+fn related_cli_sample_commits(evidence: &[RelatedCliEvidence]) -> Vec<String> {
+    let mut sample_commits = Vec::new();
+    push_related_cli_sample_commits(&mut sample_commits, evidence);
+    sample_commits
+}
+
+fn push_related_cli_sample_commits(
+    sample_commits: &mut Vec<String>,
+    evidence: &[RelatedCliEvidence],
+) {
+    for item in evidence {
+        if !push_sample_commit(sample_commits, short_commit(&item.hash)) {
+            break;
+        }
+    }
 }
 
 fn cochange_commit_weight(rank: usize, file_count: usize) -> f64 {
@@ -6858,6 +6863,39 @@ src/b.rs
         assert_eq!(unique_samples, vec!["commit-a"]);
         assert!(push_unique_sample_commit(&mut unique_samples, "commit-b"));
         assert_eq!(unique_samples, vec!["commit-a", "commit-b"]);
+    }
+
+    #[test]
+    fn related_cli_sample_commit_helpers_bound_evidence() {
+        let evidence = (0..(MAX_SAMPLE_COMMITS + 1))
+            .map(|index| RelatedCliEvidence {
+                hash: format!("commit-{index}-abcdef"),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            related_cli_sample_commits(&evidence),
+            vec![
+                "commit-0-abc",
+                "commit-1-abc",
+                "commit-2-abc",
+                "commit-3-abc",
+                "commit-4-abc"
+            ]
+        );
+
+        let mut samples = vec!["existing".to_string()];
+        push_related_cli_sample_commits(&mut samples, &evidence);
+        assert_eq!(
+            samples,
+            vec![
+                "existing",
+                "commit-0-abc",
+                "commit-1-abc",
+                "commit-2-abc",
+                "commit-3-abc"
+            ]
+        );
     }
 
     #[test]
