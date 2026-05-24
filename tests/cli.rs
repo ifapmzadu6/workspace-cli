@@ -493,6 +493,28 @@ fn diff_excludes_workspace_metadata_changes() {
 }
 
 #[test]
+fn diff_includes_staged_changes() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+    write_file(root, "note.txt", "hello staged\n");
+    run(root, "git", &["add", "note.txt"]);
+
+    let diff = run_workspace(root, &["diff", "--json"]);
+    let files = strings_at(&diff, &["data", "files"]);
+    let patch = diff["data"]["patch"]
+        .as_str()
+        .expect("diff patch should be a string");
+
+    assert_eq!(diff["kind"], "workspace_diff");
+    assert_eq!(files, vec!["note.txt".to_string()]);
+    assert!(patch.contains("-hello"));
+    assert!(patch.contains("+hello staged"));
+}
+
+#[test]
 fn patch_does_not_apply_when_transaction_storage_fails() {
     let temp = init_git_repo();
     let root = temp.path();

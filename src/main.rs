@@ -3298,6 +3298,9 @@ fn git_observable_diff_output<const N: usize>(
     extra_args: [&str; N],
 ) -> Result<String> {
     let mut args = vec!["diff"];
+    if git_current_head(workspace)?.is_some() {
+        args.push("HEAD");
+    }
     args.extend(extra_args);
     args.extend(["--", ".", ":(exclude).workspace/**"]);
     git_output(workspace, args)
