@@ -35,6 +35,10 @@ const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
 const MAX_RG_JSON_LINE_BYTES: usize = 64_000;
 const MAX_PATCH_LINE_BYTES: usize = 64_000;
 const MAX_GIT_OUTPUT_LINE_BYTES: usize = 64_000;
+const MAX_EVIDENCE_ITEMS: usize = 12;
+const MAX_MAP_EVIDENCE_ITEMS: usize = 16;
+const MAX_NEXT_OBSERVATIONS: usize = 5;
+const MAX_MAP_IMPORTANT_NEXT_OBSERVATIONS: usize = 4;
 const MAX_SAMPLE_COMMITS: usize = 5;
 const MAX_LOG_LINE_BYTES: usize = 64_000;
 const MAX_PACKAGE_JSON_BYTES: u64 = 1_000_000;
@@ -1113,7 +1117,7 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
         rg_search(workspace, &args.query, args.max_results)?;
     let evidence = matches
         .iter()
-        .take(12)
+        .take(MAX_EVIDENCE_ITEMS)
         .map(|m| Evidence {
             path: m.path.clone(),
             lines: Some(m.line.to_string()),
@@ -1146,7 +1150,7 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
     let next_observations = data
         .matches
         .iter()
-        .take(5)
+        .take(MAX_NEXT_OBSERVATIONS)
         .map(|m| workspace_read_lines_command(&m.path, m.line, m.line))
         .collect();
     let observation = Observation {
@@ -1815,7 +1819,7 @@ where
     paths
         .into_iter()
         .filter(|path| workspace.resolve_path(Path::new(path)).is_file())
-        .take(5)
+        .take(MAX_NEXT_OBSERVATIONS)
         .map(workspace_read_command)
         .collect()
 }
@@ -2284,7 +2288,7 @@ fn important_files(structure: &StructureSummary, stack: &StackSummary) -> Vec<Im
 fn map_evidence(map: &WorkspaceMap) -> Vec<Evidence> {
     map.important_files
         .iter()
-        .take(16)
+        .take(MAX_MAP_EVIDENCE_ITEMS)
         .map(|file| Evidence {
             path: file.path.clone(),
             lines: None,
@@ -2298,7 +2302,11 @@ fn map_next_observations(map: &WorkspaceMap) -> Vec<String> {
     if map.structure.docs.iter().any(|path| path == "README.md") {
         next.push(workspace_read_command("README.md"));
     }
-    for file in map.important_files.iter().take(4) {
+    for file in map
+        .important_files
+        .iter()
+        .take(MAX_MAP_IMPORTANT_NEXT_OBSERVATIONS)
+    {
         if file.path != "README.md" && file.path != "." {
             next.push(workspace_read_command(&file.path));
         }
@@ -3632,7 +3640,7 @@ fn compare_pagerank_hit_by_score(a: &PageRankHit, b: &PageRankHit) -> std::cmp::
 fn related_evidence(data: &RelatedData) -> Vec<Evidence> {
     data.related
         .iter()
-        .take(12)
+        .take(MAX_EVIDENCE_ITEMS)
         .map(|file| Evidence {
             path: file.path.clone(),
             lines: None,
@@ -3656,7 +3664,7 @@ fn related_evidence(data: &RelatedData) -> Vec<Evidence> {
 fn impact_evidence(data: &ImpactData) -> Vec<Evidence> {
     data.impacted
         .iter()
-        .take(12)
+        .take(MAX_EVIDENCE_ITEMS)
         .map(|file| Evidence {
             path: file.path.clone(),
             lines: None,
