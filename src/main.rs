@@ -1460,21 +1460,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     };
     let file_list_truncated = data.omitted_files > 0;
     let truncated = summary_truncated || patch_truncated || file_list_truncated;
-    let mut summary = if data.is_repo {
-        format!("{} changed file(s)", data.file_count)
-    } else {
-        data.summary.clone()
-    };
-    if summary_truncated && patch_truncated {
-        summary.push_str(" (summary and patch truncated)");
-    } else if summary_truncated {
-        summary.push_str(" (summary truncated)");
-    } else if patch_truncated {
-        summary.push_str(" (patch truncated)");
-    }
-    if file_list_truncated {
-        summary.push_str(" (files truncated)");
-    }
+    let summary = diff_summary(&data, summary_truncated, patch_truncated);
     let evidence = data
         .files
         .iter()
@@ -1832,6 +1818,25 @@ fn search_summary(data: &SearchData) -> String {
             ", truncated {} match text(s)",
             data.truncated_match_texts
         ));
+    }
+    summary
+}
+
+fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool) -> String {
+    let mut summary = if data.is_repo {
+        format!("{} changed file(s)", data.file_count)
+    } else {
+        data.summary.clone()
+    };
+    if summary_truncated && patch_truncated {
+        summary.push_str(" (summary and patch truncated)");
+    } else if summary_truncated {
+        summary.push_str(" (summary truncated)");
+    } else if patch_truncated {
+        summary.push_str(" (patch truncated)");
+    }
+    if data.omitted_files > 0 {
+        summary.push_str(" (files truncated)");
     }
     summary
 }
@@ -6029,6 +6034,42 @@ rename to new name.txt
         };
 
         assert_eq!(search_summary(&data), "1 match(es) for \"needle\"");
+    }
+
+    #[test]
+    fn diff_summary_reports_each_truncation_kind() {
+        let data = DiffData {
+            is_repo: true,
+            summary: "ignored for repositories".to_string(),
+            file_count: 3,
+            files: vec![],
+            omitted_files: 2,
+            patch: None,
+        };
+
+        assert_eq!(
+            diff_summary(&data, true, true),
+            "3 changed file(s) (summary and patch truncated) (files truncated)"
+        );
+        assert_eq!(
+            diff_summary(&data, true, false),
+            "3 changed file(s) (summary truncated) (files truncated)"
+        );
+        assert_eq!(
+            diff_summary(&data, false, true),
+            "3 changed file(s) (patch truncated) (files truncated)"
+        );
+
+        let data = DiffData {
+            is_repo: false,
+            summary: "not a git repository".to_string(),
+            file_count: 0,
+            files: vec![],
+            omitted_files: 0,
+            patch: None,
+        };
+
+        assert_eq!(diff_summary(&data, false, false), "not a git repository");
     }
 
     #[test]
