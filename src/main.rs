@@ -1300,13 +1300,10 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
         "not a git repository".to_string()
     };
     let evidence = related_evidence(&data);
-    let next_observations = data
-        .related
-        .iter()
-        .filter(|file| workspace.resolve_path(Path::new(&file.path)).is_file())
-        .take(5)
-        .map(|file| workspace_read_command(&file.path))
-        .collect();
+    let next_observations = read_next_observations(
+        workspace,
+        data.related.iter().map(|file| file.path.as_str()),
+    );
     let observation = Observation {
         kind: "workspace_related".to_string(),
         scope: target.clone(),
@@ -1373,13 +1370,10 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
         "not a git repository".to_string()
     };
     let evidence = impact_evidence(&data);
-    let next_observations = data
-        .impacted
-        .iter()
-        .filter(|file| workspace.resolve_path(Path::new(&file.path)).is_file())
-        .take(5)
-        .map(|file| workspace_read_command(&file.path))
-        .collect();
+    let next_observations = read_next_observations(
+        workspace,
+        data.impacted.iter().map(|file| file.path.as_str()),
+    );
     let observation = Observation {
         kind: "workspace_impact".to_string(),
         scope: data.source.clone(),
@@ -1514,13 +1508,8 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
             reason: "git diff changed file".to_string(),
         })
         .collect();
-    let next_observations = data
-        .files
-        .iter()
-        .filter(|path| workspace.resolve_path(Path::new(path)).is_file())
-        .take(5)
-        .map(|path| workspace_read_command(path))
-        .collect();
+    let next_observations =
+        read_next_observations(workspace, data.files.iter().map(String::as_str));
     let observation = Observation {
         kind: "workspace_diff".to_string(),
         scope: workspace.root.to_string_lossy().into_owned(),
@@ -1816,6 +1805,18 @@ fn changed_file_evidence(files_changed: &[String], reason: &str) -> Vec<Evidence
             lines: None,
             reason: reason.to_string(),
         })
+        .collect()
+}
+
+fn read_next_observations<'a, I>(workspace: &Workspace, paths: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    paths
+        .into_iter()
+        .filter(|path| workspace.resolve_path(Path::new(path)).is_file())
+        .take(5)
+        .map(workspace_read_command)
         .collect()
 }
 
@@ -5912,6 +5913,45 @@ rename to new name.txt
         assert_eq!(evidence[0].path, "file_000.txt");
         assert_eq!(evidence[0].reason, "patch file target");
         assert!(evidence.iter().all(|item| item.lines.is_none()));
+    }
+
+    #[test]
+    fn read_next_observations_include_existing_files_only() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::write(temp.path().join("a.txt"), "a").expect("file should be written");
+        fs::create_dir(temp.path().join("dir")).expect("directory should be created");
+        for index in 0..6 {
+            fs::write(temp.path().join(format!("file_{index}.txt")), "x")
+                .expect("file should be written");
+        }
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        let paths = [
+            "missing.txt",
+            "a.txt",
+            "dir",
+            "file_0.txt",
+            "file_1.txt",
+            "file_2.txt",
+            "file_3.txt",
+            "file_4.txt",
+            "file_5.txt",
+        ];
+
+        let next = read_next_observations(&workspace, paths);
+
+        assert_eq!(
+            next,
+            vec![
+                "workspace read a.txt",
+                "workspace read file_0.txt",
+                "workspace read file_1.txt",
+                "workspace read file_2.txt",
+                "workspace read file_3.txt",
+            ]
+        );
     }
 
     #[test]
