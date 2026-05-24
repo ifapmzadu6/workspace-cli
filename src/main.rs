@@ -3056,9 +3056,22 @@ fn extract_patch_files(patch_content: &str) -> Vec<String> {
             files.insert(path);
         } else if let Some(path) = line.strip_prefix("rename to ").and_then(clean_patch_path) {
             files.insert(path);
+        } else if let Some((old_path, new_path)) = diff_git_paths(line) {
+            if let Some(path) = clean_patch_path(old_path) {
+                files.insert(path);
+            }
+            if let Some(path) = clean_patch_path(new_path) {
+                files.insert(path);
+            }
         }
     }
     files.into_iter().collect()
+}
+
+fn diff_git_paths(line: &str) -> Option<(&str, &str)> {
+    let rest = line.strip_prefix("diff --git ")?;
+    let rest = rest.strip_prefix("a/")?;
+    rest.rsplit_once(" b/")
 }
 
 fn clean_patch_path(raw: &str) -> Option<String> {
@@ -3555,6 +3568,24 @@ rename to new name.txt
         assert_eq!(
             extract_patch_files(patch),
             vec!["new name.txt", "old name.txt"]
+        );
+    }
+
+    #[test]
+    fn extracts_patch_files_from_diff_git_only_sections() {
+        let patch = "\
+diff --git a/assets/logo.png b/assets/logo.png
+new file mode 100644
+index 0000000..1234567
+GIT binary patch
+literal 0
+
+diff --git a/old data.bin b/new data.bin
+similarity index 100%
+";
+        assert_eq!(
+            extract_patch_files(patch),
+            vec!["assets/logo.png", "new data.bin", "old data.bin"]
         );
     }
 

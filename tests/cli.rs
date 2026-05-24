@@ -438,6 +438,50 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn patch_reports_files_from_binary_patch_headers() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "README.md", "# demo\n");
+    commit_all(root, "initial commit");
+
+    fs::create_dir_all(root.join("assets")).expect("assets directory should be created");
+    fs::write(root.join("assets/logo.bin"), b"\0workspace").expect("binary file should be written");
+    run(root, "git", &["add", "assets/logo.bin"]);
+    let diff = Command::new("git")
+        .current_dir(root)
+        .args(["diff", "--cached", "--binary"])
+        .output()
+        .expect("git diff should run");
+    assert!(
+        diff.status.success(),
+        "git diff failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&diff.stdout),
+        String::from_utf8_lossy(&diff.stderr)
+    );
+    fs::write(root.join("binary.patch"), diff.stdout).expect("binary patch should be written");
+    run(root, "git", &["reset", "-q"]);
+    fs::remove_file(root.join("assets/logo.bin")).expect("staged binary file should be removed");
+
+    let patch = run_workspace(
+        root,
+        &[
+            "patch",
+            "--description",
+            "add binary asset",
+            "binary.patch",
+            "--json",
+        ],
+    );
+
+    assert_eq!(patch["kind"], "workspace_patch");
+    assert!(
+        strings_at(&patch, &["data", "files_changed"]).contains(&"assets/logo.bin".to_string())
+    );
+    assert!(root.join("assets/logo.bin").exists());
+}
+
+#[test]
 fn run_records_nonzero_exit_without_failing_cli() {
     let temp = TempDir::new().expect("temp dir should be created");
 
