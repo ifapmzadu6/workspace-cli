@@ -1680,7 +1680,7 @@ fn map_next_observations(map: &WorkspaceMap) -> Vec<String> {
         next.push(workspace_read_command("README.md"));
     }
     for file in map.important_files.iter().take(4) {
-        if file.path != "README.md" {
+        if file.path != "README.md" && file.path != "." {
             next.push(workspace_read_command(&file.path));
         }
     }

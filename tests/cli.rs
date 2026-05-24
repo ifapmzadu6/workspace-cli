@@ -163,6 +163,19 @@ fn map_and_read_emit_observations() {
 }
 
 #[test]
+fn map_does_not_suggest_reading_workspace_root() {
+    let temp = TempDir::new().expect("temp dir should be created");
+
+    let map = run_workspace(temp.path(), &["map", "--json"]);
+    let next = strings_at(&map, &["next_observations"]);
+    let important = paths_at(&map, &["data", "important_files"]);
+
+    assert_eq!(map["kind"], "workspace_map");
+    assert!(important.contains(&".".to_string()));
+    assert!(!next.contains(&"workspace read .".to_string()));
+}
+
+#[test]
 fn search_reports_total_matches_when_results_are_truncated() {
     let temp = TempDir::new().expect("temp dir should be created");
     write_file(temp.path(), "a.txt", "needle one\nneedle two\n");
