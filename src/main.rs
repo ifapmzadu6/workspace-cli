@@ -1173,6 +1173,7 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
     let patch_content = fs::read_to_string(&patch_path)
         .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
     let files_changed = extract_patch_files(&patch_content);
+    validate_patch_targets(&files_changed)?;
     run_git_apply(workspace, &patch_path, ["--check"])?;
     ensure_log_writable(workspace)?;
 
@@ -3149,6 +3150,16 @@ fn extract_patch_files(patch_content: &str) -> Vec<String> {
         }
     }
     files.into_iter().collect()
+}
+
+fn validate_patch_targets(files_changed: &[String]) -> Result<()> {
+    if let Some(path) = files_changed
+        .iter()
+        .find(|path| !should_include_repo_file(path))
+    {
+        bail!("patch target {path:?} is outside observable workspace files");
+    }
+    Ok(())
 }
 
 fn diff_git_paths(line: &str) -> Option<(String, String)> {

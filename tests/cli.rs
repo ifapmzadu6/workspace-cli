@@ -601,6 +601,44 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn patch_rejects_workspace_metadata_targets() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "README.md", "# demo\n");
+    commit_all(root, "initial commit");
+    write_file(
+        root,
+        "metadata.patch",
+        "\
+diff --git a/.workspace/log.jsonl b/.workspace/log.jsonl
+new file mode 100644
+--- /dev/null
++++ b/.workspace/log.jsonl
+@@ -0,0 +1 @@
++corrupt
+",
+    );
+
+    let stderr = run_workspace_failure(
+        root,
+        &[
+            "patch",
+            "--description",
+            "modify metadata",
+            "metadata.patch",
+            "--json",
+        ],
+    );
+
+    assert!(
+        stderr.contains("outside observable workspace files"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(!root.join(".workspace/log.jsonl").exists());
+}
+
+#[test]
 fn patch_reports_files_from_binary_patch_headers() {
     let temp = init_git_repo();
     let root = temp.path();
