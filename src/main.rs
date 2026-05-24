@@ -1163,11 +1163,7 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
     output_recorded_observation(
         workspace,
         args.json,
-        OperationLogRecord::observe(
-            LOG_OP_INDEX_COCHANGE,
-            &observation.scope,
-            &observation.summary,
-        ),
+        OperationLogRecord::observe_observation(LOG_OP_INDEX_COCHANGE, &observation),
         &observation,
         print_index_cochange,
     )
@@ -5717,10 +5713,6 @@ fn append_log(
     Ok(())
 }
 
-fn append_observation_log(workspace: &Workspace, op: &str, scope: &str, summary: &str) {
-    let _ = append_operation_log(workspace, OperationLogRecord::observe(op, scope, summary));
-}
-
 fn output_logged_observation<T, F>(
     workspace: &Workspace,
     json: bool,
@@ -5732,7 +5724,10 @@ where
     T: Serialize,
     F: FnOnce(&Observation<T>) -> Result<()>,
 {
-    append_observation_log(workspace, op, &observation.scope, &observation.summary);
+    let _ = append_operation_log(
+        workspace,
+        OperationLogRecord::observe_observation(op, observation),
+    );
     output_observation(json, observation, print_human)
 }
 
@@ -5753,6 +5748,10 @@ impl<'a> OperationLogRecord<'a> {
             summary,
             transaction_id: None,
         }
+    }
+
+    fn observe_observation<T: Serialize>(op: &'a str, observation: &'a Observation<T>) -> Self {
+        Self::observe(op, &observation.scope, &observation.summary)
     }
 
     fn change(op: &'a str, scope: &'a str, summary: &'a str, transaction_id: &'a str) -> Self {
@@ -8464,6 +8463,23 @@ rename to new name.txt
         assert_eq!(observe.scope, ".");
         assert_eq!(observe.summary, "status summary");
         assert!(observe.transaction_id.is_none());
+
+        let observation = Observation {
+            kind: WORKSPACE_STATUS_KIND.to_string(),
+            scope: "status-scope".to_string(),
+            summary: "status observation".to_string(),
+            data: (),
+            evidence: vec![],
+            truncated: false,
+            next_observations: vec![],
+        };
+        let observe_from_observation =
+            OperationLogRecord::observe_observation(LOG_OP_STATUS, &observation);
+        assert_eq!(observe_from_observation.kind, LOG_KIND_OBSERVE);
+        assert_eq!(observe_from_observation.op, LOG_OP_STATUS);
+        assert_eq!(observe_from_observation.scope, "status-scope");
+        assert_eq!(observe_from_observation.summary, "status observation");
+        assert!(observe_from_observation.transaction_id.is_none());
 
         let change = OperationLogRecord::change(LOG_OP_PATCH, "change.patch", "patched", "tx-1");
         assert_eq!(change.kind, LOG_KIND_CHANGE);
