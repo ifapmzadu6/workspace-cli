@@ -5,9 +5,10 @@ mod related_cli;
 use related_cli::{RelatedCli, RelatedCliItem, RelatedCliOutput};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsStr;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -3409,28 +3410,45 @@ fn read_log(workspace: &Workspace, limit: usize) -> Result<Vec<LogEntry>> {
     if !path.exists() {
         return Ok(vec![]);
     }
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("failed to read log {}", path.display()))?;
-    parse_log_entries(&text, limit)
+    if !path.is_file() {
+        bail!("failed to read log {}: not a file", path.display());
+    }
+    let file =
+        fs::File::open(&path).with_context(|| format!("failed to read log {}", path.display()))?;
+    read_log_entries(BufReader::new(file), limit)
         .with_context(|| format!("failed to parse operation log {}", path.display()))
 }
 
-fn parse_log_entries(text: &str, limit: usize) -> Result<Vec<LogEntry>> {
-    let lines = text
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty())
-        .collect::<Vec<_>>();
-    let start = if limit == 0 {
-        lines.len()
-    } else {
-        lines.len().saturating_sub(limit)
-    };
-    lines[start..]
-        .iter()
-        .map(|(idx, line)| {
-            serde_json::from_str::<LogEntry>(line)
-                .with_context(|| format!("invalid operation log JSON at line {}", idx + 1))
+fn read_log_entries<R: BufRead>(reader: R, limit: usize) -> Result<Vec<LogEntry>> {
+    if limit == 0 {
+        return Ok(vec![]);
+    }
+
+    let mut window = VecDeque::new();
+    for (idx, line) in reader.lines().enumerate() {
+        let line =
+            line.with_context(|| format!("failed to read operation log line {}", idx + 1))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        if window.len() == limit {
+            window.pop_front();
+        }
+        window.push_back((idx + 1, line));
+    }
+
+    parse_log_entries(window)
+}
+
+fn parse_log_entries<I>(lines: I) -> Result<Vec<LogEntry>>
+where
+    I: IntoIterator<Item = (usize, String)>,
+{
+    lines
+        .into_iter()
+        .map(|(line_number, line)| {
+            serde_json::from_str::<LogEntry>(&line)
+                .with_context(|| format!("invalid operation log JSON at line {line_number}"))
         })
         .collect()
 }
@@ -3918,6 +3936,29 @@ index 0000000..587be6b
         assert_eq!(matches[0].path, "a.txt");
         assert_eq!(matches[0].line, 1);
         assert_eq!(matches[0].column, 1);
+    }
+
+    #[test]
+    fn reads_only_requested_log_window() {
+        let log = "\
+not json
+{\"id\":\"op-1\",\"timestamp_unix_ms\":1,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"one\",\"transaction_id\":null}
+{\"id\":\"op-2\",\"timestamp_unix_ms\":2,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"two\",\"transaction_id\":null}
+";
+        let entries =
+            read_log_entries(std::io::Cursor::new(log), 2).expect("log window should parse");
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "op-1");
+        assert_eq!(entries[1].id, "op-2");
+    }
+
+    #[test]
+    fn zero_log_limit_skips_parsing() {
+        let entries = read_log_entries(std::io::Cursor::new("not json\n"), 0)
+            .expect("zero limit should parse");
+
+        assert!(entries.is_empty());
     }
 
     #[test]

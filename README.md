@@ -335,6 +335,7 @@ Shows operations performed against the workspace.
 
 ```sh
 workspace log
+workspace log --limit 10
 ```
 
 This is not agent memory. It is an auditable history stored on the workspace
