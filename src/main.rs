@@ -4024,21 +4024,32 @@ fn related_evidence(data: &RelatedData) -> Vec<Evidence> {
         .map(|file| Evidence {
             path: file.path.clone(),
             lines: None,
-            reason: if data.ranking == RANK_PAGERANK && file.cochanged_commits == 0 {
-                format!(
-                    "reached from {} through the co-change graph; pagerank score {:.3}",
-                    data.target, file.score
-                )
-            } else {
-                format!(
-                    "changed with {} in {} commit(s); samples: {}",
-                    data.target,
-                    file.cochanged_commits,
-                    join_or_none(&file.sample_commits)
-                )
-            },
+            reason: related_evidence_reason(data, file),
         })
         .collect()
+}
+
+fn related_evidence_reason(data: &RelatedData, file: &RelatedFile) -> String {
+    if data.ranking == RANK_PAGERANK && file.cochanged_commits == 0 {
+        pagerank_related_evidence_reason(&data.target, file.score)
+    } else {
+        direct_related_evidence_reason(&data.target, file.cochanged_commits, &file.sample_commits)
+    }
+}
+
+fn pagerank_related_evidence_reason(target: &str, score: f64) -> String {
+    format!("reached from {target} through the co-change graph; pagerank score {score:.3}")
+}
+
+fn direct_related_evidence_reason(
+    target: &str,
+    cochanged_commits: usize,
+    sample_commits: &[String],
+) -> String {
+    format!(
+        "changed with {target} in {cochanged_commits} commit(s); samples: {}",
+        join_or_none(sample_commits)
+    )
 }
 
 fn impact_evidence(data: &ImpactData) -> Vec<Evidence> {
@@ -4048,22 +4059,40 @@ fn impact_evidence(data: &ImpactData) -> Vec<Evidence> {
         .map(|file| Evidence {
             path: file.path.clone(),
             lines: None,
-            reason: if data.ranking == RANK_PAGERANK && file.cochanged_commits == 0 {
-                format!(
-                    "reached from seed file(s) {} through the co-change graph; pagerank score {:.3}",
-                    join_or_none(&file.seed_files),
-                    file.score
-                )
-            } else {
-                format!(
-                    "changed with seed file(s) {} in {} commit(s); samples: {}",
-                    join_or_none(&file.seed_files),
-                    file.cochanged_commits,
-                    join_or_none(&file.sample_commits)
-                )
-            },
+            reason: impact_evidence_reason(data, file),
         })
         .collect()
+}
+
+fn impact_evidence_reason(data: &ImpactData, file: &ImpactFile) -> String {
+    if data.ranking == RANK_PAGERANK && file.cochanged_commits == 0 {
+        pagerank_impact_evidence_reason(&file.seed_files, file.score)
+    } else {
+        direct_impact_evidence_reason(
+            &file.seed_files,
+            file.cochanged_commits,
+            &file.sample_commits,
+        )
+    }
+}
+
+fn pagerank_impact_evidence_reason(seed_files: &[String], score: f64) -> String {
+    format!(
+        "reached from seed file(s) {} through the co-change graph; pagerank score {score:.3}",
+        join_or_none(seed_files)
+    )
+}
+
+fn direct_impact_evidence_reason(
+    seed_files: &[String],
+    cochanged_commits: usize,
+    sample_commits: &[String],
+) -> String {
+    format!(
+        "changed with seed file(s) {} in {cochanged_commits} commit(s); samples: {}",
+        join_or_none(seed_files),
+        join_or_none(sample_commits)
+    )
 }
 
 fn relationship_source(use_index: bool) -> &'static str {
@@ -7354,6 +7383,88 @@ rename to new name.txt
         assert_eq!(
             observation.next_observations,
             vec!["workspace read src/b.rs"]
+        );
+    }
+
+    #[test]
+    fn relationship_evidence_reason_helpers_preserve_contract() {
+        let related = RelatedData {
+            target: "src/a.rs".to_string(),
+            method: RELATED_METHOD_COCHANGE.to_string(),
+            ranking: RANK_PAGERANK.to_string(),
+            relationship_source: RELATIONSHIP_SOURCE_COCHANGE_INDEX.to_string(),
+            is_repo: true,
+            commits_scanned: 5,
+            commits_matched: 2,
+            ignored_large_commits: 0,
+            max_commits: 500,
+            max_files_per_commit: 100,
+            related: vec![],
+        };
+        let direct_related = RelatedFile {
+            path: "src/b.rs".to_string(),
+            score: 0.75,
+            cochanged_commits: 2,
+            weighted_cochanges: 1.5,
+            sample_commits: vec!["abc123".to_string()],
+        };
+        let pagerank_related = RelatedFile {
+            path: "src/c.rs".to_string(),
+            score: 0.12345,
+            cochanged_commits: 0,
+            weighted_cochanges: 0.0,
+            sample_commits: vec![],
+        };
+
+        assert_eq!(
+            related_evidence_reason(&related, &direct_related),
+            "changed with src/a.rs in 2 commit(s); samples: abc123"
+        );
+        assert_eq!(
+            related_evidence_reason(&related, &pagerank_related),
+            "reached from src/a.rs through the co-change graph; pagerank score 0.123"
+        );
+
+        let impact = ImpactData {
+            source: IMPACT_SOURCE_DIFF.to_string(),
+            method: RELATED_METHOD_COCHANGE.to_string(),
+            ranking: RANK_PAGERANK.to_string(),
+            relationship_source: RELATIONSHIP_SOURCE_COCHANGE_INDEX.to_string(),
+            is_repo: true,
+            seed_files: vec!["src/a.rs".to_string()],
+            seed_file_count: 1,
+            omitted_seed_files: 0,
+            commits_scanned: 5,
+            commits_matched: 2,
+            ignored_large_commits: 0,
+            max_commits: 500,
+            max_files_per_commit: 100,
+            impacted: vec![],
+        };
+        let direct_impact = ImpactFile {
+            path: "src/b.rs".to_string(),
+            score: 0.75,
+            cochanged_commits: 2,
+            weighted_cochanges: 1.5,
+            seed_files: vec!["src/a.rs".to_string(), "src/other.rs".to_string()],
+            sample_commits: vec!["abc123".to_string()],
+        };
+        let pagerank_impact = ImpactFile {
+            path: "src/c.rs".to_string(),
+            score: 0.98765,
+            cochanged_commits: 0,
+            weighted_cochanges: 0.0,
+            seed_files: vec!["src/a.rs".to_string()],
+            sample_commits: vec![],
+        };
+
+        assert_eq!(
+            impact_evidence_reason(&impact, &direct_impact),
+            "changed with seed file(s) src/a.rs, src/other.rs in 2 commit(s); samples: abc123"
+        );
+        assert_eq!(
+            impact_evidence_reason(&impact, &pagerank_impact),
+            "reached from seed file(s) src/a.rs through the co-change graph; pagerank score 0.988"
         );
     }
 
