@@ -42,6 +42,15 @@ const MAX_MAP_IMPORTANT_NEXT_OBSERVATIONS: usize = 4;
 const MAX_SAMPLE_COMMITS: usize = 5;
 const MAX_LOG_LINE_BYTES: usize = 64_000;
 const MAX_PACKAGE_JSON_BYTES: u64 = 1_000_000;
+const WORKSPACE_MAP_COMMAND: &str = "workspace map";
+const WORKSPACE_STATUS_COMMAND: &str = "workspace status";
+const WORKSPACE_DIFF_SUMMARY_COMMAND: &str = "workspace diff --summary";
+const WORKSPACE_INDEX_STATUS_COMMAND: &str = "workspace index status";
+const WORKSPACE_INDEX_COCHANGE_COMMAND: &str = "workspace index cochange";
+const WORKSPACE_LOG_COMMAND: &str = "workspace log";
+const WORKSPACE_RELATED_INDEX_COMMAND: &str = "workspace related <file> --by cochange --use-index";
+const WORKSPACE_IMPACT_INDEX_COMMAND: &str = "workspace impact --diff --by cochange --use-index";
+const WORKSPACE_IMPACT_COCHANGE_COMMAND: &str = "workspace impact --diff --by cochange";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -1066,12 +1075,7 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
         data,
         evidence: vec![],
         truncated,
-        next_observations: vec![
-            "workspace map".to_string(),
-            "workspace diff --summary".to_string(),
-            "workspace index status".to_string(),
-            "workspace log".to_string(),
-        ],
+        next_observations: status_next_observations(),
     };
 
     append_observation_log(
@@ -1127,11 +1131,7 @@ fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> 
         data,
         evidence: vec![],
         truncated: false,
-        next_observations: vec![
-            "workspace index cochange".to_string(),
-            "workspace related <file> --by cochange --use-index".to_string(),
-            "workspace impact --diff --by cochange --use-index".to_string(),
-        ],
+        next_observations: index_status_next_observations(),
     };
 
     append_observation_log(
@@ -1178,10 +1178,7 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
         data,
         evidence: vec![],
         truncated: false,
-        next_observations: vec![
-            "workspace related <file> --by cochange --use-index".to_string(),
-            "workspace impact --diff --by cochange --use-index".to_string(),
-        ],
+        next_observations: index_cochange_next_observations(),
     };
 
     append_log(
@@ -1452,10 +1449,7 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         data,
         evidence: changed_file_evidence(&files_changed, "patch file target"),
         truncated,
-        next_observations: vec![
-            "workspace diff --summary".to_string(),
-            format!("workspace rollback {}", transaction_id),
-        ],
+        next_observations: patch_followup_observations(&transaction_id),
     };
 
     append_log(
@@ -1556,10 +1550,7 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
         data,
         evidence: vec![],
         truncated,
-        next_observations: vec![
-            "workspace status".to_string(),
-            "workspace diff --summary".to_string(),
-        ],
+        next_observations: run_followup_observations(),
     };
 
     append_log(
@@ -1589,7 +1580,7 @@ fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
         data,
         evidence: vec![],
         truncated,
-        next_observations: vec!["workspace status".to_string()],
+        next_observations: log_followup_observations(),
     };
     output_observation(args.json, &observation, print_log)
 }
@@ -1633,7 +1624,7 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         data,
         evidence: changed_file_evidence(&files_changed, "rollback target"),
         truncated,
-        next_observations: vec!["workspace diff --summary".to_string()],
+        next_observations: rollback_followup_observations(),
     };
 
     append_log(
@@ -1716,8 +1707,56 @@ fn read_evidence(data: &ReadData) -> Vec<Evidence> {
 fn read_followup_observations(path: &str) -> Vec<String> {
     vec![
         format!("workspace search {}", shell_hint(path)),
-        "workspace diff --summary".to_string(),
+        WORKSPACE_DIFF_SUMMARY_COMMAND.to_string(),
     ]
+}
+
+fn static_observation_commands(commands: &[&str]) -> Vec<String> {
+    commands
+        .iter()
+        .map(|command| (*command).to_string())
+        .collect()
+}
+
+fn status_next_observations() -> Vec<String> {
+    static_observation_commands(&[
+        WORKSPACE_MAP_COMMAND,
+        WORKSPACE_DIFF_SUMMARY_COMMAND,
+        WORKSPACE_INDEX_STATUS_COMMAND,
+        WORKSPACE_LOG_COMMAND,
+    ])
+}
+
+fn index_status_next_observations() -> Vec<String> {
+    let mut next = static_observation_commands(&[WORKSPACE_INDEX_COCHANGE_COMMAND]);
+    next.extend(index_cochange_next_observations());
+    next
+}
+
+fn index_cochange_next_observations() -> Vec<String> {
+    static_observation_commands(&[
+        WORKSPACE_RELATED_INDEX_COMMAND,
+        WORKSPACE_IMPACT_INDEX_COMMAND,
+    ])
+}
+
+fn patch_followup_observations(transaction_id: &str) -> Vec<String> {
+    vec![
+        WORKSPACE_DIFF_SUMMARY_COMMAND.to_string(),
+        format!("workspace rollback {transaction_id}"),
+    ]
+}
+
+fn run_followup_observations() -> Vec<String> {
+    static_observation_commands(&[WORKSPACE_STATUS_COMMAND, WORKSPACE_DIFF_SUMMARY_COMMAND])
+}
+
+fn log_followup_observations() -> Vec<String> {
+    static_observation_commands(&[WORKSPACE_STATUS_COMMAND])
+}
+
+fn rollback_followup_observations() -> Vec<String> {
+    static_observation_commands(&[WORKSPACE_DIFF_SUMMARY_COMMAND])
 }
 
 fn map_truncated(map: &WorkspaceMap) -> bool {
@@ -2391,10 +2430,10 @@ fn map_next_observations(map: &WorkspaceMap) -> Vec<String> {
         }
     }
     if map.git.is_repo {
-        next.push("workspace diff --summary".to_string());
-        next.push("workspace index status".to_string());
-        next.push("workspace index cochange".to_string());
-        next.push("workspace impact --diff --by cochange".to_string());
+        next.push(WORKSPACE_DIFF_SUMMARY_COMMAND.to_string());
+        next.push(WORKSPACE_INDEX_STATUS_COMMAND.to_string());
+        next.push(WORKSPACE_INDEX_COCHANGE_COMMAND.to_string());
+        next.push(WORKSPACE_IMPACT_COCHANGE_COMMAND.to_string());
         if let Some(entrypoint) = map.structure.entrypoints.first() {
             next.push(format!(
                 "workspace related {} --by cochange",
@@ -6061,6 +6100,47 @@ rename to new name.txt
                 "workspace search 'path with spaces.txt'",
                 "workspace diff --summary"
             ]
+        );
+    }
+
+    #[test]
+    fn static_followup_helpers_report_expected_commands() {
+        assert_eq!(
+            status_next_observations(),
+            vec![
+                "workspace map",
+                "workspace diff --summary",
+                "workspace index status",
+                "workspace log"
+            ]
+        );
+        assert_eq!(
+            index_status_next_observations(),
+            vec![
+                "workspace index cochange",
+                "workspace related <file> --by cochange --use-index",
+                "workspace impact --diff --by cochange --use-index"
+            ]
+        );
+        assert_eq!(
+            index_cochange_next_observations(),
+            vec![
+                "workspace related <file> --by cochange --use-index",
+                "workspace impact --diff --by cochange --use-index"
+            ]
+        );
+        assert_eq!(
+            patch_followup_observations("tx-1"),
+            vec!["workspace diff --summary", "workspace rollback tx-1"]
+        );
+        assert_eq!(
+            run_followup_observations(),
+            vec!["workspace status", "workspace diff --summary"]
+        );
+        assert_eq!(log_followup_observations(), vec!["workspace status"]);
+        assert_eq!(
+            rollback_followup_observations(),
+            vec!["workspace diff --summary"]
         );
     }
 
