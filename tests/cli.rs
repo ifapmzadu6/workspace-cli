@@ -438,6 +438,28 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn run_records_nonzero_exit_without_failing_cli() {
+    let temp = TempDir::new().expect("temp dir should be created");
+
+    let run = run_workspace(temp.path(), &["run", "printf fail >&2; exit 7", "--json"]);
+
+    assert_eq!(run["kind"], "workspace_run");
+    assert_eq!(run["data"]["command"], "printf fail >&2; exit 7");
+    assert_eq!(run["data"]["exit_code"], 7);
+    assert_eq!(run["data"]["stdout"], "");
+    assert_eq!(run["data"]["stderr"], "fail");
+
+    let log = run_workspace(temp.path(), &["log", "--json"]);
+    let entries = strings_at(&log, &["data", "entries"]);
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.contains("command exited with 7")),
+        "log should record the child exit status: {entries:?}"
+    );
+}
+
+#[test]
 fn rollback_rejects_invalid_transaction_ids() {
     let temp = init_git_repo();
     let root = temp.path();

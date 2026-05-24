@@ -314,6 +314,10 @@ workspace run "cargo test"
 workspace run "npm test"
 ```
 
+A command that exits with a nonzero status is still recorded as an observation:
+the JSON output and operation log contain the child process `exit_code`, while
+the `workspace` command itself remains successful.
+
 Future versions can infer relevant tests from changed files or symbols.
 
 ### `workspace log`
