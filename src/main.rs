@@ -5745,7 +5745,7 @@ fn append_log(
 }
 
 fn append_observation_log(workspace: &Workspace, op: &str, scope: &str, summary: &str) {
-    let _ = append_log(workspace, LOG_KIND_OBSERVE, op, scope, summary, None);
+    let _ = append_operation_log(workspace, OperationLogRecord::observe(op, scope, summary));
 }
 
 fn output_logged_observation<T, F>(
@@ -5804,6 +5804,17 @@ impl<'a> OperationLogRecord<'a> {
     }
 }
 
+fn append_operation_log(workspace: &Workspace, record: OperationLogRecord<'_>) -> Result<()> {
+    append_log(
+        workspace,
+        record.kind,
+        record.op,
+        record.scope,
+        record.summary,
+        record.transaction_id,
+    )
+}
+
 fn output_recorded_observation<T, F>(
     workspace: &Workspace,
     json: bool,
@@ -5815,14 +5826,7 @@ where
     T: Serialize,
     F: FnOnce(&Observation<T>) -> Result<()>,
 {
-    append_log(
-        workspace,
-        record.kind,
-        record.op,
-        record.scope,
-        record.summary,
-        record.transaction_id,
-    )?;
+    append_operation_log(workspace, record)?;
     output_observation(json, observation, print_human)
 }
 
@@ -8509,6 +8513,29 @@ rename to new name.txt
         assert_eq!(verify.scope, "cargo test");
         assert_eq!(verify.summary, "command exited with 0");
         assert!(verify.transaction_id.is_none());
+    }
+
+    #[test]
+    fn append_operation_log_preserves_record_fields() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        append_operation_log(
+            &workspace,
+            OperationLogRecord::change(LOG_OP_PATCH, "change.patch", "patched", "tx-1"),
+        )
+        .expect("operation log should be appended");
+
+        let log = read_log(&workspace, 10).expect("log should be readable");
+        assert_eq!(log.entries.len(), 1);
+        assert_eq!(log.entries[0].kind, LOG_KIND_CHANGE);
+        assert_eq!(log.entries[0].op, LOG_OP_PATCH);
+        assert_eq!(log.entries[0].scope, "change.patch");
+        assert_eq!(log.entries[0].summary, "patched");
+        assert_eq!(log.entries[0].transaction_id.as_deref(), Some("tx-1"));
     }
 
     #[test]
