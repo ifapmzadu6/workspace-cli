@@ -838,6 +838,7 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
         bail!("workspace index cochange requires a git repository");
     }
 
+    ensure_log_writable(workspace)?;
     let index = build_cochange_index(workspace, args.max_commits, args.max_files_per_commit)?;
     let index_path = workspace.cochange_index_path();
     let index_dir = workspace.root.join(INDEX_DIR);
@@ -1153,6 +1154,7 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
     let files_changed = extract_patch_files(&patch_content);
     run_git_apply(workspace, &patch_path, ["--check"])?;
+    ensure_log_writable(workspace)?;
 
     let transaction_id = new_id("tx");
     let transaction_dir = workspace.transaction_dir();
@@ -1215,6 +1217,7 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
 }
 
 fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
+    ensure_log_writable(workspace)?;
     let start = Instant::now();
     let output = shell_command(&args.command)
         .current_dir(&workspace.root)
@@ -1301,6 +1304,7 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
         .with_context(|| format!("failed to read stored patch {}", stored_patch.display()))?;
     let files_changed = extract_patch_files(&patch_content);
     run_git_apply(workspace, &stored_patch, ["--reverse", "--check"])?;
+    ensure_log_writable(workspace)?;
     run_git_apply(workspace, &stored_patch, ["--reverse"])?;
 
     let rollback_transaction_id = new_id("rb");
@@ -3240,13 +3244,24 @@ fn append_log(
     };
     let line = serde_json::to_string(&entry)?;
     use std::io::Write;
-    let mut file = fs::OpenOptions::new()
+    let mut file = open_log_for_append(workspace)?;
+    writeln!(file, "{line}")?;
+    Ok(())
+}
+
+fn ensure_log_writable(workspace: &Workspace) -> Result<()> {
+    open_log_for_append(workspace).map(|_| ())
+}
+
+fn open_log_for_append(workspace: &Workspace) -> Result<fs::File> {
+    let log_dir = workspace.root.join(LOG_DIR);
+    fs::create_dir_all(&log_dir)
+        .with_context(|| format!("failed to create log directory {}", log_dir.display()))?;
+    fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(workspace.log_path())
-        .with_context(|| format!("failed to open {}", workspace.log_path().display()))?;
-    writeln!(file, "{line}")?;
-    Ok(())
+        .with_context(|| format!("failed to open {}", workspace.log_path().display()))
 }
 
 fn read_log(workspace: &Workspace, limit: usize) -> Result<Vec<LogEntry>> {

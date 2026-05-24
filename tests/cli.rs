@@ -480,6 +480,49 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn patch_does_not_apply_when_operation_log_is_not_writable() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+    write_file(
+        root,
+        "change.patch",
+        "\
+diff --git a/note.txt b/note.txt
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-hello
++hello workspace
+",
+    );
+    fs::create_dir_all(root.join(".workspace/log.jsonl"))
+        .expect("log path directory should be created");
+
+    let stderr = run_workspace_failure(
+        root,
+        &[
+            "patch",
+            "--description",
+            "update note",
+            "change.patch",
+            "--json",
+        ],
+    );
+
+    assert!(
+        stderr.contains("failed to open"),
+        "unexpected stderr: {stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello\n"
+    );
+}
+
+#[test]
 fn patch_reports_files_from_binary_patch_headers() {
     let temp = init_git_repo();
     let root = temp.path();
@@ -584,6 +627,71 @@ fn run_records_nonzero_exit_without_failing_cli() {
             .iter()
             .any(|entry| entry.contains("command exited with 7")),
         "log should record the child exit status: {entries:?}"
+    );
+}
+
+#[test]
+fn run_does_not_execute_when_operation_log_is_not_writable() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    fs::create_dir_all(temp.path().join(".workspace/log.jsonl"))
+        .expect("log path directory should be created");
+
+    let stderr = run_workspace_failure(temp.path(), &["run", "touch side-effect", "--json"]);
+
+    assert!(
+        stderr.contains("failed to open"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(!temp.path().join("side-effect").exists());
+}
+
+#[test]
+fn rollback_does_not_apply_when_operation_log_is_not_writable() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+    write_file(
+        root,
+        "change.patch",
+        "\
+diff --git a/note.txt b/note.txt
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-hello
++hello workspace
+",
+    );
+
+    let patch = run_workspace(
+        root,
+        &[
+            "patch",
+            "--description",
+            "update note",
+            "change.patch",
+            "--json",
+        ],
+    );
+    let transaction_id = patch["data"]["transaction_id"]
+        .as_str()
+        .expect("transaction id should be a string")
+        .to_string();
+    fs::remove_file(root.join(".workspace/log.jsonl")).expect("log file should be removed");
+    fs::create_dir(root.join(".workspace/log.jsonl"))
+        .expect("log path directory should be created");
+
+    let stderr = run_workspace_failure(root, &["rollback", &transaction_id, "--json"]);
+
+    assert!(
+        stderr.contains("failed to open"),
+        "unexpected stderr: {stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello workspace\n"
     );
 }
 
