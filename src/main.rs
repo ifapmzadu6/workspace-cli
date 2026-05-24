@@ -3289,19 +3289,7 @@ fn rank_cochanges_pagerank_from_index(
         .into_iter()
         .map(|hit| {
             let direct_edge = find_cochange_edge(&edge_lookup, &target, &hit.path);
-            RelatedFile {
-                path: hit.path,
-                score: round3(hit.score),
-                cochanged_commits: direct_edge
-                    .map(|edge| edge.cochanged_commits)
-                    .unwrap_or_default(),
-                weighted_cochanges: direct_edge
-                    .map(|edge| edge.weighted_cochanges)
-                    .unwrap_or_default(),
-                sample_commits: direct_edge
-                    .map(|edge| edge.sample_commits.clone())
-                    .unwrap_or_default(),
-            }
+            related_file_from_pagerank_hit(hit, direct_edge)
         })
         .collect::<Vec<_>>();
 
@@ -3840,6 +3828,25 @@ fn related_file_from_edge(path: String, edge: &CochangeEdge, max_weight: f64) ->
         cochanged_commits: edge.cochanged_commits,
         weighted_cochanges: edge.weighted_cochanges,
         sample_commits: edge.sample_commits.clone(),
+    }
+}
+
+fn related_file_from_pagerank_hit(
+    hit: PageRankHit,
+    direct_edge: Option<&CochangeEdge>,
+) -> RelatedFile {
+    RelatedFile {
+        path: hit.path,
+        score: round3(hit.score),
+        cochanged_commits: direct_edge
+            .map(|edge| edge.cochanged_commits)
+            .unwrap_or_default(),
+        weighted_cochanges: direct_edge
+            .map(|edge| edge.weighted_cochanges)
+            .unwrap_or_default(),
+        sample_commits: direct_edge
+            .map(|edge| edge.sample_commits.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -7047,6 +7054,44 @@ src/b.rs
         assert_eq!(file.cochanged_commits, 4);
         assert_eq!(file.weighted_cochanges, 1.25);
         assert_eq!(file.sample_commits, vec!["bbbbbbbbbbbb"]);
+    }
+
+    #[test]
+    fn related_pagerank_hit_conversion_preserves_direct_edge_fields() {
+        let edge = CochangeEdge {
+            a: "src/a.rs".to_string(),
+            b: "src/b.rs".to_string(),
+            cochanged_commits: 4,
+            weighted_cochanges: 1.25,
+            sample_commits: vec!["bbbbbbbbbbbb".to_string()],
+        };
+        let file = related_file_from_pagerank_hit(
+            PageRankHit {
+                path: "src/b.rs".to_string(),
+                score: 2.0 / 3.0,
+            },
+            Some(&edge),
+        );
+
+        assert_eq!(file.path, "src/b.rs");
+        assert_eq!(file.score, 0.667);
+        assert_eq!(file.cochanged_commits, 4);
+        assert_eq!(file.weighted_cochanges, 1.25);
+        assert_eq!(file.sample_commits, vec!["bbbbbbbbbbbb"]);
+
+        let file = related_file_from_pagerank_hit(
+            PageRankHit {
+                path: "src/indirect.rs".to_string(),
+                score: 0.25,
+            },
+            None,
+        );
+
+        assert_eq!(file.path, "src/indirect.rs");
+        assert_eq!(file.score, 0.25);
+        assert_eq!(file.cochanged_commits, 0);
+        assert_eq!(file.weighted_cochanges, 0.0);
+        assert!(file.sample_commits.is_empty());
     }
 
     #[test]
