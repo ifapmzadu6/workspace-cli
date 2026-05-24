@@ -502,13 +502,14 @@ struct FallbackLineSearch {
     display_text: String,
     display_char_count: usize,
     display_truncated: bool,
+    capture_display: bool,
     pending_utf8: Vec<u8>,
     pending_line_cr: bool,
     saw_bytes: bool,
 }
 
 impl FallbackLineSearch {
-    fn new(line_number: u64) -> Self {
+    fn with_display(line_number: u64, capture_display: bool) -> Self {
         Self {
             line_number,
             byte_offset: 0,
@@ -518,6 +519,7 @@ impl FallbackLineSearch {
             display_text: String::new(),
             display_char_count: 0,
             display_truncated: false,
+            capture_display,
             pending_utf8: Vec::new(),
             pending_line_cr: false,
             saw_bytes: false,
@@ -4200,7 +4202,7 @@ fn fallback_text_search_file(
         total_matches: 0,
         truncated_match_texts: 0,
     };
-    let mut line = FallbackLineSearch::new(1);
+    let mut line = FallbackLineSearch::with_display(1, max_results > 0);
 
     loop {
         let (bytes_to_consume, reached_line_end) = {
@@ -4244,7 +4246,10 @@ fn fallback_text_search_file(
 
         reader.consume(bytes_to_consume);
         if reached_line_end {
-            line = FallbackLineSearch::new(line.line_number + 1);
+            line = FallbackLineSearch::with_display(
+                line.line_number + 1,
+                result.matches.len() < max_results,
+            );
         }
     }
 
@@ -4375,7 +4380,7 @@ fn fallback_append_display_bytes(line: &mut FallbackLineSearch, bytes: &[u8]) ->
         return Ok(());
     }
 
-    if !line.display_truncated {
+    if line.capture_display && !line.display_truncated {
         let valid_text = std::str::from_utf8(&line.pending_utf8[..valid_len])?;
         line.display_truncated = append_limited_text(
             &mut line.display_text,
@@ -5865,7 +5870,7 @@ rename to new name.txt
 
     #[test]
     fn fallback_query_scan_matches_across_segments() {
-        let mut line = FallbackLineSearch::new(1);
+        let mut line = FallbackLineSearch::with_display(1, true);
         fallback_scan_query(&mut line, b"abc", b"cde");
         line.byte_offset += 3;
 
@@ -5897,6 +5902,25 @@ rename to new name.txt
         assert_eq!(truncated_match_texts, 0);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].path, "valid.txt");
+    }
+
+    #[test]
+    fn fallback_text_search_count_only_still_skips_invalid_utf8_files() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        fs::write(temp.path().join("invalid.bin"), b"needle \xff\n")
+            .expect("file should be written");
+        fs::write(temp.path().join("valid.txt"), "needle valid\n").expect("file should be written");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        let (matches, total_matches, truncated_match_texts) =
+            fallback_text_search(&workspace, "needle", 0).expect("fallback search should work");
+
+        assert_eq!(total_matches, 1);
+        assert_eq!(truncated_match_texts, 0);
+        assert!(matches.is_empty());
     }
 
     #[test]
