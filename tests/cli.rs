@@ -195,6 +195,19 @@ fn search_reports_total_matches_when_results_are_truncated() {
 }
 
 #[test]
+fn search_quotes_read_suggestions_for_paths_that_need_shell_quoting() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    write_file(temp.path(), "space name.txt", "needle\n");
+
+    let search = run_workspace(temp.path(), &["search", "needle", "--json"]);
+    let next = strings_at(&search, &["next_observations"]);
+
+    assert_eq!(search["kind"], "workspace_search");
+    assert_eq!(search["data"]["matches"][0]["path"], "space name.txt");
+    assert!(next.contains(&"workspace read 'space name.txt' --lines 1:1".to_string()));
+}
+
+#[test]
 fn read_rejects_paths_outside_workspace() {
     let workspace = TempDir::new().expect("workspace temp dir should be created");
     let outside = TempDir::new().expect("outside temp dir should be created");
@@ -602,6 +615,23 @@ fn diff_does_not_suggest_reading_deleted_files() {
     assert!(strings_at(&diff, &["data", "files"]).contains(&"kept.txt".to_string()));
     assert!(!next.contains(&"workspace read deleted.txt".to_string()));
     assert!(next.contains(&"workspace read kept.txt".to_string()));
+}
+
+#[test]
+fn diff_quotes_read_suggestions_for_paths_that_need_shell_quoting() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "space name.txt", "old\n");
+    commit_all(root, "initial file with space");
+    write_file(root, "space name.txt", "new\n");
+
+    let diff = run_workspace(root, &["diff", "--summary", "--json"]);
+    let next = strings_at(&diff, &["next_observations"]);
+
+    assert_eq!(diff["kind"], "workspace_diff");
+    assert!(strings_at(&diff, &["data", "files"]).contains(&"space name.txt".to_string()));
+    assert!(next.contains(&"workspace read 'space name.txt'".to_string()));
 }
 
 #[test]

@@ -788,7 +788,7 @@ fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
         .matches
         .iter()
         .take(5)
-        .map(|m| format!("workspace read {} --lines {}:{}", m.path, m.line, m.line))
+        .map(|m| workspace_read_lines_command(&m.path, m.line, m.line))
         .collect();
     let observation = Observation {
         kind: "workspace_search".to_string(),
@@ -943,7 +943,7 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
         .iter()
         .filter(|file| workspace.resolve_path(Path::new(&file.path)).is_file())
         .take(5)
-        .map(|file| format!("workspace read {}", file.path))
+        .map(|file| workspace_read_command(&file.path))
         .collect();
     let observation = Observation {
         kind: "workspace_related".to_string(),
@@ -1016,7 +1016,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
         .iter()
         .filter(|file| workspace.resolve_path(Path::new(&file.path)).is_file())
         .take(5)
-        .map(|file| format!("workspace read {}", file.path))
+        .map(|file| workspace_read_command(&file.path))
         .collect();
     let observation = Observation {
         kind: "workspace_impact".to_string(),
@@ -1148,7 +1148,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
         .iter()
         .filter(|path| workspace.resolve_path(Path::new(path)).is_file())
         .take(5)
-        .map(|path| format!("workspace read {}", path))
+        .map(|path| workspace_read_command(path))
         .collect();
     let observation = Observation {
         kind: "workspace_diff".to_string(),
@@ -1692,11 +1692,11 @@ fn map_evidence(map: &WorkspaceMap) -> Vec<Evidence> {
 fn map_next_observations(map: &WorkspaceMap) -> Vec<String> {
     let mut next = Vec::new();
     if map.structure.docs.iter().any(|path| path == "README.md") {
-        next.push("workspace read README.md".to_string());
+        next.push(workspace_read_command("README.md"));
     }
     for file in map.important_files.iter().take(4) {
         if file.path != "README.md" {
-            next.push(format!("workspace read {}", file.path));
+            next.push(workspace_read_command(&file.path));
         }
     }
     if map.git.is_repo {
@@ -1705,7 +1705,10 @@ fn map_next_observations(map: &WorkspaceMap) -> Vec<String> {
         next.push("workspace index cochange".to_string());
         next.push("workspace impact --diff --by cochange".to_string());
         if let Some(entrypoint) = map.structure.entrypoints.first() {
-            next.push(format!("workspace related {} --by cochange", entrypoint));
+            next.push(format!(
+                "workspace related {} --by cochange",
+                shell_hint(entrypoint)
+            ));
         }
     }
     if let Some(command) = map.commands.get("test") {
@@ -3687,6 +3690,14 @@ fn join_or_none(values: &[String]) -> String {
     }
 }
 
+fn workspace_read_command(path: &str) -> String {
+    format!("workspace read {}", shell_hint(path))
+}
+
+fn workspace_read_lines_command(path: &str, start: u64, end: u64) -> String {
+    format!("{} --lines {start}:{end}", workspace_read_command(path))
+}
+
 fn shell_hint(value: &str) -> String {
     if value
         .chars()
@@ -3694,7 +3705,16 @@ fn shell_hint(value: &str) -> String {
     {
         value.to_string()
     } else {
-        format!("{value:?}")
+        let mut quoted = String::from("'");
+        for ch in value.chars() {
+            if ch == '\'' {
+                quoted.push_str("'\\''");
+            } else {
+                quoted.push(ch);
+            }
+        }
+        quoted.push('\'');
+        quoted
     }
 }
 
@@ -3734,6 +3754,14 @@ mod tests {
         assert!(parse_line_range("3:1").is_err());
         assert!(parse_line_range("0:1").is_err());
         assert!(parse_line_range("abc").is_err());
+    }
+
+    #[test]
+    fn shell_hints_quote_values_for_shell_reuse() {
+        assert_eq!(shell_hint("src/main.rs"), "src/main.rs");
+        assert_eq!(shell_hint("space name.txt"), "'space name.txt'");
+        assert_eq!(shell_hint("weird$path.txt"), "'weird$path.txt'");
+        assert_eq!(shell_hint("quote'name.txt"), "'quote'\\''name.txt'");
     }
 
     #[test]
