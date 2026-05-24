@@ -364,6 +364,28 @@ fn read_truncates_large_content() {
 }
 
 #[test]
+fn read_truncates_large_line_range() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    let content = format!("first\n{}tail\nlast\n", "b".repeat(30_000));
+    write_file(temp.path(), "large.txt", &content);
+
+    let read = run_workspace(
+        temp.path(),
+        &["read", "large.txt", "--lines", "2:2", "--json"],
+    );
+    let returned = read["data"]["content"]
+        .as_str()
+        .expect("read content should be a string");
+
+    assert_eq!(read["kind"], "workspace_read");
+    assert_eq!(read["data"]["lines"], "2:2");
+    assert_eq!(read["truncated"], true);
+    assert!(returned.contains("[output truncated]"));
+    assert!(!returned.contains("tail"));
+    assert!(!returned.contains("last"));
+}
+
+#[test]
 fn read_succeeds_when_operation_log_is_not_writable() {
     let temp = TempDir::new().expect("temp dir should be created");
     write_file(temp.path(), "note.txt", "hello\n");

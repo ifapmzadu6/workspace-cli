@@ -486,6 +486,11 @@ struct ReadData {
     content: String,
 }
 
+struct ReadContent {
+    content: String,
+    truncated: bool,
+}
+
 #[derive(Serialize)]
 struct DiffData {
     is_repo: bool,
@@ -1124,8 +1129,6 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
 
 fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
     let path = workspace.resolve_existing_workspace_path(&args.path)?;
-    let full_content = fs::read_to_string(&path)
-        .with_context(|| format!("failed to read text file {}", path.display()))?;
     let rel_path = workspace.relative(&path);
     let range = args
         .lines
@@ -1133,33 +1136,24 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
         .map(parse_line_range)
         .transpose()
         .context("invalid --lines range")?;
-    let (selected_content, line_label) = if let Some((start, end)) = range {
-        let selected = full_content
-            .lines()
-            .enumerate()
-            .filter_map(|(idx, line)| {
-                let line_number = idx + 1;
-                (line_number >= start && line_number <= end).then_some(line)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        (selected, Some(format!("{start}:{end}")))
+    let line_label = range.map(|(start, end)| format!("{start}:{end}"));
+    let read_content = if let Some((start, end)) = range {
+        read_line_range_bounded(&path, start, end)
     } else {
-        (full_content, None)
-    };
-    let truncated = selected_content.chars().count() > MAX_READ_CONTENT;
-    let content = truncate_string(&selected_content, MAX_READ_CONTENT);
+        read_text_prefix_bounded(&path)
+    }
+    .with_context(|| format!("failed to read text file {}", path.display()))?;
 
     let data = ReadData {
         path: rel_path.clone(),
         lines: line_label.clone(),
-        content,
+        content: read_content.content,
     };
     let mut summary = match &data.lines {
         Some(lines) => format!("read {} lines {}", data.path, lines),
         None => format!("read {}", data.path),
     };
-    if truncated {
+    if read_content.truncated {
         summary.push_str(" (truncated)");
     }
     let observation = Observation {
@@ -1172,7 +1166,7 @@ fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
             lines: line_label,
             reason: "requested file content".to_string(),
         }],
-        truncated,
+        truncated: read_content.truncated,
         next_observations: vec![
             format!("workspace search {}", shell_hint(&rel_path)),
             "workspace diff --summary".to_string(),
@@ -3377,6 +3371,106 @@ fn parse_line_range(value: &str) -> Result<(usize, usize)> {
         bail!("line range must be positive and START <= END");
     }
     Ok((start, end))
+}
+
+fn read_text_prefix_bounded(path: &Path) -> Result<ReadContent> {
+    let mut file = fs::File::open(path)?;
+    let mut output = String::new();
+    let mut char_count = 0usize;
+    let mut pending = Vec::new();
+    let mut buffer = [0u8; 8192];
+    let mut truncated = false;
+
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        pending.extend_from_slice(&buffer[..bytes_read]);
+
+        let valid_len = match std::str::from_utf8(&pending) {
+            Ok(_) => pending.len(),
+            Err(error) if error.error_len().is_none() => error.valid_up_to(),
+            Err(error) => bail!("file is not valid UTF-8: {error}"),
+        };
+
+        if valid_len > 0 {
+            let valid_text = std::str::from_utf8(&pending[..valid_len])?.to_string();
+            pending.drain(..valid_len);
+            if append_bounded_text(&mut output, &mut char_count, &valid_text) {
+                truncated = true;
+                break;
+            }
+        }
+    }
+
+    if !truncated && !pending.is_empty() {
+        match std::str::from_utf8(&pending) {
+            Ok(text) => {
+                truncated = append_bounded_text(&mut output, &mut char_count, text);
+            }
+            Err(error) => bail!("file is not valid UTF-8: {error}"),
+        }
+    }
+
+    Ok(ReadContent {
+        content: output,
+        truncated,
+    })
+}
+
+fn read_line_range_bounded(path: &Path, start: usize, end: usize) -> Result<ReadContent> {
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut output = String::new();
+    let mut char_count = 0usize;
+    let mut line = String::new();
+    let mut line_number = 0usize;
+    let mut wrote_line = false;
+    let mut truncated = false;
+
+    loop {
+        line.clear();
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            break;
+        }
+        line_number += 1;
+        if line_number < start {
+            continue;
+        }
+        if line_number > end {
+            break;
+        }
+
+        if wrote_line && append_bounded_text(&mut output, &mut char_count, "\n") {
+            truncated = true;
+            break;
+        }
+        let selected_line = line.trim_end_matches('\n').trim_end_matches('\r');
+        if append_bounded_text(&mut output, &mut char_count, selected_line) {
+            truncated = true;
+            break;
+        }
+        wrote_line = true;
+    }
+
+    Ok(ReadContent {
+        content: output,
+        truncated,
+    })
+}
+
+fn append_bounded_text(output: &mut String, char_count: &mut usize, text: &str) -> bool {
+    for ch in text.chars() {
+        if *char_count >= MAX_READ_CONTENT {
+            output.push_str("\n[output truncated]\n");
+            return true;
+        }
+        output.push(ch);
+        *char_count += 1;
+    }
+    false
 }
 
 fn extract_patch_files(patch_content: &str) -> Vec<String> {
