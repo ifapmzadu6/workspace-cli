@@ -3391,30 +3391,28 @@ fn rank_cochange_impact(
             continue;
         }
 
-        let files = commit
-            .files
-            .iter()
-            .map(|file| normalize_repo_path(file))
-            .filter(|file| should_include_repo_file(file))
-            .collect::<BTreeSet<_>>();
-        let matched_seed_count = files.intersection(&seed_files).count();
-
-        if matched_seed_count == 0 {
-            continue;
-        }
         commits_matched += 1;
 
-        if files.len() > max_files_per_commit.max(1) {
+        let Some(files) = bounded_observable_commit_files(commit, max_files_per_commit.max(1))
+        else {
             ignored_large_commits += 1;
             continue;
-        }
+        };
 
+        let matched_seed_count = files
+            .iter()
+            .filter(|file| seed_files.contains(*file))
+            .count();
         let file_count = files.len().max(2);
         let recency_weight = 1.0 / (1.0 + rank as f64 / 50.0);
         let size_weight = 1.0 / (file_count as f64 + 1.0).ln();
         let seed_weight = 1.0 + (matched_seed_count.saturating_sub(1) as f64 * 0.25);
         let weight = recency_weight * size_weight * seed_weight;
-        let matched_seeds = files.intersection(&seed_files).cloned().collect::<Vec<_>>();
+        let matched_seeds = files
+            .iter()
+            .filter(|file| seed_files.contains(*file))
+            .cloned()
+            .collect::<Vec<_>>();
 
         for file in files {
             if seed_files.contains(&file) {
@@ -6488,6 +6486,26 @@ src/b.rs
         assert_eq!(ranking.commits_matched, 1);
         assert_eq!(ranking.ignored_large_commits, 1);
         assert!(ranking.impacted.is_empty());
+    }
+
+    #[test]
+    fn impact_ranking_counts_unique_files_for_broad_commits() {
+        let commits = vec![GitCommitFiles {
+            hash: "aaaaaaaaaaaa".to_string(),
+            files: vec![
+                "src/a.rs".to_string(),
+                "src/b.rs".to_string(),
+                "src/b.rs".to_string(),
+            ],
+        }];
+        let seeds = vec!["src/a.rs".to_string()];
+
+        let ranking = rank_cochange_impact(&commits, &seeds, 2, 10);
+
+        assert_eq!(ranking.commits_matched, 1);
+        assert_eq!(ranking.ignored_large_commits, 0);
+        assert_eq!(ranking.impacted.len(), 1);
+        assert_eq!(ranking.impacted[0].path, "src/b.rs");
     }
 
     #[test]
