@@ -1170,16 +1170,19 @@ fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> 
 fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<()> {
     let data = observed_index_cochange(workspace, &args)?;
     let observation = index_cochange_observation(data);
-
-    append_log(
+    output_recorded_observation(
         workspace,
-        LOG_KIND_OBSERVE,
-        LOG_OP_INDEX_COCHANGE,
-        &observation.scope,
-        &observation.summary,
-        None,
-    )?;
-    output_observation(args.json, &observation, print_index_cochange)
+        args.json,
+        OperationLogRecord {
+            kind: LOG_KIND_OBSERVE,
+            op: LOG_OP_INDEX_COCHANGE,
+            scope: &observation.scope,
+            summary: &observation.summary,
+            transaction_id: None,
+        },
+        &observation,
+        print_index_cochange,
+    )
 }
 
 fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
@@ -1245,18 +1248,23 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         &patch.files_changed,
     );
     let observation = patch_observation(data, &patch.files_changed);
+    let log_summary = args
+        .description
+        .unwrap_or_else(|| observation.summary.clone());
 
-    append_log(
+    output_recorded_observation(
         workspace,
-        LOG_KIND_CHANGE,
-        LOG_OP_PATCH,
-        &observation.scope,
-        &args
-            .description
-            .unwrap_or_else(|| observation.summary.clone()),
-        Some(&patch.transaction_id),
-    )?;
-    output_observation(args.json, &observation, print_patch)
+        args.json,
+        OperationLogRecord {
+            kind: LOG_KIND_CHANGE,
+            op: LOG_OP_PATCH,
+            scope: &observation.scope,
+            summary: &log_summary,
+            transaction_id: Some(&patch.transaction_id),
+        },
+        &observation,
+        print_patch,
+    )
 }
 
 fn apply_patch_transaction(
@@ -1357,15 +1365,19 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
     let run = execute_run_command(workspace, &args.command)?;
     let observation = run_observation(run);
 
-    append_log(
+    output_recorded_observation(
         workspace,
-        LOG_KIND_VERIFY,
-        LOG_OP_RUN,
-        &args.command,
-        &observation.summary,
-        None,
-    )?;
-    output_observation(args.json, &observation, print_run)
+        args.json,
+        OperationLogRecord {
+            kind: LOG_KIND_VERIFY,
+            op: LOG_OP_RUN,
+            scope: &args.command,
+            summary: &observation.summary,
+            transaction_id: None,
+        },
+        &observation,
+        print_run,
+    )
 }
 
 fn execute_run_command(workspace: &Workspace, command_text: &str) -> Result<ObservedRun> {
@@ -1412,15 +1424,19 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
     );
     let observation = rollback_observation(data, &rollback.files_changed);
 
-    append_log(
+    output_recorded_observation(
         workspace,
-        LOG_KIND_CHANGE,
-        LOG_OP_ROLLBACK,
-        &args.transaction_id,
-        &observation.summary,
-        Some(&rollback.rollback_transaction_id),
-    )?;
-    output_observation(args.json, &observation, print_rollback)
+        args.json,
+        OperationLogRecord {
+            kind: LOG_KIND_CHANGE,
+            op: LOG_OP_ROLLBACK,
+            scope: &args.transaction_id,
+            summary: &observation.summary,
+            transaction_id: Some(&rollback.rollback_transaction_id),
+        },
+        &observation,
+        print_rollback,
+    )
 }
 
 fn apply_rollback_transaction(
@@ -5741,6 +5757,36 @@ where
     output_observation(json, observation, print_human)
 }
 
+struct OperationLogRecord<'a> {
+    kind: &'a str,
+    op: &'a str,
+    scope: &'a str,
+    summary: &'a str,
+    transaction_id: Option<&'a str>,
+}
+
+fn output_recorded_observation<T, F>(
+    workspace: &Workspace,
+    json: bool,
+    record: OperationLogRecord<'_>,
+    observation: &Observation<T>,
+    print_human: F,
+) -> Result<()>
+where
+    T: Serialize,
+    F: FnOnce(&Observation<T>) -> Result<()>,
+{
+    append_log(
+        workspace,
+        record.kind,
+        record.op,
+        record.scope,
+        record.summary,
+        record.transaction_id,
+    )?;
+    output_observation(json, observation, print_human)
+}
+
 fn ensure_log_writable(workspace: &Workspace) -> Result<()> {
     open_log_for_append(workspace).map(|_| ())
 }
@@ -8314,6 +8360,51 @@ rename to new name.txt
         assert_eq!(log.entries[0].op, LOG_OP_STATUS);
         assert_eq!(log.entries[0].scope, LOG_FILE);
         assert_eq!(log.entries[0].summary, "test summary");
+    }
+
+    #[test]
+    fn output_recorded_observation_preserves_log_kind_and_transaction() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        let observation = Observation {
+            kind: WORKSPACE_LOG_KIND.to_string(),
+            scope: LOG_FILE.to_string(),
+            summary: "observation summary".to_string(),
+            data: LogData {
+                log_path: LOG_FILE.to_string(),
+                omitted_lines: 0,
+                entries: vec![],
+            },
+            evidence: vec![],
+            truncated: false,
+            next_observations: vec![],
+        };
+
+        output_recorded_observation(
+            &workspace,
+            false,
+            OperationLogRecord {
+                kind: LOG_KIND_CHANGE,
+                op: LOG_OP_PATCH,
+                scope: "change.patch",
+                summary: "custom summary",
+                transaction_id: Some("tx-1"),
+            },
+            &observation,
+            |_| Ok(()),
+        )
+        .expect("recorded observation should be logged and output");
+
+        let log = read_log(&workspace, 10).expect("log should be readable");
+        assert_eq!(log.entries.len(), 1);
+        assert_eq!(log.entries[0].kind, LOG_KIND_CHANGE);
+        assert_eq!(log.entries[0].op, LOG_OP_PATCH);
+        assert_eq!(log.entries[0].scope, "change.patch");
+        assert_eq!(log.entries[0].summary, "custom summary");
+        assert_eq!(log.entries[0].transaction_id.as_deref(), Some("tx-1"));
     }
 
     #[test]
