@@ -1173,13 +1173,11 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
     output_recorded_observation(
         workspace,
         args.json,
-        OperationLogRecord {
-            kind: LOG_KIND_OBSERVE,
-            op: LOG_OP_INDEX_COCHANGE,
-            scope: &observation.scope,
-            summary: &observation.summary,
-            transaction_id: None,
-        },
+        OperationLogRecord::observe(
+            LOG_OP_INDEX_COCHANGE,
+            &observation.scope,
+            &observation.summary,
+        ),
         &observation,
         print_index_cochange,
     )
@@ -1255,13 +1253,12 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
     output_recorded_observation(
         workspace,
         args.json,
-        OperationLogRecord {
-            kind: LOG_KIND_CHANGE,
-            op: LOG_OP_PATCH,
-            scope: &observation.scope,
-            summary: &log_summary,
-            transaction_id: Some(&patch.transaction_id),
-        },
+        OperationLogRecord::change(
+            LOG_OP_PATCH,
+            &observation.scope,
+            &log_summary,
+            &patch.transaction_id,
+        ),
         &observation,
         print_patch,
     )
@@ -1368,13 +1365,7 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
     output_recorded_observation(
         workspace,
         args.json,
-        OperationLogRecord {
-            kind: LOG_KIND_VERIFY,
-            op: LOG_OP_RUN,
-            scope: &args.command,
-            summary: &observation.summary,
-            transaction_id: None,
-        },
+        OperationLogRecord::verify(LOG_OP_RUN, &args.command, &observation.summary),
         &observation,
         print_run,
     )
@@ -1427,13 +1418,12 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
     output_recorded_observation(
         workspace,
         args.json,
-        OperationLogRecord {
-            kind: LOG_KIND_CHANGE,
-            op: LOG_OP_ROLLBACK,
-            scope: &args.transaction_id,
-            summary: &observation.summary,
-            transaction_id: Some(&rollback.rollback_transaction_id),
-        },
+        OperationLogRecord::change(
+            LOG_OP_ROLLBACK,
+            &args.transaction_id,
+            &observation.summary,
+            &rollback.rollback_transaction_id,
+        ),
         &observation,
         print_rollback,
     )
@@ -5765,6 +5755,38 @@ struct OperationLogRecord<'a> {
     transaction_id: Option<&'a str>,
 }
 
+impl<'a> OperationLogRecord<'a> {
+    fn observe(op: &'a str, scope: &'a str, summary: &'a str) -> Self {
+        Self {
+            kind: LOG_KIND_OBSERVE,
+            op,
+            scope,
+            summary,
+            transaction_id: None,
+        }
+    }
+
+    fn change(op: &'a str, scope: &'a str, summary: &'a str, transaction_id: &'a str) -> Self {
+        Self {
+            kind: LOG_KIND_CHANGE,
+            op,
+            scope,
+            summary,
+            transaction_id: Some(transaction_id),
+        }
+    }
+
+    fn verify(op: &'a str, scope: &'a str, summary: &'a str) -> Self {
+        Self {
+            kind: LOG_KIND_VERIFY,
+            op,
+            scope,
+            summary,
+            transaction_id: None,
+        }
+    }
+}
+
 fn output_recorded_observation<T, F>(
     workspace: &Workspace,
     json: bool,
@@ -8386,13 +8408,7 @@ rename to new name.txt
         output_recorded_observation(
             &workspace,
             false,
-            OperationLogRecord {
-                kind: LOG_KIND_CHANGE,
-                op: LOG_OP_PATCH,
-                scope: "change.patch",
-                summary: "custom summary",
-                transaction_id: Some("tx-1"),
-            },
+            OperationLogRecord::change(LOG_OP_PATCH, "change.patch", "custom summary", "tx-1"),
             &observation,
             |_| Ok(()),
         )
@@ -8405,6 +8421,30 @@ rename to new name.txt
         assert_eq!(log.entries[0].scope, "change.patch");
         assert_eq!(log.entries[0].summary, "custom summary");
         assert_eq!(log.entries[0].transaction_id.as_deref(), Some("tx-1"));
+    }
+
+    #[test]
+    fn operation_log_record_constructors_preserve_log_contract() {
+        let observe = OperationLogRecord::observe(LOG_OP_STATUS, ".", "status summary");
+        assert_eq!(observe.kind, LOG_KIND_OBSERVE);
+        assert_eq!(observe.op, LOG_OP_STATUS);
+        assert_eq!(observe.scope, ".");
+        assert_eq!(observe.summary, "status summary");
+        assert!(observe.transaction_id.is_none());
+
+        let change = OperationLogRecord::change(LOG_OP_PATCH, "change.patch", "patched", "tx-1");
+        assert_eq!(change.kind, LOG_KIND_CHANGE);
+        assert_eq!(change.op, LOG_OP_PATCH);
+        assert_eq!(change.scope, "change.patch");
+        assert_eq!(change.summary, "patched");
+        assert_eq!(change.transaction_id, Some("tx-1"));
+
+        let verify = OperationLogRecord::verify(LOG_OP_RUN, "cargo test", "command exited with 0");
+        assert_eq!(verify.kind, LOG_KIND_VERIFY);
+        assert_eq!(verify.op, LOG_OP_RUN);
+        assert_eq!(verify.scope, "cargo test");
+        assert_eq!(verify.summary, "command exited with 0");
+        assert!(verify.transaction_id.is_none());
     }
 
     #[test]
