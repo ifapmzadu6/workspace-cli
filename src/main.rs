@@ -3362,9 +3362,9 @@ fn rank_cochange_impact(
             .map(|file| normalize_repo_path(file))
             .filter(|file| should_include_repo_file(file))
             .collect::<BTreeSet<_>>();
-        let matched_seeds = files.intersection(&seed_files).cloned().collect::<Vec<_>>();
+        let matched_seed_count = files.intersection(&seed_files).count();
 
-        if matched_seeds.is_empty() {
+        if matched_seed_count == 0 {
             continue;
         }
         commits_matched += 1;
@@ -3377,8 +3377,9 @@ fn rank_cochange_impact(
         let file_count = files.len().max(2);
         let recency_weight = 1.0 / (1.0 + rank as f64 / 50.0);
         let size_weight = 1.0 / (file_count as f64 + 1.0).ln();
-        let seed_weight = 1.0 + (matched_seeds.len().saturating_sub(1) as f64 * 0.25);
+        let seed_weight = 1.0 + (matched_seed_count.saturating_sub(1) as f64 * 0.25);
         let weight = recency_weight * size_weight * seed_weight;
+        let matched_seeds = files.intersection(&seed_files).cloned().collect::<Vec<_>>();
 
         for file in files {
             if seed_files.contains(&file) {
@@ -6388,6 +6389,25 @@ src/b.rs
         assert_eq!(ranking.impacted.len(), 1);
         assert_eq!(ranking.impacted[0].path, "src/b.rs");
         assert_eq!(ranking.impacted[0].cochanged_commits, 2);
+    }
+
+    #[test]
+    fn ignores_large_impact_commits_after_matching_seeds() {
+        let commits = vec![GitCommitFiles {
+            hash: "aaaaaaaaaaaa".to_string(),
+            files: vec![
+                "src/a.rs".to_string(),
+                "src/b.rs".to_string(),
+                "src/c.rs".to_string(),
+            ],
+        }];
+        let seeds = vec!["src/a.rs".to_string()];
+
+        let ranking = rank_cochange_impact(&commits, &seeds, 2, 10);
+
+        assert_eq!(ranking.commits_matched, 1);
+        assert_eq!(ranking.ignored_large_commits, 1);
+        assert!(ranking.impacted.is_empty());
     }
 
     #[test]
