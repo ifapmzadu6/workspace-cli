@@ -394,6 +394,75 @@ JSON
     assert_eq!(impact["data"]["impacted"][0]["path"], "src/b.rs");
 }
 
+#[cfg(unix)]
+#[test]
+fn related_and_impact_skip_missing_files_in_read_suggestions() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "src/a.rs", "a\n");
+    write_file(root, "src/b.rs", "b\n");
+    commit_all(root, "a with b");
+
+    let bin_dir = TempDir::new().expect("bin temp dir should be created");
+    let fake_related = bin_dir.path().join("fake-related");
+    write_executable(
+        &fake_related,
+        r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "related 0.0.0-test"
+  exit 0
+fi
+cat <<'JSON'
+{
+  "target": "src/a.rs",
+  "mode": "direct:on-demand:GitCli",
+  "related": [
+    {
+      "path": "src/missing.rs",
+      "score": 0.90,
+      "cochanges": 3,
+      "weight": 1.8,
+      "evidence": [{"hash": "aaaaaaaaaaaaaaaa"}]
+    },
+    {
+      "path": "src/b.rs",
+      "score": 0.75,
+      "cochanges": 2,
+      "weight": 1.5,
+      "evidence": [{"hash": "bbbbbbbbbbbbbbbb"}]
+    }
+  ]
+}
+JSON
+"#,
+    );
+
+    let related = run_workspace_with_related_bin(
+        root,
+        &["related", "src/a.rs", "--by", "cochange", "--json"],
+        &fake_related,
+    );
+    let related_paths = paths_at(&related, &["data", "related"]);
+    let related_next = strings_at(&related, &["next_observations"]);
+    assert!(related_paths.contains(&"src/missing.rs".to_string()));
+    assert!(related_paths.contains(&"src/b.rs".to_string()));
+    assert!(!related_next.contains(&"workspace read src/missing.rs".to_string()));
+    assert!(related_next.contains(&"workspace read src/b.rs".to_string()));
+
+    append_file(root, "src/a.rs", "local change\n");
+    let impact = run_workspace_with_related_bin(
+        root,
+        &["impact", "--diff", "--by", "cochange", "--json"],
+        &fake_related,
+    );
+    let impacted_paths = paths_at(&impact, &["data", "impacted"]);
+    let impact_next = strings_at(&impact, &["next_observations"]);
+    assert!(impacted_paths.contains(&"src/missing.rs".to_string()));
+    assert!(impacted_paths.contains(&"src/b.rs".to_string()));
+    assert!(!impact_next.contains(&"workspace read src/missing.rs".to_string()));
+    assert!(impact_next.contains(&"workspace read src/b.rs".to_string()));
+}
+
 #[test]
 fn patch_run_log_diff_and_rollback_cover_transaction_flow() {
     let temp = init_git_repo();

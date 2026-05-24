@@ -941,6 +941,7 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
     let next_observations = data
         .related
         .iter()
+        .filter(|file| workspace.resolve_path(Path::new(&file.path)).is_file())
         .take(5)
         .map(|file| format!("workspace read {}", file.path))
         .collect();
@@ -1013,6 +1014,7 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
     let next_observations = data
         .impacted
         .iter()
+        .filter(|file| workspace.resolve_path(Path::new(&file.path)).is_file())
         .take(5)
         .map(|file| format!("workspace read {}", file.path))
         .collect();
