@@ -3645,6 +3645,15 @@ fn personalized_pagerank(
         return vec![];
     }
 
+    let outbound_weights = graph
+        .iter()
+        .map(|(node, neighbors)| {
+            (
+                node.clone(),
+                neighbors.iter().map(|(_, weight)| *weight).sum::<f64>(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let seed_probability = 1.0 / active_seeds.len() as f64;
     let mut personalization = BTreeMap::<String, f64>::new();
     for seed in &active_seeds {
@@ -3666,7 +3675,7 @@ fn personalized_pagerank(
                 continue;
             }
 
-            let total_weight = neighbors.iter().map(|(_, weight)| *weight).sum::<f64>();
+            let total_weight = outbound_weights.get(node).copied().unwrap_or_default();
             if total_weight == 0.0 {
                 dangling_rank += node_rank;
                 continue;
