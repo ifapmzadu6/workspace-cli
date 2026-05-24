@@ -398,6 +398,7 @@ struct StatusData {
     git: GitSummary,
     index_status: IndexStatusData,
     recent_operations: Vec<LogEntry>,
+    recent_operations_omitted: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     recent_operations_error: Option<String>,
 }
@@ -526,7 +527,14 @@ struct LogEntry {
 #[derive(Serialize)]
 struct LogData {
     log_path: String,
+    omitted_lines: usize,
     entries: Vec<LogEntry>,
+}
+
+#[derive(Default)]
+struct LogWindow {
+    entries: Vec<LogEntry>,
+    omitted_lines: usize,
 }
 
 #[derive(Serialize)]
@@ -748,24 +756,29 @@ fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
 fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
     let git = git_summary(workspace)?;
     let index_status = cochange_index_status(workspace);
-    let (recent_operations, recent_operations_error) = match read_log(workspace, 10) {
-        Ok(entries) => (entries, None),
-        Err(error) => (Vec::new(), Some(format!("{error:#}"))),
+    let (recent_operations, recent_operations_omitted, recent_operations_error) =
+        match read_log(workspace, 10) {
+            Ok(window) => (window.entries, window.omitted_lines, None),
+            Err(error) => (Vec::new(), 0, Some(format!("{error:#}"))),
+        };
+    let recent_operations_truncated = recent_operations_omitted > 0;
+    let truncated = git.omitted_files() || recent_operations_truncated;
+    let log_note = if recent_operations_error.is_some() {
+        ", operation log unreadable"
+    } else if recent_operations_truncated {
+        ", recent operations truncated"
+    } else {
+        ""
     };
     let data = StatusData {
         root: workspace.root.to_string_lossy().into_owned(),
         git,
         index_status,
         recent_operations,
+        recent_operations_omitted,
         recent_operations_error,
     };
-    let truncated = data.git.omitted_files();
     let mut summary = if data.git.is_repo {
-        let log_note = if data.recent_operations_error.is_some() {
-            ", operation log unreadable"
-        } else {
-            ""
-        };
         format!(
             "branch {}, {} dirty file(s), {} untracked file(s), index {}{}",
             data.git.branch.as_deref().unwrap_or("unknown"),
@@ -1351,18 +1364,27 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
 }
 
 fn cmd_log(workspace: &Workspace, args: LogArgs) -> Result<()> {
-    let entries = read_log(workspace, args.limit)?;
+    let window = read_log(workspace, args.limit)?;
     let data = LogData {
         log_path: workspace.relative(&workspace.log_path()),
-        entries,
+        omitted_lines: window.omitted_lines,
+        entries: window.entries,
     };
+    let truncated = data.omitted_lines > 0;
+    let mut summary = format!("{} operation(s)", data.entries.len());
+    if truncated {
+        summary.push_str(&format!(
+            " ({} older log line(s) omitted)",
+            data.omitted_lines
+        ));
+    }
     let observation = Observation {
         kind: "workspace_log".to_string(),
         scope: data.log_path.clone(),
-        summary: format!("{} operation(s)", data.entries.len()),
+        summary,
         data,
         evidence: vec![],
-        truncated: false,
+        truncated,
         next_observations: vec!["workspace status".to_string()],
     };
     output_observation(args.json, &observation, print_log)
@@ -3544,10 +3566,10 @@ fn open_log_for_append(workspace: &Workspace) -> Result<fs::File> {
         .with_context(|| format!("failed to open {}", workspace.log_path().display()))
 }
 
-fn read_log(workspace: &Workspace, limit: usize) -> Result<Vec<LogEntry>> {
+fn read_log(workspace: &Workspace, limit: usize) -> Result<LogWindow> {
     let path = workspace.log_path();
     if !path.exists() {
-        return Ok(vec![]);
+        return Ok(LogWindow::default());
     }
     if !path.is_file() {
         bail!("failed to read log {}: not a file", path.display());
@@ -3558,11 +3580,12 @@ fn read_log(workspace: &Workspace, limit: usize) -> Result<Vec<LogEntry>> {
         .with_context(|| format!("failed to parse operation log {}", path.display()))
 }
 
-fn read_log_entries<R: BufRead>(reader: R, limit: usize) -> Result<Vec<LogEntry>> {
+fn read_log_entries<R: BufRead>(reader: R, limit: usize) -> Result<LogWindow> {
     if limit == 0 {
-        return Ok(vec![]);
+        return Ok(LogWindow::default());
     }
 
+    let mut non_empty_lines = 0usize;
     let mut window = VecDeque::new();
     for (idx, line) in reader.lines().enumerate() {
         let line =
@@ -3570,13 +3593,18 @@ fn read_log_entries<R: BufRead>(reader: R, limit: usize) -> Result<Vec<LogEntry>
         if line.trim().is_empty() {
             continue;
         }
+        non_empty_lines += 1;
         if window.len() == limit {
             window.pop_front();
         }
         window.push_back((idx + 1, line));
     }
 
-    parse_log_entries(window)
+    let omitted_lines = non_empty_lines.saturating_sub(window.len());
+    Ok(LogWindow {
+        entries: parse_log_entries(window)?,
+        omitted_lines,
+    })
 }
 
 fn parse_log_entries<I>(lines: I) -> Result<Vec<LogEntry>>
@@ -3853,6 +3881,12 @@ fn print_log(observation: &Observation<LogData>) -> Result<()> {
             entry.timestamp_unix_ms, entry.kind, entry.op, entry.scope, entry.summary
         );
     }
+    if observation.data.omitted_lines > 0 {
+        println!(
+            "... {} older log line(s) omitted",
+            observation.data.omitted_lines
+        );
+    }
     Ok(())
 }
 
@@ -4111,20 +4145,22 @@ not json
 {\"id\":\"op-1\",\"timestamp_unix_ms\":1,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"one\",\"transaction_id\":null}
 {\"id\":\"op-2\",\"timestamp_unix_ms\":2,\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"two\",\"transaction_id\":null}
 ";
-        let entries =
+        let window =
             read_log_entries(std::io::Cursor::new(log), 2).expect("log window should parse");
 
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].id, "op-1");
-        assert_eq!(entries[1].id, "op-2");
+        assert_eq!(window.entries.len(), 2);
+        assert_eq!(window.omitted_lines, 1);
+        assert_eq!(window.entries[0].id, "op-1");
+        assert_eq!(window.entries[1].id, "op-2");
     }
 
     #[test]
     fn zero_log_limit_skips_parsing() {
-        let entries = read_log_entries(std::io::Cursor::new("not json\n"), 0)
+        let window = read_log_entries(std::io::Cursor::new("not json\n"), 0)
             .expect("zero limit should parse");
 
-        assert!(entries.is_empty());
+        assert!(window.entries.is_empty());
+        assert_eq!(window.omitted_lines, 0);
     }
 
     #[test]

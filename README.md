@@ -347,6 +347,8 @@ Future versions can infer relevant tests from changed files or symbols.
 Shows operations performed against the workspace.
 Log entry `scope` and `summary` fields are bounded so long commands or manual
 descriptions do not make later status/log observations unwieldy.
+When `--limit` omits older log lines, the observation is marked as `truncated`
+and reports the omitted line count.
 
 ```sh
 workspace log

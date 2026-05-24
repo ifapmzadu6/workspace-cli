@@ -1613,9 +1613,50 @@ not json
         .as_array()
         .expect("log entries should be an array");
 
+    assert_eq!(log["truncated"], true);
+    assert_eq!(log["data"]["omitted_lines"], 2);
+    assert!(
+        log["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("older log line")
+    );
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0]["id"], "op-2");
     assert_eq!(entries[1]["id"], "op-3");
+}
+
+#[test]
+fn status_reports_omitted_recent_operations() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "README.md", "# demo\n");
+    commit_all(root, "initial commit");
+
+    let mut log = String::new();
+    for index in 0..11 {
+        log.push_str(&format!(
+            "{{\"id\":\"op-{index}\",\"timestamp_unix_ms\":{index},\"kind\":\"observe\",\"op\":\"status\",\"scope\":\".\",\"summary\":\"entry {index}\",\"transaction_id\":null}}\n"
+        ));
+    }
+    write_file(root, ".workspace/log.jsonl", &log);
+
+    let status = run_workspace(root, &["status", "--json"]);
+    let entries = status["data"]["recent_operations"]
+        .as_array()
+        .expect("recent operations should be an array");
+
+    assert_eq!(status["kind"], "workspace_status");
+    assert_eq!(status["truncated"], true);
+    assert_eq!(status["data"]["recent_operations_omitted"], 1);
+    assert_eq!(entries.len(), 10);
+    assert_eq!(entries[0]["id"], "op-1");
+    assert!(
+        status["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("recent operations truncated")
+    );
 }
 
 fn paths_at(value: &Value, path: &[&str]) -> Vec<String> {
