@@ -1397,13 +1397,16 @@ fn run_marks_large_output_as_truncated() {
         temp.path(),
         &[
             "run",
-            "python3 -c \"import sys; sys.stdout.write('a' * 30000)\"",
+            "python3 -c \"import sys; sys.stdout.write('a' * 300000); sys.stderr.write('b' * 300000)\"",
             "--json",
         ],
     );
     let stdout = run["data"]["stdout"]
         .as_str()
         .expect("stdout should be a string");
+    let stderr = run["data"]["stderr"]
+        .as_str()
+        .expect("stderr should be a string");
 
     assert_eq!(run["kind"], "workspace_run");
     assert_eq!(run["truncated"], true);
@@ -1414,7 +1417,9 @@ fn run_marks_large_output_as_truncated() {
             .contains("output truncated")
     );
     assert!(stdout.len() < 30_000);
+    assert!(stderr.len() < 30_000);
     assert!(stdout.contains("[output truncated]"));
+    assert!(stderr.contains("[output truncated]"));
 }
 
 #[test]

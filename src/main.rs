@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ffi::OsStr;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -512,6 +512,11 @@ struct RunData {
     duration_ms: u128,
     stdout: String,
     stderr: String,
+}
+
+struct CapturedOutput {
+    text: String,
+    truncated: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -1336,26 +1341,41 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
 fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
     ensure_log_writable(workspace)?;
     let start = Instant::now();
-    let output = shell_command(&args.command)
+    let mut command = shell_command(&args.command);
+    let mut child = command
         .current_dir(&workspace.root)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
+        .spawn()
         .with_context(|| format!("failed to run command {:?}", args.command))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture command stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("failed to capture command stderr"))?;
+    let stdout_reader = std::thread::spawn(move || read_captured_output(stdout));
+    let stderr_reader = std::thread::spawn(move || read_captured_output(stderr));
+    let status = child
+        .wait()
+        .with_context(|| format!("failed to wait for command {:?}", args.command))?;
     let duration_ms = start.elapsed().as_millis();
-    let stdout_text = String::from_utf8_lossy(&output.stdout);
-    let stderr_text = String::from_utf8_lossy(&output.stderr);
-    let truncated = stdout_text.chars().count() > MAX_CAPTURED_OUTPUT
-        || stderr_text.chars().count() > MAX_CAPTURED_OUTPUT;
-    let stdout = truncate_string(stdout_text.as_ref(), MAX_CAPTURED_OUTPUT);
-    let stderr = truncate_string(stderr_text.as_ref(), MAX_CAPTURED_OUTPUT);
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| anyhow!("stdout reader thread panicked"))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("stderr reader thread panicked"))??;
+    let truncated = stdout.truncated || stderr.truncated;
     let data = RunData {
         command: args.command.clone(),
         cwd: workspace.root.to_string_lossy().into_owned(),
-        exit_code: output.status.code(),
+        exit_code: status.code(),
         duration_ms,
-        stdout,
-        stderr,
+        stdout: stdout.text,
+        stderr: stderr.text,
     };
     let mut summary = format!(
         "command exited with {} in {}ms",
@@ -3549,6 +3569,36 @@ fn shell_command(command: &str) -> Command {
         cmd.args(["-c", command]);
         cmd
     }
+}
+
+fn read_captured_output<R: Read>(mut reader: R) -> Result<CapturedOutput> {
+    let mut stored = Vec::new();
+    let mut buffer = [0u8; 8192];
+    let mut truncated = false;
+
+    loop {
+        let bytes_read = reader
+            .read(&mut buffer)
+            .context("failed to read command output")?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let remaining = MAX_CAPTURED_OUTPUT.saturating_sub(stored.len());
+        if remaining > 0 {
+            let bytes_to_store = remaining.min(bytes_read);
+            stored.extend_from_slice(&buffer[..bytes_to_store]);
+        }
+        if bytes_read > remaining {
+            truncated = true;
+        }
+    }
+
+    let mut text = String::from_utf8_lossy(&stored).into_owned();
+    if truncated {
+        text.push_str("\n[output truncated]\n");
+    }
+    Ok(CapturedOutput { text, truncated })
 }
 
 fn append_log(
