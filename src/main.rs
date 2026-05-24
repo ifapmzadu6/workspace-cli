@@ -86,6 +86,11 @@ const RANK_PAGERANK: &str = "pagerank";
 const RELATIONSHIP_SOURCE_COCHANGE_INDEX: &str = "cochange-index";
 const RELATIONSHIP_SOURCE_GIT_LOG: &str = "git-log";
 const RELATIONSHIP_SOURCE_RELATED_CLI: &str = "related-cli";
+const INDEX_STATUS_FRESH: &str = "fresh";
+const INDEX_STATUS_STALE: &str = "stale";
+const INDEX_STATUS_MISSING: &str = "missing";
+const INDEX_STATUS_INVALID: &str = "invalid";
+const INDEX_STATUS_NOT_GIT_REPO: &str = "not_git_repo";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -1854,11 +1859,11 @@ fn status_log_note(data: &StatusData) -> &'static str {
 
 fn index_status_summary(data: &IndexStatusData) -> String {
     match data.status.as_str() {
-        "fresh" => "co-change index is fresh".to_string(),
-        "stale" => "co-change index is stale".to_string(),
-        "missing" => "co-change index is missing".to_string(),
-        "invalid" => "co-change index is invalid".to_string(),
-        "not_git_repo" => "not a git repository".to_string(),
+        INDEX_STATUS_FRESH => "co-change index is fresh".to_string(),
+        INDEX_STATUS_STALE => "co-change index is stale".to_string(),
+        INDEX_STATUS_MISSING => "co-change index is missing".to_string(),
+        INDEX_STATUS_INVALID => "co-change index is invalid".to_string(),
+        INDEX_STATUS_NOT_GIT_REPO => "not a git repository".to_string(),
         _ => data.status.clone(),
     }
 }
@@ -2738,7 +2743,15 @@ fn cochange_index_status(workspace: &Workspace) -> IndexStatusData {
     let path = workspace.cochange_index_path();
     let path_label = workspace.relative(&path);
     if !workspace.is_git_repo {
-        return empty_index_status(false, path_label, "not_git_repo", false, false, None, None);
+        return empty_index_status(
+            false,
+            path_label,
+            INDEX_STATUS_NOT_GIT_REPO,
+            false,
+            false,
+            None,
+            None,
+        );
     }
 
     let current_head = git_current_head(workspace).ok().flatten();
@@ -2746,7 +2759,7 @@ fn cochange_index_status(workspace: &Workspace) -> IndexStatusData {
         return empty_index_status(
             true,
             path_label,
-            "missing",
+            INDEX_STATUS_MISSING,
             false,
             false,
             current_head,
@@ -2762,7 +2775,12 @@ fn cochange_index_status(workspace: &Workspace) -> IndexStatusData {
                 path: path_label,
                 exists: true,
                 readable: true,
-                status: if fresh { "fresh" } else { "stale" }.to_string(),
+                status: if fresh {
+                    INDEX_STATUS_FRESH
+                } else {
+                    INDEX_STATUS_STALE
+                }
+                .to_string(),
                 fresh,
                 current_head,
                 index_head: index.head,
@@ -2780,7 +2798,7 @@ fn cochange_index_status(workspace: &Workspace) -> IndexStatusData {
         Err(error) => empty_index_status(
             true,
             path_label,
-            "invalid",
+            INDEX_STATUS_INVALID,
             true,
             false,
             current_head,
@@ -6309,6 +6327,20 @@ rename to new name.txt
     }
 
     #[test]
+    fn index_status_constants_match_json_contract() {
+        assert_eq!(
+            [
+                INDEX_STATUS_FRESH,
+                INDEX_STATUS_STALE,
+                INDEX_STATUS_MISSING,
+                INDEX_STATUS_INVALID,
+                INDEX_STATUS_NOT_GIT_REPO,
+            ],
+            ["fresh", "stale", "missing", "invalid", "not_git_repo"]
+        );
+    }
+
+    #[test]
     fn observation_truncation_helpers_report_data_limits() {
         let search = SearchData {
             query: "needle".to_string(),
@@ -6431,12 +6463,12 @@ rename to new name.txt
 
     fn test_index_status_data(status: &str) -> IndexStatusData {
         IndexStatusData {
-            is_repo: status != "not_git_repo",
+            is_repo: status != INDEX_STATUS_NOT_GIT_REPO,
             path: ".workspace/index/cochange.json".to_string(),
-            exists: status != "missing",
-            readable: status != "invalid",
+            exists: status != INDEX_STATUS_MISSING,
+            readable: status != INDEX_STATUS_INVALID,
             status: status.to_string(),
-            fresh: status == "fresh",
+            fresh: status == INDEX_STATUS_FRESH,
             current_head: Some("abc123".to_string()),
             index_head: Some("abc123".to_string()),
             generated_at_unix_ms: Some(1),
@@ -6455,7 +6487,7 @@ rename to new name.txt
         StatusData {
             root: "/repo".to_string(),
             git: test_git_summary(true),
-            index_status: test_index_status_data("fresh"),
+            index_status: test_index_status_data(INDEX_STATUS_FRESH),
             recent_operations: vec![],
             recent_operations_omitted: 0,
             recent_operations_error: None,
@@ -6552,11 +6584,11 @@ rename to new name.txt
     #[test]
     fn index_status_summary_reports_known_statuses() {
         for (status, expected) in [
-            ("fresh", "co-change index is fresh"),
-            ("stale", "co-change index is stale"),
-            ("missing", "co-change index is missing"),
-            ("invalid", "co-change index is invalid"),
-            ("not_git_repo", "not a git repository"),
+            (INDEX_STATUS_FRESH, "co-change index is fresh"),
+            (INDEX_STATUS_STALE, "co-change index is stale"),
+            (INDEX_STATUS_MISSING, "co-change index is missing"),
+            (INDEX_STATUS_INVALID, "co-change index is invalid"),
+            (INDEX_STATUS_NOT_GIT_REPO, "not a git repository"),
             ("custom", "custom"),
         ] {
             assert_eq!(
