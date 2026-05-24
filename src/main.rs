@@ -4235,18 +4235,11 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = Command::new("git")
-        .current_dir(&workspace.root)
-        .args(args)
-        .output()
-        .context("failed to run git")?;
-    if !output.status.success() {
-        bail!(
-            "git failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+    let output = git_output_bounded(workspace, args, MAX_CAPTURED_OUTPUT)?;
+    if output.truncated {
+        bail!("git output exceeded {} bytes", MAX_CAPTURED_OUTPUT);
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(output.text)
 }
 
 fn git_observable_diff_name_only(workspace: &Workspace) -> Result<Vec<String>> {
