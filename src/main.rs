@@ -1453,16 +1453,14 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
         return Err(error);
     }
 
-    let observed_files = observed_changed_files(&files_changed);
-    let data = PatchData {
-        transaction_id: transaction_id.clone(),
-        patch_file: workspace.relative(&patch_path),
-        stored_patch: workspace.relative(&stored_patch),
-        file_count: files_changed.len(),
-        files_changed: observed_files.files,
-        omitted_files: observed_files.omitted_files,
-    };
-    let truncated = data.omitted_files > 0;
+    let data = patch_data(
+        workspace,
+        &transaction_id,
+        &patch_path,
+        &stored_patch,
+        &files_changed,
+    );
+    let truncated = transaction_files_truncated(data.omitted_files);
     let summary = transaction_file_summary(
         "applied patch",
         &data.transaction_id,
@@ -1628,16 +1626,14 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
     run_git_apply(workspace, &stored_patch, ["--reverse"])?;
 
     let rollback_transaction_id = new_id("rb");
-    let observed_files = observed_changed_files(&files_changed);
-    let data = RollbackData {
-        transaction_id: args.transaction_id.clone(),
-        rollback_transaction_id: rollback_transaction_id.clone(),
-        stored_patch: workspace.relative(&stored_patch),
-        file_count: files_changed.len(),
-        files_changed: observed_files.files,
-        omitted_files: observed_files.omitted_files,
-    };
-    let truncated = data.omitted_files > 0;
+    let data = rollback_data(
+        workspace,
+        &args.transaction_id,
+        &rollback_transaction_id,
+        &stored_patch,
+        &files_changed,
+    );
+    let truncated = transaction_files_truncated(data.omitted_files);
     let summary = transaction_file_summary(
         "rolled back",
         &data.transaction_id,
@@ -1677,6 +1673,46 @@ fn observed_changed_files(files_changed: &[String]) -> ObservedChangedFiles {
         files,
         omitted_files,
     }
+}
+
+fn patch_data(
+    workspace: &Workspace,
+    transaction_id: &str,
+    patch_path: &Path,
+    stored_patch: &Path,
+    files_changed: &[String],
+) -> PatchData {
+    let observed_files = observed_changed_files(files_changed);
+    PatchData {
+        transaction_id: transaction_id.to_string(),
+        patch_file: workspace.relative(patch_path),
+        stored_patch: workspace.relative(stored_patch),
+        file_count: files_changed.len(),
+        files_changed: observed_files.files,
+        omitted_files: observed_files.omitted_files,
+    }
+}
+
+fn rollback_data(
+    workspace: &Workspace,
+    transaction_id: &str,
+    rollback_transaction_id: &str,
+    stored_patch: &Path,
+    files_changed: &[String],
+) -> RollbackData {
+    let observed_files = observed_changed_files(files_changed);
+    RollbackData {
+        transaction_id: transaction_id.to_string(),
+        rollback_transaction_id: rollback_transaction_id.to_string(),
+        stored_patch: workspace.relative(stored_patch),
+        file_count: files_changed.len(),
+        files_changed: observed_files.files,
+        omitted_files: observed_files.omitted_files,
+    }
+}
+
+fn transaction_files_truncated(omitted_files: usize) -> bool {
+    omitted_files > 0
 }
 
 fn changed_file_evidence(files_changed: &[String], reason: &str) -> Vec<Evidence> {
@@ -6146,6 +6182,37 @@ rename to new name.txt
         assert_eq!(evidence[0].path, "file_000.txt");
         assert_eq!(evidence[0].reason, "patch file target");
         assert!(evidence.iter().all(|item| item.lines.is_none()));
+    }
+
+    #[test]
+    fn transaction_data_helpers_bound_files_and_paths() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: true,
+        };
+        let patch_path = temp.path().join("change.patch");
+        let stored_patch = temp.path().join(TRANSACTION_DIR).join("tx-1.patch");
+        let files = (0..(MAX_CHANGED_FILES + 1))
+            .map(|index| format!("file_{index:03}.txt"))
+            .collect::<Vec<_>>();
+
+        let data = patch_data(&workspace, "tx-1", &patch_path, &stored_patch, &files);
+        assert_eq!(data.transaction_id, "tx-1");
+        assert_eq!(data.patch_file, "change.patch");
+        assert_eq!(data.stored_patch, ".workspace/transactions/tx-1.patch");
+        assert_eq!(data.file_count, MAX_CHANGED_FILES + 1);
+        assert_eq!(data.files_changed.len(), MAX_CHANGED_FILES);
+        assert_eq!(data.omitted_files, 1);
+        assert!(transaction_files_truncated(data.omitted_files));
+
+        let data = rollback_data(&workspace, "tx-1", "rb-1", &stored_patch, &files);
+        assert_eq!(data.transaction_id, "tx-1");
+        assert_eq!(data.rollback_transaction_id, "rb-1");
+        assert_eq!(data.stored_patch, ".workspace/transactions/tx-1.patch");
+        assert_eq!(data.file_count, MAX_CHANGED_FILES + 1);
+        assert_eq!(data.files_changed.len(), MAX_CHANGED_FILES);
+        assert_eq!(data.omitted_files, 1);
     }
 
     #[test]
