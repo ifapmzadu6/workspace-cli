@@ -388,6 +388,25 @@ fn search_truncates_large_match_text() {
 }
 
 #[test]
+fn search_handles_oversized_match_lines() {
+    let temp = TempDir::new().expect("temp dir should be created");
+    let line = format!("needle {} tail\n", "a".repeat(80_000));
+    write_file(temp.path(), "large.txt", &line);
+
+    let search = run_workspace(temp.path(), &["search", "needle", "--json"]);
+    let text = search["data"]["matches"][0]["text"]
+        .as_str()
+        .expect("match text should be a string");
+
+    assert_eq!(search["kind"], "workspace_search");
+    assert_eq!(search["data"]["total_matches"], 1);
+    assert_eq!(search["truncated"], true);
+    assert_eq!(search["data"]["truncated_match_texts"], 1);
+    assert!(text.contains("[output truncated]"));
+    assert!(!text.contains("tail"));
+}
+
+#[test]
 fn read_rejects_paths_outside_workspace() {
     let workspace = TempDir::new().expect("workspace temp dir should be created");
     let outside = TempDir::new().expect("outside temp dir should be created");

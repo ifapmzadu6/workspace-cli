@@ -32,6 +32,7 @@ const MAX_RECENT_FILES: usize = 12;
 const MAX_DIFF_SUMMARY: usize = 12_000;
 const MAX_DIFF_PATCH: usize = 48_000;
 const MAX_SEARCH_MATCH_TEXT: usize = 2_000;
+const MAX_RG_JSON_LINE_BYTES: usize = 64_000;
 const MAX_SAMPLE_COMMITS: usize = 5;
 const MAX_LOG_LINE_BYTES: usize = 64_000;
 static ID_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -636,6 +637,30 @@ impl PendingLogLine {
             oversized: self.oversized,
         }
     }
+}
+
+#[derive(Debug)]
+struct RipgrepJsonLineTooLarge {
+    line_number: usize,
+    max_bytes: usize,
+}
+
+impl std::fmt::Display for RipgrepJsonLineTooLarge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "ripgrep JSON line {} exceeded {} bytes",
+            self.line_number, self.max_bytes
+        )
+    }
+}
+
+impl std::error::Error for RipgrepJsonLineTooLarge {}
+
+struct BoundedOutputLine {
+    line_number: usize,
+    bytes: Vec<u8>,
+    exceeded: bool,
 }
 
 #[derive(Serialize)]
@@ -3672,7 +3697,13 @@ fn rg_search(
         bail!("ripgrep failed: {}", stderr.text.trim());
     }
 
-    search_result
+    match search_result {
+        Ok(result) => Ok(result),
+        Err(error) if error.downcast_ref::<RipgrepJsonLineTooLarge>().is_some() => {
+            fallback_text_search(workspace, query, max_results)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn parse_rg_json_output<R: Read>(
@@ -3682,22 +3713,106 @@ fn parse_rg_json_output<R: Read>(
     let mut matches = Vec::new();
     let mut total_matches = 0usize;
     let mut truncated_match_texts = 0usize;
-    let reader = BufReader::new(reader);
+    let mut reader = BufReader::new(reader);
+    let mut line_number = 1usize;
+    let mut first_error = None;
 
-    for line in reader.lines() {
-        let line = line.context("failed to read ripgrep JSON output")?;
-        if !parse_rg_json_line(
+    while let Some(line) = read_bounded_output_line(
+        &mut reader,
+        line_number,
+        MAX_RG_JSON_LINE_BYTES,
+        "ripgrep JSON output",
+    )? {
+        line_number += 1;
+        if first_error.is_some() {
+            continue;
+        }
+        if line.exceeded {
+            first_error = Some(anyhow!(RipgrepJsonLineTooLarge {
+                line_number: line.line_number,
+                max_bytes: MAX_RG_JSON_LINE_BYTES,
+            }));
+            continue;
+        }
+        let line = match String::from_utf8(line.bytes) {
+            Ok(line) => line,
+            Err(error) => {
+                first_error = Some(anyhow!("ripgrep JSON output is not valid UTF-8: {error}"));
+                continue;
+            }
+        };
+        if let Err(error) = parse_rg_json_line(
             &line,
             max_results,
             &mut matches,
             &mut total_matches,
             &mut truncated_match_texts,
-        )? {
-            continue;
+        ) {
+            first_error = Some(error);
         }
     }
 
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+
     Ok((matches, total_matches, truncated_match_texts))
+}
+
+fn read_bounded_output_line<R: BufRead>(
+    reader: &mut R,
+    line_number: usize,
+    max_bytes: usize,
+    label: &str,
+) -> Result<Option<BoundedOutputLine>> {
+    let mut bytes = Vec::new();
+    let mut exceeded = false;
+    let mut saw_bytes = false;
+
+    loop {
+        let (bytes_to_consume, reached_line_end) = {
+            let buffer = reader
+                .fill_buf()
+                .with_context(|| format!("failed to read {label} line {line_number}"))?;
+            if buffer.is_empty() {
+                if !saw_bytes {
+                    return Ok(None);
+                }
+                break;
+            }
+
+            saw_bytes = true;
+            let (segment, consume_len, segment_reaches_line_end) =
+                match buffer.iter().position(|byte| *byte == b'\n') {
+                    Some(newline_index) => (&buffer[..newline_index], newline_index + 1, true),
+                    None => (buffer, buffer.len(), false),
+                };
+            let remaining = max_bytes.saturating_sub(bytes.len());
+            if remaining > 0 {
+                let bytes_to_store = remaining.min(segment.len());
+                bytes.extend_from_slice(&segment[..bytes_to_store]);
+            }
+            if segment.len() > remaining {
+                exceeded = true;
+            }
+
+            (consume_len, segment_reaches_line_end)
+        };
+
+        reader.consume(bytes_to_consume);
+        if reached_line_end {
+            break;
+        }
+    }
+
+    if !exceeded && bytes.last() == Some(&b'\r') {
+        bytes.pop();
+    }
+    Ok(Some(BoundedOutputLine {
+        line_number,
+        bytes,
+        exceeded,
+    }))
 }
 
 fn parse_rg_json_line(
@@ -5282,6 +5397,25 @@ rename to new name.txt
         assert_eq!(truncated_match_texts, 0);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].path, "valid.txt");
+    }
+
+    #[test]
+    fn ripgrep_json_parser_rejects_oversized_lines_after_draining() {
+        let json = format!(
+            "{}\n{{\"type\":\"match\",\"data\":{{\"path\":{{\"text\":\"./a.txt\"}},\"lines\":{{\"text\":\"needle\\n\"}},\"line_number\":1,\"submatches\":[{{\"start\":0}}]}}}}\n",
+            "x".repeat(MAX_RG_JSON_LINE_BYTES + 1)
+        );
+
+        let Err(error) = parse_rg_json_output(std::io::Cursor::new(json), 10) else {
+            panic!("oversized ripgrep JSON line should fail");
+        };
+        let error = format!("{error:#}");
+
+        assert!(
+            error.contains("ripgrep JSON line 1"),
+            "unexpected error: {error}"
+        );
+        assert!(error.contains("exceeded"), "unexpected error: {error}");
     }
 
     #[test]
