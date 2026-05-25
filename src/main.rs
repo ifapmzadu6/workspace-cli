@@ -612,6 +612,37 @@ struct RelatedData {
     related: Vec<RelatedFile>,
 }
 
+struct RelatedDataMetadata {
+    target: String,
+    method: String,
+    ranking: String,
+    relationship_source: String,
+    is_repo: bool,
+}
+
+#[derive(Clone, Copy)]
+struct RelationshipStats {
+    commits_scanned: usize,
+    commits_matched: usize,
+    ignored_large_commits: usize,
+}
+
+impl RelationshipStats {
+    fn none() -> Self {
+        Self {
+            commits_scanned: 0,
+            commits_matched: 0,
+            ignored_large_commits: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RelationshipLimits {
+    max_commits: usize,
+    max_files_per_commit: usize,
+}
+
 #[derive(Serialize, Clone)]
 struct RelatedFile {
     path: String,
@@ -2157,18 +2188,57 @@ fn related_data_for_non_repo(
     max_commits: usize,
     max_files_per_commit: usize,
 ) -> RelatedData {
-    RelatedData {
+    cochange_related_data(
+        related_data_metadata(
+            target,
+            method,
+            rank,
+            relationship_source(uses_cochange_index(use_index, rank)),
+            false,
+        ),
+        RelationshipStats::none(),
+        RelationshipLimits {
+            max_commits,
+            max_files_per_commit,
+        },
+        vec![],
+    )
+}
+
+fn related_data_metadata(
+    target: &str,
+    method: &RelatedMethod,
+    rank: RankingMethod,
+    relationship_source: impl Into<String>,
+    is_repo: bool,
+) -> RelatedDataMetadata {
+    RelatedDataMetadata {
         target: target.to_string(),
         method: method.as_str().to_string(),
         ranking: rank.as_str().to_string(),
-        relationship_source: relationship_source(uses_cochange_index(use_index, rank)).to_string(),
-        is_repo: false,
-        commits_scanned: 0,
-        commits_matched: 0,
-        ignored_large_commits: 0,
-        max_commits,
-        max_files_per_commit,
-        related: vec![],
+        relationship_source: relationship_source.into(),
+        is_repo,
+    }
+}
+
+fn cochange_related_data(
+    metadata: RelatedDataMetadata,
+    stats: RelationshipStats,
+    limits: RelationshipLimits,
+    related: Vec<RelatedFile>,
+) -> RelatedData {
+    RelatedData {
+        target: metadata.target,
+        method: metadata.method,
+        ranking: metadata.ranking,
+        relationship_source: metadata.relationship_source,
+        is_repo: metadata.is_repo,
+        commits_scanned: stats.commits_scanned,
+        commits_matched: stats.commits_matched,
+        ignored_large_commits: stats.ignored_large_commits,
+        max_commits: limits.max_commits,
+        max_files_per_commit: limits.max_files_per_commit,
+        related,
     }
 }
 
@@ -2958,36 +3028,48 @@ fn related_by_cochange(
                 rank_cochanges_pagerank_from_index(&index, target, max_results)
             }
         };
-        return Ok(RelatedData {
-            target: target.to_string(),
-            method: RELATED_METHOD_COCHANGE.to_string(),
-            ranking: rank.as_str().to_string(),
-            relationship_source: RELATIONSHIP_SOURCE_COCHANGE_INDEX.to_string(),
-            is_repo: true,
-            commits_scanned: index.commits_scanned,
-            commits_matched: ranking.commits_matched,
-            ignored_large_commits: index.ignored_large_commits,
-            max_commits: index.max_commits,
-            max_files_per_commit: index.max_files_per_commit,
-            related: ranking.related,
-        });
+        return Ok(cochange_related_data(
+            related_data_metadata(
+                target,
+                &RelatedMethod::Cochange,
+                rank,
+                RELATIONSHIP_SOURCE_COCHANGE_INDEX,
+                true,
+            ),
+            RelationshipStats {
+                commits_scanned: index.commits_scanned,
+                commits_matched: ranking.commits_matched,
+                ignored_large_commits: index.ignored_large_commits,
+            },
+            RelationshipLimits {
+                max_commits: index.max_commits,
+                max_files_per_commit: index.max_files_per_commit,
+            },
+            ranking.related,
+        ));
     }
 
     let commits = git_recent_name_only_commits(workspace, max_commits)?;
     let ranking = rank_cochanges(&commits, target, max_files_per_commit, max_results);
-    Ok(RelatedData {
-        target: target.to_string(),
-        method: RELATED_METHOD_COCHANGE.to_string(),
-        ranking: rank.as_str().to_string(),
-        relationship_source: RELATIONSHIP_SOURCE_GIT_LOG.to_string(),
-        is_repo: true,
-        commits_scanned: commits.len(),
-        commits_matched: ranking.commits_matched,
-        ignored_large_commits: ranking.ignored_large_commits,
-        max_commits,
-        max_files_per_commit,
-        related: ranking.related,
-    })
+    Ok(cochange_related_data(
+        related_data_metadata(
+            target,
+            &RelatedMethod::Cochange,
+            rank,
+            RELATIONSHIP_SOURCE_GIT_LOG,
+            true,
+        ),
+        RelationshipStats {
+            commits_scanned: commits.len(),
+            commits_matched: ranking.commits_matched,
+            ignored_large_commits: ranking.ignored_large_commits,
+        },
+        RelationshipLimits {
+            max_commits,
+            max_files_per_commit,
+        },
+        ranking.related,
+    ))
 }
 
 fn related_data_from_related_cli(
@@ -3004,19 +3086,25 @@ fn related_data_from_related_cli(
         .map(|item| item.cochanged_commits)
         .max()
         .unwrap_or(0);
-    RelatedData {
-        target: target.to_string(),
-        method: RELATED_METHOD_COCHANGE.to_string(),
-        ranking: rank.as_str().to_string(),
-        relationship_source: format!("{RELATIONSHIP_SOURCE_RELATED_CLI}:{}", output.mode),
-        is_repo: true,
-        commits_scanned: 0,
-        commits_matched,
-        ignored_large_commits: 0,
-        max_commits,
-        max_files_per_commit,
+    cochange_related_data(
+        related_data_metadata(
+            target,
+            &RelatedMethod::Cochange,
+            rank,
+            format!("{RELATIONSHIP_SOURCE_RELATED_CLI}:{}", output.mode),
+            true,
+        ),
+        RelationshipStats {
+            commits_scanned: 0,
+            commits_matched,
+            ignored_large_commits: 0,
+        },
+        RelationshipLimits {
+            max_commits,
+            max_files_per_commit,
+        },
         related,
-    }
+    )
 }
 
 fn bounded_related_cli_files(items: Vec<RelatedCliItem>, max_results: usize) -> Vec<RelatedFile> {
@@ -7254,6 +7342,48 @@ rename to new name.txt
         assert_eq!(impact.max_commits, 500);
         assert_eq!(impact.max_files_per_commit, 80);
         assert!(impact.impacted.is_empty());
+    }
+
+    #[test]
+    fn cochange_related_data_preserves_relationship_metadata() {
+        let data = cochange_related_data(
+            related_data_metadata(
+                "src/main.rs",
+                &RelatedMethod::Cochange,
+                RankingMethod::Pagerank,
+                RELATIONSHIP_SOURCE_COCHANGE_INDEX,
+                true,
+            ),
+            RelationshipStats {
+                commits_scanned: 8,
+                commits_matched: 3,
+                ignored_large_commits: 2,
+            },
+            RelationshipLimits {
+                max_commits: 500,
+                max_files_per_commit: 80,
+            },
+            vec![RelatedFile {
+                path: "tests/cli.rs".to_string(),
+                score: 0.75,
+                cochanged_commits: 3,
+                weighted_cochanges: 1.25,
+                sample_commits: vec!["abc123".to_string()],
+            }],
+        );
+
+        assert_eq!(data.target, "src/main.rs");
+        assert_eq!(data.method, RELATED_METHOD_COCHANGE);
+        assert_eq!(data.ranking, RANK_PAGERANK);
+        assert_eq!(data.relationship_source, RELATIONSHIP_SOURCE_COCHANGE_INDEX);
+        assert!(data.is_repo);
+        assert_eq!(data.commits_scanned, 8);
+        assert_eq!(data.commits_matched, 3);
+        assert_eq!(data.ignored_large_commits, 2);
+        assert_eq!(data.max_commits, 500);
+        assert_eq!(data.max_files_per_commit, 80);
+        assert_eq!(data.related.len(), 1);
+        assert_eq!(data.related[0].path, "tests/cli.rs");
     }
 
     #[test]
