@@ -670,6 +670,40 @@ struct ImpactData {
     impacted: Vec<ImpactFile>,
 }
 
+struct ImpactDataMetadata {
+    source: String,
+    method: String,
+    ranking: String,
+    relationship_source: String,
+    is_repo: bool,
+}
+
+struct SeedFileSummary {
+    seed_files: Vec<String>,
+    seed_file_count: usize,
+    omitted_seed_files: usize,
+}
+
+impl SeedFileSummary {
+    fn empty() -> Self {
+        Self {
+            seed_files: vec![],
+            seed_file_count: 0,
+            omitted_seed_files: 0,
+        }
+    }
+
+    fn from_seed_files(seed_files: &[String], max_seed_files: usize) -> Self {
+        let (observed_seed_files, omitted_seed_files) =
+            observed_string_prefix(seed_files, max_seed_files);
+        Self {
+            seed_files: observed_seed_files,
+            seed_file_count: seed_files.len(),
+            omitted_seed_files,
+        }
+    }
+}
+
 #[derive(Serialize, Clone)]
 struct ImpactFile {
     path: String,
@@ -2249,21 +2283,60 @@ fn impact_data_for_non_repo(
     max_commits: usize,
     max_files_per_commit: usize,
 ) -> ImpactData {
-    ImpactData {
+    cochange_impact_data(
+        impact_data_metadata(
+            method,
+            rank,
+            relationship_source(uses_cochange_index(use_index, rank)),
+            false,
+        ),
+        SeedFileSummary::empty(),
+        RelationshipStats::none(),
+        RelationshipLimits {
+            max_commits,
+            max_files_per_commit,
+        },
+        vec![],
+    )
+}
+
+fn impact_data_metadata(
+    method: &RelatedMethod,
+    rank: RankingMethod,
+    relationship_source: impl Into<String>,
+    is_repo: bool,
+) -> ImpactDataMetadata {
+    ImpactDataMetadata {
         source: IMPACT_SOURCE_DIFF.to_string(),
         method: method.as_str().to_string(),
         ranking: rank.as_str().to_string(),
-        relationship_source: relationship_source(uses_cochange_index(use_index, rank)).to_string(),
-        is_repo: false,
-        seed_files: vec![],
-        seed_file_count: 0,
-        omitted_seed_files: 0,
-        commits_scanned: 0,
-        commits_matched: 0,
-        ignored_large_commits: 0,
-        max_commits,
-        max_files_per_commit,
-        impacted: vec![],
+        relationship_source: relationship_source.into(),
+        is_repo,
+    }
+}
+
+fn cochange_impact_data(
+    metadata: ImpactDataMetadata,
+    seed_summary: SeedFileSummary,
+    stats: RelationshipStats,
+    limits: RelationshipLimits,
+    impacted: Vec<ImpactFile>,
+) -> ImpactData {
+    ImpactData {
+        source: metadata.source,
+        method: metadata.method,
+        ranking: metadata.ranking,
+        relationship_source: metadata.relationship_source,
+        is_repo: metadata.is_repo,
+        seed_files: seed_summary.seed_files,
+        seed_file_count: seed_summary.seed_file_count,
+        omitted_seed_files: seed_summary.omitted_seed_files,
+        commits_scanned: stats.commits_scanned,
+        commits_matched: stats.commits_matched,
+        ignored_large_commits: stats.ignored_large_commits,
+        max_commits: limits.max_commits,
+        max_files_per_commit: limits.max_files_per_commit,
+        impacted,
     }
 }
 
@@ -3434,9 +3507,7 @@ fn impact_by_cochange(
     use_index: bool,
 ) -> Result<ImpactData> {
     let seed_files = git_changed_files(workspace)?;
-    let seed_file_count = seed_files.len();
-    let (observed_seed_files, omitted_seed_files) =
-        observed_string_prefix(&seed_files, MAX_CHANGED_FILES);
+    let seed_summary = SeedFileSummary::from_seed_files(&seed_files, MAX_CHANGED_FILES);
     if !uses_cochange_index(use_index, rank)
         && let Some(cli) = RelatedCli::detect()
         && let Some(data) = impact_by_related_cli(
@@ -3462,43 +3533,49 @@ fn impact_by_cochange(
                 rank_cochange_impact_pagerank_from_index(&index, &seed_files, max_results)
             }
         };
-        return Ok(ImpactData {
-            source: IMPACT_SOURCE_DIFF.to_string(),
-            method: RELATED_METHOD_COCHANGE.to_string(),
-            ranking: rank.as_str().to_string(),
-            relationship_source: RELATIONSHIP_SOURCE_COCHANGE_INDEX.to_string(),
-            is_repo: true,
-            seed_files: observed_seed_files,
-            seed_file_count,
-            omitted_seed_files,
-            commits_scanned: index.commits_scanned,
-            commits_matched: ranking.commits_matched,
-            ignored_large_commits: index.ignored_large_commits,
-            max_commits: index.max_commits,
-            max_files_per_commit: index.max_files_per_commit,
-            impacted: ranking.impacted,
-        });
+        return Ok(cochange_impact_data(
+            impact_data_metadata(
+                &RelatedMethod::Cochange,
+                rank,
+                RELATIONSHIP_SOURCE_COCHANGE_INDEX,
+                true,
+            ),
+            seed_summary,
+            RelationshipStats {
+                commits_scanned: index.commits_scanned,
+                commits_matched: ranking.commits_matched,
+                ignored_large_commits: index.ignored_large_commits,
+            },
+            RelationshipLimits {
+                max_commits: index.max_commits,
+                max_files_per_commit: index.max_files_per_commit,
+            },
+            ranking.impacted,
+        ));
     }
 
     let commits = git_recent_name_only_commits(workspace, max_commits)?;
     let ranking = rank_cochange_impact(&commits, &seed_files, max_files_per_commit, max_results);
 
-    Ok(ImpactData {
-        source: IMPACT_SOURCE_DIFF.to_string(),
-        method: RELATED_METHOD_COCHANGE.to_string(),
-        ranking: rank.as_str().to_string(),
-        relationship_source: RELATIONSHIP_SOURCE_GIT_LOG.to_string(),
-        is_repo: true,
-        seed_files: observed_seed_files,
-        seed_file_count,
-        omitted_seed_files,
-        commits_scanned: commits.len(),
-        commits_matched: ranking.commits_matched,
-        ignored_large_commits: ranking.ignored_large_commits,
-        max_commits,
-        max_files_per_commit,
-        impacted: ranking.impacted,
-    })
+    Ok(cochange_impact_data(
+        impact_data_metadata(
+            &RelatedMethod::Cochange,
+            rank,
+            RELATIONSHIP_SOURCE_GIT_LOG,
+            true,
+        ),
+        seed_summary,
+        RelationshipStats {
+            commits_scanned: commits.len(),
+            commits_matched: ranking.commits_matched,
+            ignored_large_commits: ranking.ignored_large_commits,
+        },
+        RelationshipLimits {
+            max_commits,
+            max_files_per_commit,
+        },
+        ranking.impacted,
+    ))
 }
 
 fn impact_by_related_cli(
@@ -3514,9 +3591,7 @@ fn impact_by_related_cli(
         return Ok(None);
     }
 
-    let seed_file_count = seed_files.len();
-    let (observed_seed_files, omitted_seed_files) =
-        observed_string_prefix(seed_files, MAX_CHANGED_FILES);
+    let seed_summary = SeedFileSummary::from_seed_files(seed_files, MAX_CHANGED_FILES);
     let seed_set = normalized_seed_file_set(seed_files);
     let mut accumulators = BTreeMap::<String, RelatedCliImpactAccumulator>::new();
     for seed in seed_files {
@@ -3555,29 +3630,34 @@ fn impact_by_related_cli(
         );
     }
 
-    Ok(Some(ImpactData {
-        source: IMPACT_SOURCE_DIFF.to_string(),
-        method: RELATED_METHOD_COCHANGE.to_string(),
-        ranking: rank.as_str().to_string(),
-        relationship_source: format!(
-            "{RELATIONSHIP_SOURCE_RELATED_CLI}:{}:aggregate",
-            rank.as_str()
+    let commits_matched = impacted
+        .iter()
+        .map(|item| item.cochanged_commits)
+        .max()
+        .unwrap_or(0);
+
+    Ok(Some(cochange_impact_data(
+        impact_data_metadata(
+            &RelatedMethod::Cochange,
+            rank,
+            format!(
+                "{RELATIONSHIP_SOURCE_RELATED_CLI}:{}:aggregate",
+                rank.as_str()
+            ),
+            true,
         ),
-        is_repo: true,
-        seed_files: observed_seed_files,
-        seed_file_count,
-        omitted_seed_files,
-        commits_scanned: 0,
-        commits_matched: impacted
-            .iter()
-            .map(|item| item.cochanged_commits)
-            .max()
-            .unwrap_or(0),
-        ignored_large_commits: 0,
-        max_commits,
-        max_files_per_commit,
+        seed_summary,
+        RelationshipStats {
+            commits_scanned: 0,
+            commits_matched,
+            ignored_large_commits: 0,
+        },
+        RelationshipLimits {
+            max_commits,
+            max_files_per_commit,
+        },
         impacted,
-    }))
+    )))
 }
 
 fn git_recent_name_only_commits(
@@ -7384,6 +7464,58 @@ rename to new name.txt
         assert_eq!(data.max_files_per_commit, 80);
         assert_eq!(data.related.len(), 1);
         assert_eq!(data.related[0].path, "tests/cli.rs");
+    }
+
+    #[test]
+    fn cochange_impact_data_preserves_seed_and_relationship_metadata() {
+        let seed_files = vec![
+            "src/a.rs".to_string(),
+            "src/b.rs".to_string(),
+            "src/c.rs".to_string(),
+        ];
+
+        let data = cochange_impact_data(
+            impact_data_metadata(
+                &RelatedMethod::Cochange,
+                RankingMethod::Direct,
+                RELATIONSHIP_SOURCE_GIT_LOG,
+                true,
+            ),
+            SeedFileSummary::from_seed_files(&seed_files, 2),
+            RelationshipStats {
+                commits_scanned: 8,
+                commits_matched: 3,
+                ignored_large_commits: 1,
+            },
+            RelationshipLimits {
+                max_commits: 500,
+                max_files_per_commit: 80,
+            },
+            vec![ImpactFile {
+                path: "tests/cli.rs".to_string(),
+                score: 0.75,
+                cochanged_commits: 3,
+                weighted_cochanges: 1.25,
+                seed_files: vec!["src/a.rs".to_string()],
+                sample_commits: vec!["abc123".to_string()],
+            }],
+        );
+
+        assert_eq!(data.source, IMPACT_SOURCE_DIFF);
+        assert_eq!(data.method, RELATED_METHOD_COCHANGE);
+        assert_eq!(data.ranking, RANK_DIRECT);
+        assert_eq!(data.relationship_source, RELATIONSHIP_SOURCE_GIT_LOG);
+        assert!(data.is_repo);
+        assert_eq!(data.seed_files, vec!["src/a.rs", "src/b.rs"]);
+        assert_eq!(data.seed_file_count, 3);
+        assert_eq!(data.omitted_seed_files, 1);
+        assert_eq!(data.commits_scanned, 8);
+        assert_eq!(data.commits_matched, 3);
+        assert_eq!(data.ignored_large_commits, 1);
+        assert_eq!(data.max_commits, 500);
+        assert_eq!(data.max_files_per_commit, 80);
+        assert_eq!(data.impacted.len(), 1);
+        assert_eq!(data.impacted[0].path, "tests/cli.rs");
     }
 
     #[test]
