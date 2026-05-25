@@ -623,6 +623,21 @@ struct RelatedDataMetadata {
     relationship: RelationshipMetadata,
 }
 
+impl RelatedDataMetadata {
+    fn new(
+        target: &str,
+        method: &RelatedMethod,
+        rank: RankingMethod,
+        relationship_source: impl Into<String>,
+        is_repo: bool,
+    ) -> Self {
+        Self {
+            target: target.to_string(),
+            relationship: RelationshipMetadata::new(method, rank, relationship_source, is_repo),
+        }
+    }
+}
+
 struct RelationshipMetadata {
     method: String,
     ranking: String,
@@ -740,6 +755,20 @@ struct ImpactData {
 struct ImpactDataMetadata {
     source: String,
     relationship: RelationshipMetadata,
+}
+
+impl ImpactDataMetadata {
+    fn new(
+        method: &RelatedMethod,
+        rank: RankingMethod,
+        relationship_source: impl Into<String>,
+        is_repo: bool,
+    ) -> Self {
+        Self {
+            source: IMPACT_SOURCE_DIFF.to_string(),
+            relationship: RelationshipMetadata::new(method, rank, relationship_source, is_repo),
+        }
+    }
 }
 
 struct SeedFileSummary {
@@ -2298,7 +2327,7 @@ fn related_data_for_non_repo(
     max_files_per_commit: usize,
 ) -> RelatedData {
     cochange_related_data(
-        related_data_metadata(
+        RelatedDataMetadata::new(
             target,
             method,
             rank,
@@ -2309,19 +2338,6 @@ fn related_data_for_non_repo(
         RelationshipLimits::from_options(max_commits, max_files_per_commit),
         vec![],
     )
-}
-
-fn related_data_metadata(
-    target: &str,
-    method: &RelatedMethod,
-    rank: RankingMethod,
-    relationship_source: impl Into<String>,
-    is_repo: bool,
-) -> RelatedDataMetadata {
-    RelatedDataMetadata {
-        target: target.to_string(),
-        relationship: RelationshipMetadata::new(method, rank, relationship_source, is_repo),
-    }
 }
 
 fn cochange_related_data(
@@ -2364,7 +2380,7 @@ fn impact_data_for_non_repo(
     max_files_per_commit: usize,
 ) -> ImpactData {
     cochange_impact_data(
-        impact_data_metadata(
+        ImpactDataMetadata::new(
             method,
             rank,
             relationship_source_for_options(use_index, rank),
@@ -2375,18 +2391,6 @@ fn impact_data_for_non_repo(
         RelationshipLimits::from_options(max_commits, max_files_per_commit),
         vec![],
     )
-}
-
-fn impact_data_metadata(
-    method: &RelatedMethod,
-    rank: RankingMethod,
-    relationship_source: impl Into<String>,
-    is_repo: bool,
-) -> ImpactDataMetadata {
-    ImpactDataMetadata {
-        source: IMPACT_SOURCE_DIFF.to_string(),
-        relationship: RelationshipMetadata::new(method, rank, relationship_source, is_repo),
-    }
 }
 
 fn cochange_impact_data(
@@ -3209,7 +3213,7 @@ fn related_by_cochange(
             }
         };
         return Ok(cochange_related_data(
-            related_data_metadata(
+            RelatedDataMetadata::new(
                 target,
                 &RelatedMethod::Cochange,
                 rank,
@@ -3225,7 +3229,7 @@ fn related_by_cochange(
     let commits = git_recent_name_only_commits(workspace, max_commits)?;
     let ranking = rank_cochanges(&commits, target, max_files_per_commit, max_results);
     Ok(cochange_related_data(
-        related_data_metadata(
+        RelatedDataMetadata::new(
             target,
             &RelatedMethod::Cochange,
             rank,
@@ -3253,7 +3257,7 @@ fn related_data_from_related_cli(
     let related = bounded_related_cli_files(output.related, max_results);
     let commits_matched = max_cochanged_commits(related.iter().map(|item| item.cochanged_commits));
     cochange_related_data(
-        related_data_metadata(
+        RelatedDataMetadata::new(
             target,
             &RelatedMethod::Cochange,
             rank,
@@ -3621,7 +3625,7 @@ fn impact_by_cochange(
             }
         };
         return Ok(cochange_impact_data(
-            impact_data_metadata(
+            ImpactDataMetadata::new(
                 &RelatedMethod::Cochange,
                 rank,
                 RELATIONSHIP_SOURCE_COCHANGE_INDEX,
@@ -3638,7 +3642,7 @@ fn impact_by_cochange(
     let ranking = rank_cochange_impact(&commits, &seed_files, max_files_per_commit, max_results);
 
     Ok(cochange_impact_data(
-        impact_data_metadata(
+        ImpactDataMetadata::new(
             &RelatedMethod::Cochange,
             rank,
             RELATIONSHIP_SOURCE_GIT_LOG,
@@ -3710,7 +3714,7 @@ fn impact_by_related_cli(
     let commits_matched = max_cochanged_commits(impacted.iter().map(|item| item.cochanged_commits));
 
     Ok(Some(cochange_impact_data(
-        impact_data_metadata(
+        ImpactDataMetadata::new(
             &RelatedMethod::Cochange,
             rank,
             related_cli_aggregate_relationship_source(rank),
@@ -7642,7 +7646,7 @@ rename to new name.txt
     #[test]
     fn cochange_related_data_preserves_relationship_metadata() {
         let data = cochange_related_data(
-            related_data_metadata(
+            RelatedDataMetadata::new(
                 "src/main.rs",
                 &RelatedMethod::Cochange,
                 RankingMethod::Pagerank,
@@ -7683,7 +7687,7 @@ rename to new name.txt
         ];
 
         let data = cochange_impact_data(
-            impact_data_metadata(
+            ImpactDataMetadata::new(
                 &RelatedMethod::Cochange,
                 RankingMethod::Direct,
                 RELATIONSHIP_SOURCE_GIT_LOG,
