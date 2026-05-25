@@ -2608,6 +2608,13 @@ fn map_git_human_summary(git: &GitSummary) -> String {
     }
 }
 
+fn status_recent_operation_human_summary(entry: &LogEntry) -> String {
+    format!(
+        "    {} {} {} - {}",
+        entry.id, entry.kind, entry.op, entry.summary
+    )
+}
+
 fn status_truncated(data: &StatusData) -> bool {
     data.git.omitted_files() || status_recent_operations_omitted(data)
 }
@@ -6547,10 +6554,7 @@ fn print_status(observation: &Observation<StatusData>) -> Result<()> {
     if !data.recent_operations.is_empty() {
         println!("  recent operations:");
         for entry in &data.recent_operations {
-            println!(
-                "    {} {} {} - {}",
-                entry.id, entry.kind, entry.op, entry.summary
-            );
+            println!("{}", status_recent_operation_human_summary(entry));
         }
     }
     if let Some(error) = &data.recent_operations_error {
@@ -8480,6 +8484,10 @@ rename to new name.txt
         );
         assert_eq!(data.root, temp.path().to_string_lossy().into_owned());
         assert_eq!(data.recent_operations.len(), 1);
+        assert_eq!(
+            status_recent_operation_human_summary(&data.recent_operations[0]),
+            "    op-1 observe status - entry"
+        );
         assert_eq!(data.recent_operations_omitted, 2);
         assert!(data.recent_operations_error.is_none());
 
