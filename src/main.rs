@@ -2462,7 +2462,7 @@ fn impact_summary(data: &ImpactData) -> String {
             data.seed_file_count,
             data.method
         );
-        if data.omitted_seed_files > 0 {
+        if impact_seed_files_omitted(data) {
             summary.push_str(" (seed files truncated)");
         }
         summary
@@ -2500,6 +2500,10 @@ fn search_summary(data: &SearchData) -> String {
 }
 
 fn impact_truncated(data: &ImpactData) -> bool {
+    impact_seed_files_omitted(data)
+}
+
+fn impact_seed_files_omitted(data: &ImpactData) -> bool {
     data.omitted_seed_files > 0
 }
 
@@ -6425,7 +6429,7 @@ fn print_impact(observation: &Observation<ImpactData>) -> Result<()> {
     println!("  source: {}", data.relationship_source);
     println!("  ranking: {}", data.ranking);
     print_list("seeds", &data.seed_files);
-    if data.omitted_seed_files > 0 {
+    if impact_seed_files_omitted(data) {
         println!("    ... {} more seed file(s)", data.omitted_seed_files);
     }
     println!(
@@ -7669,12 +7673,14 @@ rename to new name.txt
             impacted: vec![],
         };
         assert!(impact_truncated(&impact));
+        assert!(impact_seed_files_omitted(&impact));
 
         let impact = ImpactData {
             omitted_seed_files: 0,
             ..impact
         };
         assert!(!impact_truncated(&impact));
+        assert!(!impact_seed_files_omitted(&impact));
 
         let diff = DiffData {
             is_repo: true,
@@ -8353,6 +8359,7 @@ rename to new name.txt
             impact_summary(&data),
             "1 impacted file(s) from 3 seed file(s) using cochange history (seed files truncated)"
         );
+        assert!(impact_seed_files_omitted(&data));
 
         let data = ImpactData {
             is_repo: false,
@@ -8361,6 +8368,7 @@ rename to new name.txt
             ..data
         };
         assert_eq!(impact_summary(&data), SUMMARY_NOT_GIT_REPOSITORY);
+        assert!(!impact_seed_files_omitted(&data));
     }
 
     #[test]
