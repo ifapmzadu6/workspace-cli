@@ -6283,14 +6283,24 @@ struct OperationLogRecord<'a> {
 }
 
 impl<'a> OperationLogRecord<'a> {
-    fn observe(op: &'a str, scope: &'a str, summary: &'a str) -> Self {
+    fn new(
+        kind: &'a str,
+        op: &'a str,
+        scope: &'a str,
+        summary: &'a str,
+        transaction_id: Option<&'a str>,
+    ) -> Self {
         Self {
-            kind: LOG_KIND_OBSERVE,
+            kind,
             op,
             scope,
             summary,
-            transaction_id: None,
+            transaction_id,
         }
+    }
+
+    fn observe(op: &'a str, scope: &'a str, summary: &'a str) -> Self {
+        Self::new(LOG_KIND_OBSERVE, op, scope, summary, None)
     }
 
     fn observe_observation<T: Serialize>(op: &'a str, observation: &'a Observation<T>) -> Self {
@@ -6298,13 +6308,7 @@ impl<'a> OperationLogRecord<'a> {
     }
 
     fn change(op: &'a str, scope: &'a str, summary: &'a str, transaction_id: &'a str) -> Self {
-        Self {
-            kind: LOG_KIND_CHANGE,
-            op,
-            scope,
-            summary,
-            transaction_id: Some(transaction_id),
-        }
+        Self::new(LOG_KIND_CHANGE, op, scope, summary, Some(transaction_id))
     }
 
     fn change_observation<T: Serialize>(
@@ -6325,13 +6329,7 @@ impl<'a> OperationLogRecord<'a> {
     }
 
     fn verify(op: &'a str, scope: &'a str, summary: &'a str) -> Self {
-        Self {
-            kind: LOG_KIND_VERIFY,
-            op,
-            scope,
-            summary,
-            transaction_id: None,
-        }
+        Self::new(LOG_KIND_VERIFY, op, scope, summary, None)
     }
 
     fn verify_observation<T: Serialize>(op: &'a str, observation: &'a Observation<T>) -> Self {
@@ -9599,6 +9597,19 @@ rename to new name.txt
 
     #[test]
     fn operation_log_record_constructors_preserve_log_contract() {
+        let record = OperationLogRecord::new(
+            LOG_KIND_CHANGE,
+            LOG_OP_PATCH,
+            "change.patch",
+            "patched",
+            Some("tx-0"),
+        );
+        assert_eq!(record.kind, LOG_KIND_CHANGE);
+        assert_eq!(record.op, LOG_OP_PATCH);
+        assert_eq!(record.scope, "change.patch");
+        assert_eq!(record.summary, "patched");
+        assert_eq!(record.transaction_id, Some("tx-0"));
+
         let observe = OperationLogRecord::observe(LOG_OP_STATUS, ".", "status summary");
         assert_eq!(observe.kind, LOG_KIND_OBSERVE);
         assert_eq!(observe.op, LOG_OP_STATUS);
