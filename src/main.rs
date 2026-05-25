@@ -2609,7 +2609,13 @@ fn search_match_texts_truncated(data: &SearchData) -> bool {
 }
 
 fn search_summary(data: &SearchData) -> String {
-    let mut summary = if search_results_omitted(data) {
+    let mut summary = search_result_count_summary(data);
+    append_search_match_text_truncation_note(&mut summary, data);
+    summary
+}
+
+fn search_result_count_summary(data: &SearchData) -> String {
+    if search_results_omitted(data) {
         format!(
             "{} match(es) for {:?}, showing {}",
             data.total_matches,
@@ -2618,14 +2624,16 @@ fn search_summary(data: &SearchData) -> String {
         )
     } else {
         format!("{} match(es) for {:?}", data.total_matches, data.query)
-    };
+    }
+}
+
+fn append_search_match_text_truncation_note(summary: &mut String, data: &SearchData) {
     if search_match_texts_truncated(data) {
         summary.push_str(&format!(
             ", truncated {} match text(s)",
             data.truncated_match_texts
         ));
     }
-    summary
 }
 
 fn impact_truncated(data: &ImpactData) -> bool {
