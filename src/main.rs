@@ -5684,14 +5684,7 @@ fn read_captured_output_with_limit<R: Read>(
     Ok(CapturedOutput { text, truncated })
 }
 
-fn append_log(
-    workspace: &Workspace,
-    kind: &str,
-    op: &str,
-    scope: &str,
-    summary: &str,
-    transaction_id: Option<&str>,
-) -> Result<()> {
+fn append_operation_log(workspace: &Workspace, record: OperationLogRecord<'_>) -> Result<()> {
     let log_dir = workspace.root.join(LOG_DIR);
     fs::create_dir_all(&log_dir)
         .with_context(|| format!("failed to create log directory {}", log_dir.display()))?;
@@ -5699,11 +5692,11 @@ fn append_log(
     let entry = LogEntry {
         id: new_id("op"),
         timestamp_unix_ms: now_ms(),
-        kind: kind.to_string(),
-        op: op.to_string(),
-        scope: truncate_inline(scope, MAX_LOG_SCOPE),
-        summary: truncate_inline(summary, MAX_LOG_SUMMARY),
-        transaction_id: transaction_id.map(ToOwned::to_owned),
+        kind: record.kind.to_string(),
+        op: record.op.to_string(),
+        scope: truncate_inline(record.scope, MAX_LOG_SCOPE),
+        summary: truncate_inline(record.summary, MAX_LOG_SUMMARY),
+        transaction_id: record.transaction_id.map(ToOwned::to_owned),
     };
     let line = serde_json::to_string(&entry)?;
     use std::io::Write;
@@ -5793,17 +5786,6 @@ impl<'a> OperationLogRecord<'a> {
     fn verify_observation<T: Serialize>(op: &'a str, observation: &'a Observation<T>) -> Self {
         Self::verify(op, &observation.scope, &observation.summary)
     }
-}
-
-fn append_operation_log(workspace: &Workspace, record: OperationLogRecord<'_>) -> Result<()> {
-    append_log(
-        workspace,
-        record.kind,
-        record.op,
-        record.scope,
-        record.summary,
-        record.transaction_id,
-    )
 }
 
 fn output_recorded_observation<T, F>(
@@ -8370,24 +8352,19 @@ rename to new name.txt
             root: temp.path().to_path_buf(),
             is_git_repo: false,
         };
-        append_log(&workspace, LOG_KIND_OBSERVE, LOG_OP_MAP, ".", "map", None)
-            .expect("first log entry should be written");
-        append_log(
+        append_operation_log(
             &workspace,
-            LOG_KIND_OBSERVE,
-            LOG_OP_STATUS,
-            ".",
-            "status",
-            None,
+            OperationLogRecord::observe(LOG_OP_MAP, ".", "map"),
+        )
+        .expect("first log entry should be written");
+        append_operation_log(
+            &workspace,
+            OperationLogRecord::observe(LOG_OP_STATUS, ".", "status"),
         )
         .expect("second log entry should be written");
-        append_log(
+        append_operation_log(
             &workspace,
-            LOG_KIND_OBSERVE,
-            LOG_OP_SEARCH,
-            "needle",
-            "search",
-            None,
+            OperationLogRecord::observe(LOG_OP_SEARCH, "needle", "search"),
         )
         .expect("third log entry should be written");
         let args = LogArgs {
