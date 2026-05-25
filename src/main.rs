@@ -3194,11 +3194,7 @@ fn related_data_from_related_cli(
     rank: RankingMethod,
 ) -> RelatedData {
     let related = bounded_related_cli_files(output.related, max_results);
-    let commits_matched = related
-        .iter()
-        .map(|item| item.cochanged_commits)
-        .max()
-        .unwrap_or(0);
+    let commits_matched = max_cochanged_commits(related.iter().map(|item| item.cochanged_commits));
     cochange_related_data(
         related_data_metadata(
             target,
@@ -3658,11 +3654,7 @@ fn impact_by_related_cli(
         );
     }
 
-    let commits_matched = impacted
-        .iter()
-        .map(|item| item.cochanged_commits)
-        .max()
-        .unwrap_or(0);
+    let commits_matched = max_cochanged_commits(impacted.iter().map(|item| item.cochanged_commits));
 
     Ok(Some(cochange_impact_data(
         impact_data_metadata(
@@ -4548,6 +4540,10 @@ fn related_cli_aggregate_relationship_source(rank: RankingMethod) -> String {
         RELATIONSHIP_SOURCE_RELATED_CLI,
         rank.as_str()
     )
+}
+
+fn max_cochanged_commits(commits: impl IntoIterator<Item = usize>) -> usize {
+    commits.into_iter().max().unwrap_or(0)
 }
 
 fn uses_cochange_index(use_index: bool, rank: RankingMethod) -> bool {
@@ -7465,6 +7461,8 @@ rename to new name.txt
             related_cli_aggregate_relationship_source(RankingMethod::Direct),
             "related-cli:direct:aggregate"
         );
+        assert_eq!(max_cochanged_commits([2, 5, 3]), 5);
+        assert_eq!(max_cochanged_commits([]), 0);
     }
 
     #[test]
