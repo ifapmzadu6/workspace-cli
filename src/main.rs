@@ -522,6 +522,10 @@ impl BoundedMapItems {
     fn total_items(&self) -> usize {
         self.total_items
     }
+
+    fn omitted_count(&self) -> usize {
+        self.total_items.saturating_sub(self.items.len())
+    }
 }
 
 #[derive(Serialize)]
@@ -2865,20 +2869,11 @@ fn detect_structure(signals: &MapSignals) -> (StructureSummary, MapOmittedCounts
         docs: signals.docs.observed(),
     };
     let omitted = MapOmittedCounts {
-        directories: signals
-            .directories
-            .total_items()
-            .saturating_sub(structure.directories.len()),
+        directories: signals.directories.omitted_count(),
         entrypoints: 0,
-        tests: signals
-            .tests
-            .total_items()
-            .saturating_sub(structure.tests.len()),
+        tests: signals.tests.omitted_count(),
         configs: config_count.saturating_sub(structure.configs.len()),
-        docs: signals
-            .docs
-            .total_items()
-            .saturating_sub(structure.docs.len()),
+        docs: signals.docs.omitted_count(),
         large_files: 0,
     };
 
@@ -9604,6 +9599,7 @@ not json
         let observed = items.observed();
         assert_eq!(items.total_items(), 90);
         assert_eq!(observed.len(), MAX_MAP_LIST_ITEMS);
+        assert_eq!(items.omitted_count(), 10);
         assert_eq!(observed[0], "item_000");
         assert_eq!(observed[MAX_MAP_LIST_ITEMS - 1], "item_079");
     }
