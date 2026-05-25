@@ -104,6 +104,15 @@ const INDEX_STATUS_NOT_GIT_REPO: &str = "not_git_repo";
 const SUMMARY_NOT_GIT_REPOSITORY: &str = "not a git repository";
 const OUTPUT_TRUNCATED_MARKER: &str = "\n[output truncated]\n";
 const INLINE_TRUNCATED_MARKER: &str = " [truncated]";
+const SUMMARY_NOTE_MAP_TRUNCATED: &str = " (map truncated)";
+const SUMMARY_NOTE_STATUS_TRUNCATED: &str = " (status truncated)";
+const SUMMARY_NOTE_SEED_FILES_TRUNCATED: &str = " (seed files truncated)";
+const SUMMARY_NOTE_FILES_TRUNCATED: &str = " (files truncated)";
+const SUMMARY_NOTE_SUMMARY_AND_PATCH_TRUNCATED: &str = " (summary and patch truncated)";
+const SUMMARY_NOTE_SUMMARY_TRUNCATED: &str = " (summary truncated)";
+const SUMMARY_NOTE_PATCH_TRUNCATED: &str = " (patch truncated)";
+const SUMMARY_NOTE_OUTPUT_TRUNCATED: &str = " (output truncated)";
+const SUMMARY_NOTE_READ_TRUNCATED: &str = " (truncated)";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -2496,7 +2505,7 @@ fn map_summary(map: &WorkspaceMap, truncated: bool) -> String {
         map.stats.file_count,
         join_or_none(&map.stack.languages)
     );
-    append_note_if(&mut summary, truncated, " (map truncated)");
+    append_note_if(&mut summary, truncated, SUMMARY_NOTE_MAP_TRUNCATED);
     summary
 }
 
@@ -2517,7 +2526,7 @@ fn status_summary(data: &StatusData, truncated: bool) -> String {
     } else {
         SUMMARY_NOT_GIT_REPOSITORY.to_string()
     };
-    append_note_if(&mut summary, truncated, " (status truncated)");
+    append_note_if(&mut summary, truncated, SUMMARY_NOTE_STATUS_TRUNCATED);
     summary
 }
 
@@ -2577,7 +2586,7 @@ fn impact_summary(data: &ImpactData) -> String {
         append_note_if(
             &mut summary,
             impact_seed_files_omitted(data),
-            " (seed files truncated)",
+            SUMMARY_NOTE_SEED_FILES_TRUNCATED,
         );
         summary
     } else {
@@ -2638,7 +2647,11 @@ fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool)
     if let Some(note) = diff_output_truncation_note(summary_truncated, patch_truncated) {
         summary.push_str(note);
     }
-    append_note_if(&mut summary, diff_files_omitted(data), " (files truncated)");
+    append_note_if(
+        &mut summary,
+        diff_files_omitted(data),
+        SUMMARY_NOTE_FILES_TRUNCATED,
+    );
     summary
 }
 
@@ -2651,9 +2664,9 @@ fn diff_output_truncation_note(
     patch_truncated: bool,
 ) -> Option<&'static str> {
     match (summary_truncated, patch_truncated) {
-        (true, true) => Some(" (summary and patch truncated)"),
-        (true, false) => Some(" (summary truncated)"),
-        (false, true) => Some(" (patch truncated)"),
+        (true, true) => Some(SUMMARY_NOTE_SUMMARY_AND_PATCH_TRUNCATED),
+        (true, false) => Some(SUMMARY_NOTE_SUMMARY_TRUNCATED),
+        (false, true) => Some(SUMMARY_NOTE_PATCH_TRUNCATED),
         (false, false) => None,
     }
 }
@@ -2669,7 +2682,7 @@ fn transaction_file_summary(
     append_note_if(
         &mut summary,
         transaction_files_truncated(omitted_files),
-        " (files truncated)",
+        SUMMARY_NOTE_FILES_TRUNCATED,
     );
     summary
 }
@@ -2679,7 +2692,7 @@ fn run_summary(exit_code: Option<i32>, duration_ms: u128, truncated: bool) -> St
         .map(|code| code.to_string())
         .unwrap_or_else(|| "signal".to_string());
     let mut summary = format!("command exited with {status} in {duration_ms}ms");
-    append_note_if(&mut summary, truncated, " (output truncated)");
+    append_note_if(&mut summary, truncated, SUMMARY_NOTE_OUTPUT_TRUNCATED);
     summary
 }
 
@@ -2688,7 +2701,7 @@ fn read_summary(path: &str, lines: Option<&str>, truncated: bool) -> String {
         Some(lines) => format!("read {path} lines {lines}"),
         None => format!("read {path}"),
     };
-    append_note_if(&mut summary, truncated, " (truncated)");
+    append_note_if(&mut summary, truncated, SUMMARY_NOTE_READ_TRUNCATED);
     summary
 }
 
@@ -7443,6 +7456,18 @@ rename to new name.txt
         assert_eq!(SUMMARY_NOT_GIT_REPOSITORY, "not a git repository");
         assert_eq!(OUTPUT_TRUNCATED_MARKER, "\n[output truncated]\n");
         assert_eq!(INLINE_TRUNCATED_MARKER, " [truncated]");
+        assert_eq!(SUMMARY_NOTE_MAP_TRUNCATED, " (map truncated)");
+        assert_eq!(SUMMARY_NOTE_STATUS_TRUNCATED, " (status truncated)");
+        assert_eq!(SUMMARY_NOTE_SEED_FILES_TRUNCATED, " (seed files truncated)");
+        assert_eq!(SUMMARY_NOTE_FILES_TRUNCATED, " (files truncated)");
+        assert_eq!(
+            SUMMARY_NOTE_SUMMARY_AND_PATCH_TRUNCATED,
+            " (summary and patch truncated)"
+        );
+        assert_eq!(SUMMARY_NOTE_SUMMARY_TRUNCATED, " (summary truncated)");
+        assert_eq!(SUMMARY_NOTE_PATCH_TRUNCATED, " (patch truncated)");
+        assert_eq!(SUMMARY_NOTE_OUTPUT_TRUNCATED, " (output truncated)");
+        assert_eq!(SUMMARY_NOTE_READ_TRUNCATED, " (truncated)");
     }
 
     #[test]
