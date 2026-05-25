@@ -2879,6 +2879,14 @@ fn transaction_file_summary(
     summary
 }
 
+fn patch_transaction_human_summary(transaction_id: &str) -> String {
+    format!("  transaction: {transaction_id}")
+}
+
+fn rollback_transaction_human_summary(rollback_transaction_id: &str) -> String {
+    format!("  rollback transaction: {rollback_transaction_id}")
+}
+
 fn run_summary(exit_code: Option<i32>, duration_ms: u128, truncated: bool) -> String {
     let status = run_exit_status_label(exit_code);
     let mut summary = format!("command exited with {status} in {duration_ms}ms");
@@ -6753,7 +6761,10 @@ fn print_diff(observation: &Observation<DiffData>) -> Result<()> {
 
 fn print_patch(observation: &Observation<PatchData>) -> Result<()> {
     println!("{}", observation.summary);
-    println!("  transaction: {}", observation.data.transaction_id);
+    println!(
+        "{}",
+        patch_transaction_human_summary(&observation.data.transaction_id)
+    );
     print_transaction_files(
         &observation.data.files_changed,
         observation.data.omitted_files,
@@ -6791,8 +6802,8 @@ fn print_log(observation: &Observation<LogData>) -> Result<()> {
 fn print_rollback(observation: &Observation<RollbackData>) -> Result<()> {
     println!("{}", observation.summary);
     println!(
-        "  rollback transaction: {}",
-        observation.data.rollback_transaction_id
+        "{}",
+        rollback_transaction_human_summary(&observation.data.rollback_transaction_id)
     );
     print_transaction_files(
         &observation.data.files_changed,
@@ -9364,6 +9375,14 @@ rename to new name.txt
         assert_eq!(
             transaction_file_summary("rolled back", "tx-123", 3, 2),
             "rolled back transaction tx-123 touching 3 file(s) (files truncated)"
+        );
+        assert_eq!(
+            patch_transaction_human_summary("tx-123"),
+            "  transaction: tx-123"
+        );
+        assert_eq!(
+            rollback_transaction_human_summary("rb-123"),
+            "  rollback transaction: rb-123"
         );
     }
 
