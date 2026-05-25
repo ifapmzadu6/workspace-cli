@@ -2703,6 +2703,18 @@ fn index_cochange_summary(data: &IndexCochangeData) -> String {
     )
 }
 
+fn index_cochange_human_summary_lines(data: &IndexCochangeData) -> Vec<String> {
+    vec![
+        format!("  path: {}", data.path),
+        format!("  head: {}", data.head.as_deref().unwrap_or("unknown")),
+        format!("  scanned: {} commit(s)", data.commits_scanned),
+        format!("  indexed: {} commit(s)", data.commits_indexed),
+        format!("  ignored broad commits: {}", data.ignored_large_commits),
+        format!("  files: {}", data.file_count),
+        format!("  edges: {}", data.edge_count),
+    ]
+}
+
 fn related_summary(data: &RelatedData) -> String {
     if data.is_repo {
         related_repository_summary(data)
@@ -6606,13 +6618,9 @@ fn print_search(observation: &Observation<SearchData>) -> Result<()> {
 fn print_index_cochange(observation: &Observation<IndexCochangeData>) -> Result<()> {
     let data = &observation.data;
     println!("{}", observation.summary);
-    println!("  path: {}", data.path);
-    println!("  head: {}", data.head.as_deref().unwrap_or("unknown"));
-    println!("  scanned: {} commit(s)", data.commits_scanned);
-    println!("  indexed: {} commit(s)", data.commits_indexed);
-    println!("  ignored broad commits: {}", data.ignored_large_commits);
-    println!("  files: {}", data.file_count);
-    println!("  edges: {}", data.edge_count);
+    for line in index_cochange_human_summary_lines(data) {
+        println!("{line}");
+    }
     Ok(())
 }
 
@@ -8699,7 +8707,7 @@ rename to new name.txt
 
     #[test]
     fn index_cochange_summary_reports_edges_and_commits() {
-        let data = IndexCochangeData {
+        let mut data = IndexCochangeData {
             path: ".workspace/index/cochange.json".to_string(),
             version: 1,
             generated_at_unix_ms: 1,
@@ -8716,6 +8724,24 @@ rename to new name.txt
         assert_eq!(
             index_cochange_summary(&data),
             "indexed 2 co-change edge(s) from 4 commit(s)"
+        );
+        assert_eq!(
+            index_cochange_human_summary_lines(&data),
+            vec![
+                "  path: .workspace/index/cochange.json".to_string(),
+                "  head: abc123".to_string(),
+                "  scanned: 5 commit(s)".to_string(),
+                "  indexed: 4 commit(s)".to_string(),
+                "  ignored broad commits: 1".to_string(),
+                "  files: 3".to_string(),
+                "  edges: 2".to_string(),
+            ]
+        );
+
+        data.head = None;
+        assert_eq!(
+            index_cochange_human_summary_lines(&data)[1],
+            "  head: unknown"
         );
     }
 
