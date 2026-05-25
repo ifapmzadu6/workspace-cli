@@ -2909,6 +2909,17 @@ fn append_log_lines_omission_note(summary: &mut String, data: &LogData) {
     }
 }
 
+fn log_entry_human_summary(entry: &LogEntry) -> String {
+    format!(
+        "{} {} {} {} - {}",
+        entry.timestamp_unix_ms, entry.kind, entry.op, entry.scope, entry.summary
+    )
+}
+
+fn log_omitted_lines_human_summary(omitted_lines: usize) -> String {
+    format!("... {omitted_lines} older log line(s) omitted")
+}
+
 fn log_truncated(data: &LogData) -> bool {
     log_lines_omitted(data)
 }
@@ -6761,13 +6772,10 @@ fn print_log(observation: &Observation<LogData>) -> Result<()> {
         return Ok(());
     }
     for entry in &data.entries {
-        println!(
-            "{} {} {} {} - {}",
-            entry.timestamp_unix_ms, entry.kind, entry.op, entry.scope, entry.summary
-        );
+        println!("{}", log_entry_human_summary(entry));
     }
     if log_lines_omitted(data) {
-        println!("... {} older log line(s) omitted", data.omitted_lines);
+        println!("{}", log_omitted_lines_human_summary(data.omitted_lines));
     }
     Ok(())
 }
@@ -9411,6 +9419,14 @@ rename to new name.txt
             "1 operation(s) (2 older log line(s) omitted)"
         );
         assert!(log_lines_omitted(&data));
+        assert_eq!(
+            log_entry_human_summary(&data.entries[0]),
+            "1 observe status . - entry"
+        );
+        assert_eq!(
+            log_omitted_lines_human_summary(data.omitted_lines),
+            "... 2 older log line(s) omitted"
+        );
     }
 
     #[test]
