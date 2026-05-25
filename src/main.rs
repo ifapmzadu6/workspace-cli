@@ -6397,10 +6397,7 @@ fn read_log_entries<R: BufRead>(mut reader: R, limit: usize) -> Result<LogWindow
                 .fill_buf()
                 .with_context(|| format!("failed to read operation log line {line_number}"))?;
             if buffer.is_empty() {
-                if line.saw_non_whitespace {
-                    push_log_window_line(&mut window, limit, line.into_stored());
-                    non_empty_lines += 1;
-                }
+                push_log_window_line_if_non_empty(&mut window, limit, line, &mut non_empty_lines);
                 break;
             }
 
@@ -6418,10 +6415,7 @@ fn read_log_entries<R: BufRead>(mut reader: R, limit: usize) -> Result<LogWindow
 
         reader.consume(bytes_to_consume);
         if reached_line_end {
-            if line.saw_non_whitespace {
-                push_log_window_line(&mut window, limit, line.into_stored());
-                non_empty_lines += 1;
-            }
+            push_log_window_line_if_non_empty(&mut window, limit, line, &mut non_empty_lines);
             line_number += 1;
             line = PendingLogLine::new(line_number);
         }
@@ -6432,6 +6426,18 @@ fn read_log_entries<R: BufRead>(mut reader: R, limit: usize) -> Result<LogWindow
         entries: parse_log_entries(window)?,
         omitted_lines,
     })
+}
+
+fn push_log_window_line_if_non_empty(
+    window: &mut VecDeque<StoredLogLine>,
+    limit: usize,
+    line: PendingLogLine,
+    non_empty_lines: &mut usize,
+) {
+    if line.saw_non_whitespace {
+        push_log_window_line(window, limit, line.into_stored());
+        *non_empty_lines += 1;
+    }
 }
 
 fn push_log_window_line(window: &mut VecDeque<StoredLogLine>, limit: usize, line: StoredLogLine) {
