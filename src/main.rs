@@ -5689,7 +5689,16 @@ fn append_operation_log(workspace: &Workspace, record: OperationLogRecord<'_>) -
     fs::create_dir_all(&log_dir)
         .with_context(|| format!("failed to create log directory {}", log_dir.display()))?;
 
-    let entry = LogEntry {
+    let entry = operation_log_entry(record);
+    let line = serde_json::to_string(&entry)?;
+    use std::io::Write;
+    let mut file = open_log_for_append(workspace)?;
+    writeln!(file, "{line}")?;
+    Ok(())
+}
+
+fn operation_log_entry(record: OperationLogRecord<'_>) -> LogEntry {
+    LogEntry {
         id: new_id("op"),
         timestamp_unix_ms: now_ms(),
         kind: record.kind.to_string(),
@@ -5697,12 +5706,7 @@ fn append_operation_log(workspace: &Workspace, record: OperationLogRecord<'_>) -
         scope: truncate_inline(record.scope, MAX_LOG_SCOPE),
         summary: truncate_inline(record.summary, MAX_LOG_SUMMARY),
         transaction_id: record.transaction_id.map(ToOwned::to_owned),
-    };
-    let line = serde_json::to_string(&entry)?;
-    use std::io::Write;
-    let mut file = open_log_for_append(workspace)?;
-    writeln!(file, "{line}")?;
-    Ok(())
+    }
 }
 
 fn output_logged_observation<T, F>(
@@ -8542,6 +8546,30 @@ rename to new name.txt
         assert_eq!(log.entries[0].scope, "change.patch");
         assert_eq!(log.entries[0].summary, "patched");
         assert_eq!(log.entries[0].transaction_id.as_deref(), Some("tx-1"));
+    }
+
+    #[test]
+    fn operation_log_entry_bounds_record_fields() {
+        let scope = format!("{}tail", "s".repeat(MAX_LOG_SCOPE + 10));
+        let summary = format!("{}tail", "m".repeat(MAX_LOG_SUMMARY + 10));
+
+        let entry = operation_log_entry(OperationLogRecord::change(
+            LOG_OP_PATCH,
+            &scope,
+            &summary,
+            "tx-1",
+        ));
+
+        assert!(entry.id.starts_with("op-"));
+        assert_eq!(entry.kind, LOG_KIND_CHANGE);
+        assert_eq!(entry.op, LOG_OP_PATCH);
+        assert!(entry.scope.contains("[truncated]"));
+        assert!(!entry.scope.contains("tail"));
+        assert!(entry.scope.chars().count() < MAX_LOG_SCOPE + 20);
+        assert!(entry.summary.contains("[truncated]"));
+        assert!(!entry.summary.contains("tail"));
+        assert!(entry.summary.chars().count() < MAX_LOG_SUMMARY + 20);
+        assert_eq!(entry.transaction_id.as_deref(), Some("tx-1"));
     }
 
     #[test]
