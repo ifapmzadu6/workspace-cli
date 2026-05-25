@@ -6625,13 +6625,7 @@ fn print_related(observation: &Observation<RelatedData>) -> Result<()> {
         )
     );
     for file in &data.related {
-        println!(
-            "  {:.3}  {}  ({} co-change commit(s), samples: {})",
-            file.score,
-            file.path,
-            file.cochanged_commits,
-            join_or_none(&file.sample_commits)
-        );
+        println!("{}", related_file_human_summary(file));
     }
     Ok(())
 }
@@ -6657,14 +6651,7 @@ fn print_impact(observation: &Observation<ImpactData>) -> Result<()> {
         )
     );
     for file in &data.impacted {
-        println!(
-            "  {:.3}  {}  ({} co-change commit(s), seeds: {}, samples: {})",
-            file.score,
-            file.path,
-            file.cochanged_commits,
-            join_or_none(&file.seed_files),
-            join_or_none(&file.sample_commits)
-        );
+        println!("{}", impact_file_human_summary(file));
     }
     Ok(())
 }
@@ -6676,6 +6663,27 @@ fn relationship_scan_summary(
 ) -> String {
     format!(
         "  scanned: {commits_scanned} commit(s), matched: {commits_matched}, ignored broad commits: {ignored_large_commits}"
+    )
+}
+
+fn related_file_human_summary(file: &RelatedFile) -> String {
+    format!(
+        "  {:.3}  {}  ({} co-change commit(s), samples: {})",
+        file.score,
+        file.path,
+        file.cochanged_commits,
+        join_or_none(&file.sample_commits)
+    )
+}
+
+fn impact_file_human_summary(file: &ImpactFile) -> String {
+    format!(
+        "  {:.3}  {}  ({} co-change commit(s), seeds: {}, samples: {})",
+        file.score,
+        file.path,
+        file.cochanged_commits,
+        join_or_none(&file.seed_files),
+        join_or_none(&file.sample_commits)
     )
 }
 
@@ -8810,6 +8818,27 @@ rename to new name.txt
         assert_eq!(
             relationship_scan_summary(5, 2, 1),
             "  scanned: 5 commit(s), matched: 2, ignored broad commits: 1"
+        );
+        assert_eq!(
+            related_file_human_summary(&RelatedFile {
+                path: "src/related.rs".to_string(),
+                score: 2.0 / 3.0,
+                cochanged_commits: 2,
+                weighted_cochanges: 1.0,
+                sample_commits: vec!["abc123".to_string()],
+            }),
+            "  0.667  src/related.rs  (2 co-change commit(s), samples: abc123)"
+        );
+        assert_eq!(
+            impact_file_human_summary(&ImpactFile {
+                path: "src/impact.rs".to_string(),
+                score: 0.25,
+                cochanged_commits: 0,
+                weighted_cochanges: 0.0,
+                seed_files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+                sample_commits: vec![],
+            }),
+            "  0.250  src/impact.rs  (0 co-change commit(s), seeds: src/a.rs, src/b.rs, samples: none)"
         );
 
         let temp = tempfile::TempDir::new().expect("temp dir should be created");
