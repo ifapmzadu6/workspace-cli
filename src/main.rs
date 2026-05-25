@@ -1790,12 +1790,16 @@ fn changed_file_evidence(files_changed: &[String], reason: &str) -> Vec<Evidence
     files_changed
         .iter()
         .take(MAX_CHANGED_FILES)
-        .map(|path| Evidence {
-            path: path.clone(),
-            lines: None,
-            reason: reason.to_string(),
-        })
+        .map(|path| evidence_item(path.clone(), None, reason.to_string()))
         .collect()
+}
+
+fn evidence_item(path: String, lines: Option<String>, reason: String) -> Evidence {
+    Evidence {
+        path,
+        lines,
+        reason,
+    }
 }
 
 fn read_next_observations<'a, I>(workspace: &Workspace, paths: I) -> Vec<String>
@@ -1814,10 +1818,12 @@ fn search_evidence(matches: &[SearchMatch]) -> Vec<Evidence> {
     matches
         .iter()
         .take(MAX_EVIDENCE_ITEMS)
-        .map(|item| Evidence {
-            path: item.path.clone(),
-            lines: Some(item.line.to_string()),
-            reason: EVIDENCE_REASON_TEXT_MATCH.to_string(),
+        .map(|item| {
+            evidence_item(
+                item.path.clone(),
+                Some(item.line.to_string()),
+                EVIDENCE_REASON_TEXT_MATCH.to_string(),
+            )
         })
         .collect()
 }
@@ -1872,11 +1878,11 @@ fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
 }
 
 fn read_evidence(data: &ReadData) -> Vec<Evidence> {
-    vec![Evidence {
-        path: data.path.clone(),
-        lines: data.lines.clone(),
-        reason: EVIDENCE_REASON_REQUESTED_FILE_CONTENT.to_string(),
-    }]
+    vec![evidence_item(
+        data.path.clone(),
+        data.lines.clone(),
+        EVIDENCE_REASON_REQUESTED_FILE_CONTENT.to_string(),
+    )]
 }
 
 fn read_line_label(range: Option<(usize, usize)>) -> Option<String> {
@@ -3279,11 +3285,7 @@ fn map_evidence(map: &WorkspaceMap) -> Vec<Evidence> {
     map.important_files
         .iter()
         .take(MAX_MAP_EVIDENCE_ITEMS)
-        .map(|file| Evidence {
-            path: file.path.clone(),
-            lines: None,
-            reason: file.reason.clone(),
-        })
+        .map(|file| evidence_item(file.path.clone(), None, file.reason.clone()))
         .collect()
 }
 
@@ -4600,11 +4602,7 @@ fn related_evidence(data: &RelatedData) -> Vec<Evidence> {
     data.related
         .iter()
         .take(MAX_EVIDENCE_ITEMS)
-        .map(|file| Evidence {
-            path: file.path.clone(),
-            lines: None,
-            reason: related_evidence_reason(data, file),
-        })
+        .map(|file| evidence_item(file.path.clone(), None, related_evidence_reason(data, file)))
         .collect()
 }
 
@@ -4632,11 +4630,7 @@ fn impact_evidence(data: &ImpactData) -> Vec<Evidence> {
     data.impacted
         .iter()
         .take(MAX_EVIDENCE_ITEMS)
-        .map(|file| Evidence {
-            path: file.path.clone(),
-            lines: None,
-            reason: impact_evidence_reason(data, file),
-        })
+        .map(|file| evidence_item(file.path.clone(), None, impact_evidence_reason(data, file)))
         .collect()
 }
 
