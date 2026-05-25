@@ -1111,13 +1111,13 @@ impl Workspace {
 fn cmd_map(workspace: &Workspace, args: MapArgs) -> Result<()> {
     let map = observed_map(workspace, &args)?;
     let observation = map_observation(map);
-    output_logged_observation(workspace, args.json, LOG_OP_MAP, &observation, print_map)
+    output_best_effort_logged_observation(workspace, args.json, LOG_OP_MAP, &observation, print_map)
 }
 
 fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
     let data = observed_status(workspace)?;
     let observation = status_observation(data);
-    output_logged_observation(
+    output_best_effort_logged_observation(
         workspace,
         args.json,
         LOG_OP_STATUS,
@@ -1129,7 +1129,7 @@ fn cmd_status(workspace: &Workspace, args: JsonArgs) -> Result<()> {
 fn cmd_search(workspace: &Workspace, args: SearchArgs) -> Result<()> {
     let data = observed_search(workspace, &args)?;
     let observation = search_observation(workspace, data);
-    output_logged_observation(
+    output_best_effort_logged_observation(
         workspace,
         args.json,
         LOG_OP_SEARCH,
@@ -1148,7 +1148,7 @@ fn cmd_index(workspace: &Workspace, args: IndexArgs) -> Result<()> {
 fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> {
     let data = observed_index_status(workspace);
     let observation = index_status_observation(data);
-    output_logged_observation(
+    output_best_effort_logged_observation(
         workspace,
         args.json,
         LOG_OP_INDEX_STATUS,
@@ -1172,7 +1172,7 @@ fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<
 fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
     let related = observed_related_args(workspace, &args)?;
     let observation = related_observation(workspace, &related.target, related.data);
-    output_logged_observation(
+    output_best_effort_logged_observation(
         workspace,
         args.json,
         LOG_OP_RELATED,
@@ -1184,7 +1184,7 @@ fn cmd_related(workspace: &Workspace, args: RelatedArgs) -> Result<()> {
 fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
     let data = observed_impact_args(workspace, &args)?;
     let observation = impact_observation(workspace, data);
-    output_logged_observation(
+    output_best_effort_logged_observation(
         workspace,
         args.json,
         LOG_OP_IMPACT,
@@ -1196,13 +1196,25 @@ fn cmd_impact(workspace: &Workspace, args: ImpactArgs) -> Result<()> {
 fn cmd_read(workspace: &Workspace, args: ReadArgs) -> Result<()> {
     let read = observed_read_args(workspace, &args)?;
     let observation = read_observation(read);
-    output_logged_observation(workspace, args.json, LOG_OP_READ, &observation, print_read)
+    output_best_effort_logged_observation(
+        workspace,
+        args.json,
+        LOG_OP_READ,
+        &observation,
+        print_read,
+    )
 }
 
 fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
     let diff = observed_diff(workspace, args.summary)?;
     let observation = diff_observation(workspace, diff);
-    output_logged_observation(workspace, args.json, LOG_OP_DIFF, &observation, print_diff)
+    output_best_effort_logged_observation(
+        workspace,
+        args.json,
+        LOG_OP_DIFF,
+        &observation,
+        print_diff,
+    )
 }
 
 fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
@@ -5709,7 +5721,7 @@ fn operation_log_entry(record: OperationLogRecord<'_>) -> LogEntry {
     }
 }
 
-fn output_logged_observation<T, F>(
+fn output_best_effort_logged_observation<T, F>(
     workspace: &Workspace,
     json: bool,
     op: &str,
@@ -8406,7 +8418,7 @@ rename to new name.txt
     }
 
     #[test]
-    fn output_logged_observation_records_observe_log_before_output() {
+    fn output_best_effort_logged_observation_records_observe_log_before_output() {
         let temp = tempfile::TempDir::new().expect("temp dir should be created");
         let workspace = Workspace {
             root: temp.path().to_path_buf(),
@@ -8426,8 +8438,14 @@ rename to new name.txt
             next_observations: vec![],
         };
 
-        output_logged_observation(&workspace, false, LOG_OP_STATUS, &observation, |_| Ok(()))
-            .expect("observation should be logged and output");
+        output_best_effort_logged_observation(
+            &workspace,
+            false,
+            LOG_OP_STATUS,
+            &observation,
+            |_| Ok(()),
+        )
+        .expect("observation should be logged and output");
 
         let log = read_log(&workspace, 10).expect("log should be readable");
         assert_eq!(log.entries.len(), 1);
