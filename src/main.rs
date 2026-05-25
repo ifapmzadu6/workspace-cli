@@ -2576,7 +2576,7 @@ fn read_summary(path: &str, lines: Option<&str>, truncated: bool) -> String {
 
 fn log_summary(data: &LogData) -> String {
     let mut summary = format!("{} operation(s)", data.entries.len());
-    if data.omitted_lines > 0 {
+    if log_lines_omitted(data) {
         summary.push_str(&format!(
             " ({} older log line(s) omitted)",
             data.omitted_lines
@@ -2586,6 +2586,10 @@ fn log_summary(data: &LogData) -> String {
 }
 
 fn log_truncated(data: &LogData) -> bool {
+    log_lines_omitted(data)
+}
+
+fn log_lines_omitted(data: &LogData) -> bool {
     data.omitted_lines > 0
 }
 
@@ -6503,21 +6507,19 @@ fn print_run(observation: &Observation<RunData>) -> Result<()> {
 }
 
 fn print_log(observation: &Observation<LogData>) -> Result<()> {
-    if observation.data.entries.is_empty() {
+    let data = &observation.data;
+    if data.entries.is_empty() {
         println!("no operations recorded");
         return Ok(());
     }
-    for entry in &observation.data.entries {
+    for entry in &data.entries {
         println!(
             "{} {} {} {} - {}",
             entry.timestamp_unix_ms, entry.kind, entry.op, entry.scope, entry.summary
         );
     }
-    if observation.data.omitted_lines > 0 {
-        println!(
-            "... {} older log line(s) omitted",
-            observation.data.omitted_lines
-        );
+    if log_lines_omitted(data) {
+        println!("... {} older log line(s) omitted", data.omitted_lines);
     }
     Ok(())
 }
@@ -7706,12 +7708,14 @@ rename to new name.txt
             entries: vec![],
         };
         assert!(log_truncated(&log));
+        assert!(log_lines_omitted(&log));
 
         let log = LogData {
             omitted_lines: 0,
             ..log
         };
         assert!(!log_truncated(&log));
+        assert!(!log_lines_omitted(&log));
     }
 
     #[test]
@@ -8783,6 +8787,7 @@ rename to new name.txt
             entries: vec![],
         };
         assert_eq!(log_summary(&data), "0 operation(s)");
+        assert!(!log_lines_omitted(&data));
 
         let data = LogData {
             log_path: ".workspace/log.jsonl".to_string(),
@@ -8801,6 +8806,7 @@ rename to new name.txt
             log_summary(&data),
             "1 operation(s) (2 older log line(s) omitted)"
         );
+        assert!(log_lines_omitted(&data));
     }
 
     #[test]
