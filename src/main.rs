@@ -1222,15 +1222,12 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
     let observation = patch_transaction_observation(workspace, &patch);
     let log_summary = patch_log_summary(args.description, &observation);
 
-    output_recorded_observation(
+    output_changed_observation_with_summary(
         workspace,
         args.json,
-        OperationLogRecord::change_observation_summary(
-            LOG_OP_PATCH,
-            &observation,
-            &log_summary,
-            &patch.transaction_id,
-        ),
+        LOG_OP_PATCH,
+        &log_summary,
+        &patch.transaction_id,
         &observation,
         print_patch,
     )
@@ -1334,13 +1331,7 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
     let run = execute_run_command(workspace, &args.command)?;
     let observation = run_observation(run);
 
-    output_recorded_observation(
-        workspace,
-        args.json,
-        OperationLogRecord::verify_observation(LOG_OP_RUN, &observation),
-        &observation,
-        print_run,
-    )
+    output_verified_observation(workspace, args.json, LOG_OP_RUN, &observation, print_run)
 }
 
 fn execute_run_command(workspace: &Workspace, command_text: &str) -> Result<ObservedRun> {
@@ -1380,14 +1371,11 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
     let rollback = apply_rollback_transaction(workspace, &args.transaction_id)?;
     let observation = rollback_transaction_observation(workspace, &args.transaction_id, &rollback);
 
-    output_recorded_observation(
+    output_changed_observation(
         workspace,
         args.json,
-        OperationLogRecord::change_observation(
-            LOG_OP_ROLLBACK,
-            &observation,
-            &rollback.rollback_transaction_id,
-        ),
+        LOG_OP_ROLLBACK,
+        &rollback.rollback_transaction_id,
         &observation,
         print_rollback,
     )
@@ -5759,6 +5747,69 @@ where
     )
 }
 
+fn output_changed_observation<T, F>(
+    workspace: &Workspace,
+    json: bool,
+    op: &str,
+    transaction_id: &str,
+    observation: &Observation<T>,
+    print_human: F,
+) -> Result<()>
+where
+    T: Serialize,
+    F: FnOnce(&Observation<T>) -> Result<()>,
+{
+    output_recorded_observation(
+        workspace,
+        json,
+        OperationLogRecord::change_observation(op, observation, transaction_id),
+        observation,
+        print_human,
+    )
+}
+
+fn output_changed_observation_with_summary<T, F>(
+    workspace: &Workspace,
+    json: bool,
+    op: &str,
+    summary: &str,
+    transaction_id: &str,
+    observation: &Observation<T>,
+    print_human: F,
+) -> Result<()>
+where
+    T: Serialize,
+    F: FnOnce(&Observation<T>) -> Result<()>,
+{
+    output_recorded_observation(
+        workspace,
+        json,
+        OperationLogRecord::change_observation_summary(op, observation, summary, transaction_id),
+        observation,
+        print_human,
+    )
+}
+
+fn output_verified_observation<T, F>(
+    workspace: &Workspace,
+    json: bool,
+    op: &str,
+    observation: &Observation<T>,
+    print_human: F,
+) -> Result<()>
+where
+    T: Serialize,
+    F: FnOnce(&Observation<T>) -> Result<()>,
+{
+    output_recorded_observation(
+        workspace,
+        json,
+        OperationLogRecord::verify_observation(op, observation),
+        observation,
+        print_human,
+    )
+}
+
 struct OperationLogRecord<'a> {
     kind: &'a str,
     op: &'a str,
@@ -8538,6 +8589,65 @@ rename to new name.txt
         assert_eq!(log.entries[0].scope, "change.patch");
         assert_eq!(log.entries[0].summary, "custom summary");
         assert_eq!(log.entries[0].transaction_id.as_deref(), Some("tx-1"));
+    }
+
+    #[test]
+    fn semantic_recorded_output_helpers_preserve_log_contracts() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        let observation = Observation {
+            kind: WORKSPACE_LOG_KIND.to_string(),
+            scope: LOG_FILE.to_string(),
+            summary: "observation summary".to_string(),
+            data: LogData {
+                log_path: LOG_FILE.to_string(),
+                omitted_lines: 0,
+                entries: vec![],
+            },
+            evidence: vec![],
+            truncated: false,
+            next_observations: vec![],
+        };
+
+        output_changed_observation(
+            &workspace,
+            false,
+            LOG_OP_ROLLBACK,
+            "rb-1",
+            &observation,
+            |_| Ok(()),
+        )
+        .expect("changed observation should be logged and output");
+        output_changed_observation_with_summary(
+            &workspace,
+            false,
+            LOG_OP_PATCH,
+            "custom summary",
+            "tx-1",
+            &observation,
+            |_| Ok(()),
+        )
+        .expect("changed observation with summary should be logged and output");
+        output_verified_observation(&workspace, false, LOG_OP_RUN, &observation, |_| Ok(()))
+            .expect("verified observation should be logged and output");
+
+        let log = read_log(&workspace, 10).expect("log should be readable");
+        assert_eq!(log.entries.len(), 3);
+        assert_eq!(log.entries[0].kind, LOG_KIND_CHANGE);
+        assert_eq!(log.entries[0].op, LOG_OP_ROLLBACK);
+        assert_eq!(log.entries[0].summary, "observation summary");
+        assert_eq!(log.entries[0].transaction_id.as_deref(), Some("rb-1"));
+        assert_eq!(log.entries[1].kind, LOG_KIND_CHANGE);
+        assert_eq!(log.entries[1].op, LOG_OP_PATCH);
+        assert_eq!(log.entries[1].summary, "custom summary");
+        assert_eq!(log.entries[1].transaction_id.as_deref(), Some("tx-1"));
+        assert_eq!(log.entries[2].kind, LOG_KIND_VERIFY);
+        assert_eq!(log.entries[2].op, LOG_OP_RUN);
+        assert_eq!(log.entries[2].summary, "observation summary");
+        assert!(log.entries[2].transaction_id.is_none());
     }
 
     #[test]
