@@ -102,6 +102,8 @@ const INDEX_STATUS_MISSING: &str = "missing";
 const INDEX_STATUS_INVALID: &str = "invalid";
 const INDEX_STATUS_NOT_GIT_REPO: &str = "not_git_repo";
 const SUMMARY_NOT_GIT_REPOSITORY: &str = "not a git repository";
+const OUTPUT_TRUNCATED_MARKER: &str = "\n[output truncated]\n";
+const INLINE_TRUNCATED_MARKER: &str = " [truncated]";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -5528,7 +5530,7 @@ fn append_limited_text(
 ) -> bool {
     for ch in text.chars() {
         if *char_count >= max_chars {
-            output.push_str("\n[output truncated]\n");
+            output.push_str(OUTPUT_TRUNCATED_MARKER);
             return true;
         }
         output.push(ch);
@@ -5937,7 +5939,7 @@ fn read_captured_output_with_limit<R: Read>(
 
     let mut text = String::from_utf8_lossy(&stored).into_owned();
     if truncated {
-        text.push_str("\n[output truncated]\n");
+        text.push_str(OUTPUT_TRUNCATED_MARKER);
     }
     Ok(CapturedOutput { text, truncated })
 }
@@ -6622,7 +6624,7 @@ fn truncate_string(value: &str, max_chars: usize) -> String {
         return value.to_string();
     }
     let mut truncated = value.chars().take(max_chars).collect::<String>();
-    truncated.push_str("\n[output truncated]\n");
+    truncated.push_str(OUTPUT_TRUNCATED_MARKER);
     truncated
 }
 
@@ -6631,7 +6633,7 @@ fn truncate_inline(value: &str, max_chars: usize) -> String {
         return value.to_string();
     }
     let mut truncated = value.chars().take(max_chars).collect::<String>();
-    truncated.push_str(" [truncated]");
+    truncated.push_str(INLINE_TRUNCATED_MARKER);
     truncated
 }
 
@@ -7351,6 +7353,8 @@ rename to new name.txt
     #[test]
     fn summary_label_constants_match_human_contract() {
         assert_eq!(SUMMARY_NOT_GIT_REPOSITORY, "not a git repository");
+        assert_eq!(OUTPUT_TRUNCATED_MARKER, "\n[output truncated]\n");
+        assert_eq!(INLINE_TRUNCATED_MARKER, " [truncated]");
     }
 
     #[test]
