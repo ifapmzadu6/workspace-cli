@@ -2244,7 +2244,7 @@ fn related_data_for_non_repo(
             target,
             method,
             rank,
-            relationship_source(uses_cochange_index(use_index, rank)),
+            relationship_source_for_options(use_index, rank),
             false,
         ),
         RelationshipStats::none(),
@@ -2304,7 +2304,7 @@ fn impact_data_for_non_repo(
         impact_data_metadata(
             method,
             rank,
-            relationship_source(uses_cochange_index(use_index, rank)),
+            relationship_source_for_options(use_index, rank),
             false,
         ),
         SeedFileSummary::empty(),
@@ -4554,6 +4554,10 @@ fn relationship_source(use_index: bool) -> &'static str {
     } else {
         RELATIONSHIP_SOURCE_GIT_LOG
     }
+}
+
+fn relationship_source_for_options(use_index: bool, rank: RankingMethod) -> &'static str {
+    relationship_source(uses_cochange_index(use_index, rank))
 }
 
 fn uses_cochange_index(use_index: bool, rank: RankingMethod) -> bool {
@@ -7451,6 +7455,18 @@ rename to new name.txt
             RELATIONSHIP_SOURCE_COCHANGE_INDEX
         );
         assert_eq!(relationship_source(false), RELATIONSHIP_SOURCE_GIT_LOG);
+        assert_eq!(
+            relationship_source_for_options(false, RankingMethod::Direct),
+            RELATIONSHIP_SOURCE_GIT_LOG
+        );
+        assert_eq!(
+            relationship_source_for_options(true, RankingMethod::Direct),
+            RELATIONSHIP_SOURCE_COCHANGE_INDEX
+        );
+        assert_eq!(
+            relationship_source_for_options(false, RankingMethod::Pagerank),
+            RELATIONSHIP_SOURCE_COCHANGE_INDEX
+        );
     }
 
     #[test]
