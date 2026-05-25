@@ -620,10 +620,30 @@ struct RelatedData {
 
 struct RelatedDataMetadata {
     target: String,
+    relationship: RelationshipMetadata,
+}
+
+struct RelationshipMetadata {
     method: String,
     ranking: String,
     relationship_source: String,
     is_repo: bool,
+}
+
+impl RelationshipMetadata {
+    fn new(
+        method: &RelatedMethod,
+        rank: RankingMethod,
+        relationship_source: impl Into<String>,
+        is_repo: bool,
+    ) -> Self {
+        Self {
+            method: method.as_str().to_string(),
+            ranking: rank.as_str().to_string(),
+            relationship_source: relationship_source.into(),
+            is_repo,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -719,10 +739,7 @@ struct ImpactData {
 
 struct ImpactDataMetadata {
     source: String,
-    method: String,
-    ranking: String,
-    relationship_source: String,
-    is_repo: bool,
+    relationship: RelationshipMetadata,
 }
 
 struct SeedFileSummary {
@@ -2303,10 +2320,7 @@ fn related_data_metadata(
 ) -> RelatedDataMetadata {
     RelatedDataMetadata {
         target: target.to_string(),
-        method: method.as_str().to_string(),
-        ranking: rank.as_str().to_string(),
-        relationship_source: relationship_source.into(),
-        is_repo,
+        relationship: RelationshipMetadata::new(method, rank, relationship_source, is_repo),
     }
 }
 
@@ -2316,12 +2330,23 @@ fn cochange_related_data(
     limits: RelationshipLimits,
     related: Vec<RelatedFile>,
 ) -> RelatedData {
+    let RelatedDataMetadata {
+        target,
+        relationship,
+    } = metadata;
+    let RelationshipMetadata {
+        method,
+        ranking,
+        relationship_source,
+        is_repo,
+    } = relationship;
+
     RelatedData {
-        target: metadata.target,
-        method: metadata.method,
-        ranking: metadata.ranking,
-        relationship_source: metadata.relationship_source,
-        is_repo: metadata.is_repo,
+        target,
+        method,
+        ranking,
+        relationship_source,
+        is_repo,
         commits_scanned: stats.commits_scanned,
         commits_matched: stats.commits_matched,
         ignored_large_commits: stats.ignored_large_commits,
@@ -2360,10 +2385,7 @@ fn impact_data_metadata(
 ) -> ImpactDataMetadata {
     ImpactDataMetadata {
         source: IMPACT_SOURCE_DIFF.to_string(),
-        method: method.as_str().to_string(),
-        ranking: rank.as_str().to_string(),
-        relationship_source: relationship_source.into(),
-        is_repo,
+        relationship: RelationshipMetadata::new(method, rank, relationship_source, is_repo),
     }
 }
 
@@ -2374,12 +2396,23 @@ fn cochange_impact_data(
     limits: RelationshipLimits,
     impacted: Vec<ImpactFile>,
 ) -> ImpactData {
+    let ImpactDataMetadata {
+        source,
+        relationship,
+    } = metadata;
+    let RelationshipMetadata {
+        method,
+        ranking,
+        relationship_source,
+        is_repo,
+    } = relationship;
+
     ImpactData {
-        source: metadata.source,
-        method: metadata.method,
-        ranking: metadata.ranking,
-        relationship_source: metadata.relationship_source,
-        is_repo: metadata.is_repo,
+        source,
+        method,
+        ranking,
+        relationship_source,
+        is_repo,
         seed_files: seed_summary.seed_files,
         seed_file_count: seed_summary.seed_file_count,
         omitted_seed_files: seed_summary.omitted_seed_files,
@@ -7537,6 +7570,24 @@ rename to new name.txt
         assert_eq!(impact.max_commits, 500);
         assert_eq!(impact.max_files_per_commit, 80);
         assert!(impact.impacted.is_empty());
+    }
+
+    #[test]
+    fn relationship_metadata_constructor_preserves_labels() {
+        let metadata = RelationshipMetadata::new(
+            &RelatedMethod::Cochange,
+            RankingMethod::Pagerank,
+            RELATIONSHIP_SOURCE_COCHANGE_INDEX,
+            true,
+        );
+
+        assert_eq!(metadata.method, RELATED_METHOD_COCHANGE);
+        assert_eq!(metadata.ranking, RANK_PAGERANK);
+        assert_eq!(
+            metadata.relationship_source,
+            RELATIONSHIP_SOURCE_COCHANGE_INDEX
+        );
+        assert!(metadata.is_repo);
     }
 
     #[test]
