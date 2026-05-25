@@ -654,6 +654,14 @@ impl RelationshipStats {
         )
     }
 
+    fn from_git_log(
+        commits: &[GitCommitFiles],
+        commits_matched: usize,
+        ignored_large_commits: usize,
+    ) -> Self {
+        Self::new(commits.len(), commits_matched, ignored_large_commits)
+    }
+
     fn from_related_cli(commits_matched: usize) -> Self {
         Self::new(0, commits_matched, 0)
     }
@@ -3187,8 +3195,8 @@ fn related_by_cochange(
             RELATIONSHIP_SOURCE_GIT_LOG,
             true,
         ),
-        RelationshipStats::new(
-            commits.len(),
+        RelationshipStats::from_git_log(
+            &commits,
             ranking.commits_matched,
             ranking.ignored_large_commits,
         ),
@@ -3600,8 +3608,8 @@ fn impact_by_cochange(
             true,
         ),
         seed_summary,
-        RelationshipStats::new(
-            commits.len(),
+        RelationshipStats::from_git_log(
+            &commits,
             ranking.commits_matched,
             ranking.ignored_large_commits,
         ),
@@ -7546,6 +7554,21 @@ rename to new name.txt
         assert_eq!(index_stats.commits_scanned, 12);
         assert_eq!(index_stats.commits_matched, 4);
         assert_eq!(index_stats.ignored_large_commits, 2);
+
+        let commits = vec![
+            GitCommitFiles {
+                hash: "aaaaaaaaaaaa".to_string(),
+                files: vec!["src/a.rs".to_string()],
+            },
+            GitCommitFiles {
+                hash: "bbbbbbbbbbbb".to_string(),
+                files: vec!["src/b.rs".to_string()],
+            },
+        ];
+        let git_log_stats = RelationshipStats::from_git_log(&commits, 1, 3);
+        assert_eq!(git_log_stats.commits_scanned, 2);
+        assert_eq!(git_log_stats.commits_matched, 1);
+        assert_eq!(git_log_stats.ignored_large_commits, 3);
 
         let cli_stats = RelationshipStats::from_related_cli(3);
         assert_eq!(cli_stats.commits_scanned, 0);
