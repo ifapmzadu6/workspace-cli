@@ -2384,9 +2384,7 @@ fn map_summary(map: &WorkspaceMap, truncated: bool) -> String {
         map.stats.file_count,
         join_or_none(&map.stack.languages)
     );
-    if truncated {
-        summary.push_str(" (map truncated)");
-    }
+    append_note_if(&mut summary, truncated, " (map truncated)");
     summary
 }
 
@@ -2407,9 +2405,7 @@ fn status_summary(data: &StatusData, truncated: bool) -> String {
     } else {
         SUMMARY_NOT_GIT_REPOSITORY.to_string()
     };
-    if truncated {
-        summary.push_str(" (status truncated)");
-    }
+    append_note_if(&mut summary, truncated, " (status truncated)");
     summary
 }
 
@@ -2466,9 +2462,11 @@ fn impact_summary(data: &ImpactData) -> String {
             data.seed_file_count,
             data.method
         );
-        if impact_seed_files_omitted(data) {
-            summary.push_str(" (seed files truncated)");
-        }
+        append_note_if(
+            &mut summary,
+            impact_seed_files_omitted(data),
+            " (seed files truncated)",
+        );
         summary
     } else {
         SUMMARY_NOT_GIT_REPOSITORY.to_string()
@@ -2524,9 +2522,7 @@ fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool)
     if let Some(note) = diff_output_truncation_note(summary_truncated, patch_truncated) {
         summary.push_str(note);
     }
-    if diff_files_omitted(data) {
-        summary.push_str(" (files truncated)");
-    }
+    append_note_if(&mut summary, diff_files_omitted(data), " (files truncated)");
     summary
 }
 
@@ -2554,9 +2550,11 @@ fn transaction_file_summary(
 ) -> String {
     let mut summary =
         format!("{action} transaction {transaction_id} touching {file_count} file(s)");
-    if transaction_files_truncated(omitted_files) {
-        summary.push_str(" (files truncated)");
-    }
+    append_note_if(
+        &mut summary,
+        transaction_files_truncated(omitted_files),
+        " (files truncated)",
+    );
     summary
 }
 
@@ -2565,9 +2563,7 @@ fn run_summary(exit_code: Option<i32>, duration_ms: u128, truncated: bool) -> St
         .map(|code| code.to_string())
         .unwrap_or_else(|| "signal".to_string());
     let mut summary = format!("command exited with {status} in {duration_ms}ms");
-    if truncated {
-        summary.push_str(" (output truncated)");
-    }
+    append_note_if(&mut summary, truncated, " (output truncated)");
     summary
 }
 
@@ -2576,9 +2572,7 @@ fn read_summary(path: &str, lines: Option<&str>, truncated: bool) -> String {
         Some(lines) => format!("read {path} lines {lines}"),
         None => format!("read {path}"),
     };
-    if truncated {
-        summary.push_str(" (truncated)");
-    }
+    append_note_if(&mut summary, truncated, " (truncated)");
     summary
 }
 
@@ -2599,6 +2593,12 @@ fn log_truncated(data: &LogData) -> bool {
 
 fn log_lines_omitted(data: &LogData) -> bool {
     data.omitted_lines > 0
+}
+
+fn append_note_if(summary: &mut String, condition: bool, note: &str) {
+    if condition {
+        summary.push_str(note);
+    }
 }
 
 fn transaction_patch_path(workspace: &Workspace, transaction_id: &str) -> Result<PathBuf> {
@@ -8799,6 +8799,15 @@ rename to new name.txt
         assert_eq!(nonblank_trimmed_end(""), None);
         assert_eq!(nonblank_trimmed_end(" \n\t "), None);
         assert_eq!(nonblank_trimmed_end("  patch\n\n"), Some("  patch"));
+    }
+
+    #[test]
+    fn append_note_if_preserves_summary_when_condition_is_false() {
+        let mut summary = "base".to_string();
+        append_note_if(&mut summary, false, " note");
+        assert_eq!(summary, "base");
+        append_note_if(&mut summary, true, " note");
+        assert_eq!(summary, "base note");
     }
 
     #[test]
