@@ -6679,10 +6679,7 @@ fn relationship_scan_summary(
 }
 
 fn print_read(observation: &Observation<ReadData>) -> Result<()> {
-    print!("{}", observation.data.content);
-    if needs_trailing_newline(&observation.data.content) {
-        println!();
-    }
+    print_stdout_text(&observation.data.content);
     Ok(())
 }
 
@@ -6714,16 +6711,10 @@ fn print_patch(observation: &Observation<PatchData>) -> Result<()> {
 fn print_run(observation: &Observation<RunData>) -> Result<()> {
     let data = &observation.data;
     if !data.stdout.is_empty() {
-        print!("{}", data.stdout);
-        if needs_trailing_newline(&data.stdout) {
-            println!();
-        }
+        print_stdout_text(&data.stdout);
     }
     if !data.stderr.is_empty() {
-        eprint!("{}", data.stderr);
-        if needs_trailing_newline(&data.stderr) {
-            eprintln!();
-        }
+        print_stderr_text(&data.stderr);
     }
     println!("{}", observation.summary);
     Ok(())
@@ -6763,6 +6754,20 @@ fn print_rollback(observation: &Observation<RollbackData>) -> Result<()> {
 fn print_transaction_files(files_changed: &[String], omitted_files: usize) {
     print_list("files", files_changed);
     print_omitted_items(omitted_files, "file(s)");
+}
+
+fn print_stdout_text(text: &str) {
+    print!("{text}");
+    if needs_trailing_newline(text) {
+        println!();
+    }
+}
+
+fn print_stderr_text(text: &str) {
+    eprint!("{text}");
+    if needs_trailing_newline(text) {
+        eprintln!();
+    }
 }
 
 fn is_test_file(path: &str) -> bool {
