@@ -2848,6 +2848,21 @@ fn diff_output_truncation_note(
     }
 }
 
+fn diff_human_sections(data: &DiffData) -> Vec<String> {
+    if !data.is_repo {
+        return vec![data.summary.clone()];
+    }
+
+    let mut sections = Vec::new();
+    if let Some(summary) = nonblank_trimmed_end(&data.summary) {
+        sections.push(summary.to_string());
+    }
+    if let Some(patch) = data.patch.as_deref().and_then(nonblank_trimmed_end) {
+        sections.push(patch.to_string());
+    }
+    sections
+}
+
 fn transaction_file_summary(
     action: &str,
     transaction_id: &str,
@@ -6730,15 +6745,8 @@ fn print_read(observation: &Observation<ReadData>) -> Result<()> {
 
 fn print_diff(observation: &Observation<DiffData>) -> Result<()> {
     let data = &observation.data;
-    if !data.is_repo {
-        println!("{}", data.summary);
-        return Ok(());
-    }
-    if let Some(summary) = nonblank_trimmed_end(&data.summary) {
-        println!("{summary}");
-    }
-    if let Some(patch) = data.patch.as_deref().and_then(nonblank_trimmed_end) {
-        println!("{patch}");
+    for section in diff_human_sections(data) {
+        println!("{section}");
     }
     Ok(())
 }
@@ -9236,6 +9244,35 @@ rename to new name.txt
             SUMMARY_NOT_GIT_REPOSITORY
         );
         assert!(!diff_files_omitted(&data));
+    }
+
+    #[test]
+    fn diff_human_sections_preserves_display_contract() {
+        let mut data = DiffData {
+            is_repo: true,
+            summary: "  summary\n\n".to_string(),
+            file_count: 1,
+            files: vec!["src/main.rs".to_string()],
+            omitted_files: 0,
+            patch: Some("patch\n\n".to_string()),
+        };
+
+        assert_eq!(
+            diff_human_sections(&data),
+            vec!["  summary".to_string(), "patch".to_string()]
+        );
+
+        data.summary = "\n\t ".to_string();
+        data.patch = Some(" \n".to_string());
+        assert!(diff_human_sections(&data).is_empty());
+
+        data.is_repo = false;
+        data.summary = SUMMARY_NOT_GIT_REPOSITORY.to_string();
+        data.patch = Some("ignored patch".to_string());
+        assert_eq!(
+            diff_human_sections(&data),
+            vec![SUMMARY_NOT_GIT_REPOSITORY.to_string()]
+        );
     }
 
     #[test]
