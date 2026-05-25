@@ -636,6 +636,21 @@ impl RelatedDataMetadata {
             relationship: RelationshipMetadata::new(method, rank, relationship_source, is_repo),
         }
     }
+
+    fn cochange(
+        target: &str,
+        rank: RankingMethod,
+        relationship_source: impl Into<String>,
+        is_repo: bool,
+    ) -> Self {
+        Self::new(
+            target,
+            &RelatedMethod::Cochange,
+            rank,
+            relationship_source,
+            is_repo,
+        )
+    }
 }
 
 struct RelationshipMetadata {
@@ -768,6 +783,14 @@ impl ImpactDataMetadata {
             source: IMPACT_SOURCE_DIFF.to_string(),
             relationship: RelationshipMetadata::new(method, rank, relationship_source, is_repo),
         }
+    }
+
+    fn cochange(
+        rank: RankingMethod,
+        relationship_source: impl Into<String>,
+        is_repo: bool,
+    ) -> Self {
+        Self::new(&RelatedMethod::Cochange, rank, relationship_source, is_repo)
     }
 }
 
@@ -3213,13 +3236,7 @@ fn related_by_cochange(
             }
         };
         return Ok(cochange_related_data(
-            RelatedDataMetadata::new(
-                target,
-                &RelatedMethod::Cochange,
-                rank,
-                RELATIONSHIP_SOURCE_COCHANGE_INDEX,
-                true,
-            ),
+            RelatedDataMetadata::cochange(target, rank, RELATIONSHIP_SOURCE_COCHANGE_INDEX, true),
             RelationshipStats::from_cochange_index(&index, ranking.commits_matched),
             RelationshipLimits::from_cochange_index(&index),
             ranking.related,
@@ -3229,13 +3246,7 @@ fn related_by_cochange(
     let commits = git_recent_name_only_commits(workspace, max_commits)?;
     let ranking = rank_cochanges(&commits, target, max_files_per_commit, max_results);
     Ok(cochange_related_data(
-        RelatedDataMetadata::new(
-            target,
-            &RelatedMethod::Cochange,
-            rank,
-            RELATIONSHIP_SOURCE_GIT_LOG,
-            true,
-        ),
+        RelatedDataMetadata::cochange(target, rank, RELATIONSHIP_SOURCE_GIT_LOG, true),
         RelationshipStats::from_git_log(
             &commits,
             ranking.commits_matched,
@@ -3257,9 +3268,8 @@ fn related_data_from_related_cli(
     let related = bounded_related_cli_files(output.related, max_results);
     let commits_matched = max_cochanged_commits(related.iter().map(|item| item.cochanged_commits));
     cochange_related_data(
-        RelatedDataMetadata::new(
+        RelatedDataMetadata::cochange(
             target,
-            &RelatedMethod::Cochange,
             rank,
             related_cli_relationship_source(&output.mode),
             true,
@@ -3625,12 +3635,7 @@ fn impact_by_cochange(
             }
         };
         return Ok(cochange_impact_data(
-            ImpactDataMetadata::new(
-                &RelatedMethod::Cochange,
-                rank,
-                RELATIONSHIP_SOURCE_COCHANGE_INDEX,
-                true,
-            ),
+            ImpactDataMetadata::cochange(rank, RELATIONSHIP_SOURCE_COCHANGE_INDEX, true),
             seed_summary,
             RelationshipStats::from_cochange_index(&index, ranking.commits_matched),
             RelationshipLimits::from_cochange_index(&index),
@@ -3642,12 +3647,7 @@ fn impact_by_cochange(
     let ranking = rank_cochange_impact(&commits, &seed_files, max_files_per_commit, max_results);
 
     Ok(cochange_impact_data(
-        ImpactDataMetadata::new(
-            &RelatedMethod::Cochange,
-            rank,
-            RELATIONSHIP_SOURCE_GIT_LOG,
-            true,
-        ),
+        ImpactDataMetadata::cochange(rank, RELATIONSHIP_SOURCE_GIT_LOG, true),
         seed_summary,
         RelationshipStats::from_git_log(
             &commits,
@@ -3714,12 +3714,7 @@ fn impact_by_related_cli(
     let commits_matched = max_cochanged_commits(impacted.iter().map(|item| item.cochanged_commits));
 
     Ok(Some(cochange_impact_data(
-        ImpactDataMetadata::new(
-            &RelatedMethod::Cochange,
-            rank,
-            related_cli_aggregate_relationship_source(rank),
-            true,
-        ),
+        ImpactDataMetadata::cochange(rank, related_cli_aggregate_relationship_source(rank), true),
         seed_summary,
         RelationshipStats::from_related_cli(commits_matched),
         RelationshipLimits::from_options(max_commits, max_files_per_commit),
@@ -7646,9 +7641,8 @@ rename to new name.txt
     #[test]
     fn cochange_related_data_preserves_relationship_metadata() {
         let data = cochange_related_data(
-            RelatedDataMetadata::new(
+            RelatedDataMetadata::cochange(
                 "src/main.rs",
-                &RelatedMethod::Cochange,
                 RankingMethod::Pagerank,
                 RELATIONSHIP_SOURCE_COCHANGE_INDEX,
                 true,
@@ -7687,12 +7681,7 @@ rename to new name.txt
         ];
 
         let data = cochange_impact_data(
-            ImpactDataMetadata::new(
-                &RelatedMethod::Cochange,
-                RankingMethod::Direct,
-                RELATIONSHIP_SOURCE_GIT_LOG,
-                true,
-            ),
+            ImpactDataMetadata::cochange(RankingMethod::Direct, RELATIONSHIP_SOURCE_GIT_LOG, true),
             SeedFileSummary::from_seed_files(&seed_files, 2),
             RelationshipStats::new(8, 3, 1),
             RelationshipLimits::new(500, 80),
