@@ -5694,9 +5694,17 @@ fn append_operation_log(workspace: &Workspace, record: OperationLogRecord<'_>) -
 }
 
 fn operation_log_entry(record: OperationLogRecord<'_>) -> LogEntry {
+    operation_log_entry_with_metadata(record, new_id("op"), now_ms())
+}
+
+fn operation_log_entry_with_metadata(
+    record: OperationLogRecord<'_>,
+    id: String,
+    timestamp_unix_ms: u128,
+) -> LogEntry {
     LogEntry {
-        id: new_id("op"),
-        timestamp_unix_ms: now_ms(),
+        id,
+        timestamp_unix_ms,
         kind: record.kind.to_string(),
         op: record.op.to_string(),
         scope: truncate_inline(record.scope, MAX_LOG_SCOPE),
@@ -8743,14 +8751,14 @@ rename to new name.txt
         let scope = format!("{}tail", "s".repeat(MAX_LOG_SCOPE + 10));
         let summary = format!("{}tail", "m".repeat(MAX_LOG_SUMMARY + 10));
 
-        let entry = operation_log_entry(OperationLogRecord::change(
-            LOG_OP_PATCH,
-            &scope,
-            &summary,
-            "tx-1",
-        ));
+        let entry = operation_log_entry_with_metadata(
+            OperationLogRecord::change(LOG_OP_PATCH, &scope, &summary, "tx-1"),
+            "op-test".to_string(),
+            42,
+        );
 
-        assert!(entry.id.starts_with("op-"));
+        assert_eq!(entry.id, "op-test");
+        assert_eq!(entry.timestamp_unix_ms, 42);
         assert_eq!(entry.kind, LOG_KIND_CHANGE);
         assert_eq!(entry.op, LOG_OP_PATCH);
         assert!(entry.scope.contains("[truncated]"));
