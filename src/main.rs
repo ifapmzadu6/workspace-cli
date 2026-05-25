@@ -91,6 +91,8 @@ const EVIDENCE_REASON_PATCH_FILE_TARGET: &str = "patch file target";
 const EVIDENCE_REASON_ROLLBACK_TARGET: &str = "rollback target";
 const EVIDENCE_REASON_TEXT_MATCH: &str = "text match";
 const EVIDENCE_REASON_REQUESTED_FILE_CONTENT: &str = "requested file content";
+const TRANSACTION_ACTION_APPLIED_PATCH: &str = "applied patch";
+const TRANSACTION_ACTION_ROLLED_BACK: &str = "rolled back";
 const IMPORTANT_REASON_CONFIGURATION_OR_PACKAGE_MANIFEST: &str =
     "configuration or package manifest";
 const IMPORTANT_REASON_LIKELY_ENTRYPOINT: &str = "likely entrypoint";
@@ -410,6 +412,17 @@ struct Evidence {
     path: String,
     lines: Option<String>,
     reason: String,
+}
+
+struct TransactionObservationContext {
+    kind: &'static str,
+    scope: String,
+    action: &'static str,
+    transaction_id: String,
+    file_count: usize,
+    omitted_files: usize,
+    evidence_reason: &'static str,
+    next_observations: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -1723,24 +1736,17 @@ fn patch_data(
 }
 
 fn patch_observation(data: PatchData, files_changed: &[String]) -> Observation<PatchData> {
-    let summary = transaction_file_summary(
-        "applied patch",
-        &data.transaction_id,
-        data.file_count,
-        data.omitted_files,
-    );
-    let evidence = changed_file_evidence(files_changed, EVIDENCE_REASON_PATCH_FILE_TARGET);
-    let next_observations = patch_followup_observations(&data.transaction_id);
-    let truncated = transaction_files_truncated(data.omitted_files);
-    observation_with_evidence(
-        WORKSPACE_PATCH_KIND,
-        data.patch_file.clone(),
-        summary,
-        data,
-        evidence,
-        truncated,
-        next_observations,
-    )
+    let context = TransactionObservationContext {
+        kind: WORKSPACE_PATCH_KIND,
+        scope: data.patch_file.clone(),
+        action: TRANSACTION_ACTION_APPLIED_PATCH,
+        transaction_id: data.transaction_id.clone(),
+        file_count: data.file_count,
+        omitted_files: data.omitted_files,
+        evidence_reason: EVIDENCE_REASON_PATCH_FILE_TARGET,
+        next_observations: patch_followup_observations(&data.transaction_id),
+    };
+    transaction_observation(context, data, files_changed)
 }
 
 fn rollback_data(
@@ -1762,23 +1768,40 @@ fn rollback_data(
 }
 
 fn rollback_observation(data: RollbackData, files_changed: &[String]) -> Observation<RollbackData> {
+    let context = TransactionObservationContext {
+        kind: WORKSPACE_ROLLBACK_KIND,
+        scope: data.transaction_id.clone(),
+        action: TRANSACTION_ACTION_ROLLED_BACK,
+        transaction_id: data.transaction_id.clone(),
+        file_count: data.file_count,
+        omitted_files: data.omitted_files,
+        evidence_reason: EVIDENCE_REASON_ROLLBACK_TARGET,
+        next_observations: rollback_followup_observations(),
+    };
+    transaction_observation(context, data, files_changed)
+}
+
+fn transaction_observation<T: Serialize>(
+    context: TransactionObservationContext,
+    data: T,
+    files_changed: &[String],
+) -> Observation<T> {
     let summary = transaction_file_summary(
-        "rolled back",
-        &data.transaction_id,
-        data.file_count,
-        data.omitted_files,
+        context.action,
+        &context.transaction_id,
+        context.file_count,
+        context.omitted_files,
     );
-    let evidence = changed_file_evidence(files_changed, EVIDENCE_REASON_ROLLBACK_TARGET);
-    let next_observations = rollback_followup_observations();
-    let truncated = transaction_files_truncated(data.omitted_files);
+    let evidence = changed_file_evidence(files_changed, context.evidence_reason);
+    let truncated = transaction_files_truncated(context.omitted_files);
     observation_with_evidence(
-        WORKSPACE_ROLLBACK_KIND,
-        data.transaction_id.clone(),
+        context.kind,
+        context.scope,
         summary,
         data,
         evidence,
         truncated,
-        next_observations,
+        context.next_observations,
     )
 }
 
