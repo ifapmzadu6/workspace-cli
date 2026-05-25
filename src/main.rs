@@ -3176,33 +3176,7 @@ fn cochange_index_status(workspace: &Workspace) -> IndexStatusData {
     }
 
     match read_cochange_index(workspace) {
-        Ok(index) => {
-            let fresh = current_head.is_some() && current_head == index.head;
-            IndexStatusData {
-                is_repo: true,
-                path: path_label,
-                exists: true,
-                readable: true,
-                status: if fresh {
-                    INDEX_STATUS_FRESH
-                } else {
-                    INDEX_STATUS_STALE
-                }
-                .to_string(),
-                fresh,
-                current_head,
-                index_head: index.head,
-                generated_at_unix_ms: Some(index.generated_at_unix_ms),
-                max_commits: Some(index.max_commits),
-                max_files_per_commit: Some(index.max_files_per_commit),
-                commits_scanned: Some(index.commits_scanned),
-                commits_indexed: Some(index.commits_indexed),
-                ignored_large_commits: Some(index.ignored_large_commits),
-                file_count: Some(index.file_commit_counts.len()),
-                edge_count: Some(index.edges.len()),
-                error: None,
-            }
-        }
+        Ok(index) => readable_index_status(path_label, current_head, index),
         Err(error) => empty_index_status(
             true,
             path_label,
@@ -3212,6 +3186,41 @@ fn cochange_index_status(workspace: &Workspace) -> IndexStatusData {
             current_head,
             Some(error.to_string()),
         ),
+    }
+}
+
+fn readable_index_status(
+    path: String,
+    current_head: Option<String>,
+    index: CochangeIndex,
+) -> IndexStatusData {
+    let fresh = current_head.is_some() && current_head == index.head;
+    IndexStatusData {
+        is_repo: true,
+        path,
+        exists: true,
+        readable: true,
+        status: index_freshness_status(fresh).to_string(),
+        fresh,
+        current_head,
+        index_head: index.head,
+        generated_at_unix_ms: Some(index.generated_at_unix_ms),
+        max_commits: Some(index.max_commits),
+        max_files_per_commit: Some(index.max_files_per_commit),
+        commits_scanned: Some(index.commits_scanned),
+        commits_indexed: Some(index.commits_indexed),
+        ignored_large_commits: Some(index.ignored_large_commits),
+        file_count: Some(index.file_commit_counts.len()),
+        edge_count: Some(index.edges.len()),
+        error: None,
+    }
+}
+
+fn index_freshness_status(fresh: bool) -> &'static str {
+    if fresh {
+        INDEX_STATUS_FRESH
+    } else {
+        INDEX_STATUS_STALE
     }
 }
 
@@ -7837,6 +7846,58 @@ rename to new name.txt
         assert_eq!(data.status, INDEX_STATUS_NOT_GIT_REPO);
         assert!(!data.exists);
         assert!(!data.fresh);
+    }
+
+    #[test]
+    fn readable_index_status_preserves_index_metadata() {
+        assert_eq!(index_freshness_status(true), INDEX_STATUS_FRESH);
+        assert_eq!(index_freshness_status(false), INDEX_STATUS_STALE);
+
+        let index = CochangeIndex {
+            version: 1,
+            generated_at_unix_ms: 123,
+            head: Some("abc123".to_string()),
+            max_commits: 500,
+            max_files_per_commit: 100,
+            commits_scanned: 5,
+            commits_indexed: 4,
+            ignored_large_commits: 1,
+            file_commit_counts: BTreeMap::from([
+                ("src/main.rs".to_string(), 2),
+                ("tests/cli.rs".to_string(), 1),
+            ]),
+            edges: vec![CochangeEdge {
+                a: "src/main.rs".to_string(),
+                b: "tests/cli.rs".to_string(),
+                cochanged_commits: 1,
+                weighted_cochanges: 1.0,
+                sample_commits: vec!["abc123".to_string()],
+            }],
+        };
+
+        let data = readable_index_status(
+            COCHANGE_INDEX_FILE.to_string(),
+            Some("abc123".to_string()),
+            index,
+        );
+
+        assert!(data.is_repo);
+        assert_eq!(data.path, COCHANGE_INDEX_FILE);
+        assert!(data.exists);
+        assert!(data.readable);
+        assert_eq!(data.status, INDEX_STATUS_FRESH);
+        assert!(data.fresh);
+        assert_eq!(data.current_head.as_deref(), Some("abc123"));
+        assert_eq!(data.index_head.as_deref(), Some("abc123"));
+        assert_eq!(data.generated_at_unix_ms, Some(123));
+        assert_eq!(data.max_commits, Some(500));
+        assert_eq!(data.max_files_per_commit, Some(100));
+        assert_eq!(data.commits_scanned, Some(5));
+        assert_eq!(data.commits_indexed, Some(4));
+        assert_eq!(data.ignored_large_commits, Some(1));
+        assert_eq!(data.file_count, Some(2));
+        assert_eq!(data.edge_count, Some(1));
+        assert!(data.error.is_none());
     }
 
     #[test]
