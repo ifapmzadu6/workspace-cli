@@ -1845,14 +1845,16 @@ fn search_evidence(matches: &[SearchMatch]) -> Vec<Evidence> {
     matches
         .iter()
         .take(MAX_EVIDENCE_ITEMS)
-        .map(|item| {
-            evidence_item(
-                item.path.clone(),
-                Some(item.line.to_string()),
-                EVIDENCE_REASON_TEXT_MATCH.to_string(),
-            )
-        })
+        .map(search_match_evidence_item)
         .collect()
+}
+
+fn search_match_evidence_item(item: &SearchMatch) -> Evidence {
+    evidence_item(
+        item.path.clone(),
+        Some(item.line.to_string()),
+        EVIDENCE_REASON_TEXT_MATCH.to_string(),
+    )
 }
 
 fn search_data(
@@ -1900,8 +1902,12 @@ fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
     matches
         .iter()
         .take(MAX_NEXT_OBSERVATIONS)
-        .map(|item| workspace_read_lines_command(&item.path, item.line, item.line))
+        .map(search_match_read_command)
         .collect()
+}
+
+fn search_match_read_command(item: &SearchMatch) -> String {
+    workspace_read_lines_command(&item.path, item.line, item.line)
 }
 
 fn read_evidence(data: &ReadData) -> Vec<Evidence> {
@@ -8085,14 +8091,20 @@ rename to new name.txt
 
         let evidence = search_evidence(&matches);
         let next = search_next_observations(&matches);
+        let first_evidence = search_match_evidence_item(&matches[0]);
+        let first_next = search_match_read_command(&matches[0]);
 
         assert_eq!(evidence.len(), MAX_EVIDENCE_ITEMS);
         assert_eq!(evidence[0].path, "file_00.txt");
         assert_eq!(evidence[0].lines.as_deref(), Some("1"));
         assert_eq!(evidence[0].reason, EVIDENCE_REASON_TEXT_MATCH);
+        assert_eq!(first_evidence.path, "file_00.txt");
+        assert_eq!(first_evidence.lines.as_deref(), Some("1"));
+        assert_eq!(first_evidence.reason, EVIDENCE_REASON_TEXT_MATCH);
         assert_eq!(next.len(), MAX_NEXT_OBSERVATIONS);
         assert_eq!(next[0], "workspace read file_00.txt --lines 1:1");
         assert_eq!(next[4], "workspace read file_04.txt --lines 5:5");
+        assert_eq!(first_next, "workspace read file_00.txt --lines 1:1");
 
         let data = search_data("needle", matches, MAX_EVIDENCE_ITEMS + 2, 1);
         let observation = search_observation(&workspace, data);
