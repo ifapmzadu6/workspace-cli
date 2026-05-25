@@ -2472,11 +2472,15 @@ fn impact_summary(data: &ImpactData) -> String {
 }
 
 fn search_truncated(data: &SearchData) -> bool {
-    data.total_matches > data.matches.len() || data.truncated_match_texts > 0
+    search_results_omitted(data) || data.truncated_match_texts > 0
+}
+
+fn search_results_omitted(data: &SearchData) -> bool {
+    data.total_matches > data.matches.len()
 }
 
 fn search_summary(data: &SearchData) -> String {
-    let mut summary = if data.total_matches > data.matches.len() {
+    let mut summary = if search_results_omitted(data) {
         format!(
             "{} match(es) for {:?}, showing {}",
             data.total_matches,
@@ -7630,6 +7634,7 @@ rename to new name.txt
             }],
         };
         assert!(search_truncated(&search));
+        assert!(search_results_omitted(&search));
 
         let search = SearchData {
             total_matches: 1,
@@ -7637,6 +7642,7 @@ rename to new name.txt
             ..search
         };
         assert!(search_truncated(&search));
+        assert!(!search_results_omitted(&search));
 
         let search = SearchData {
             total_matches: 1,
@@ -7644,6 +7650,7 @@ rename to new name.txt
             ..search
         };
         assert!(!search_truncated(&search));
+        assert!(!search_results_omitted(&search));
 
         let impact = ImpactData {
             source: IMPACT_SOURCE_DIFF.to_string(),
@@ -8570,6 +8577,7 @@ rename to new name.txt
             search_summary(&data),
             "3 match(es) for \"needle\", showing 1, truncated 2 match text(s)"
         );
+        assert!(search_results_omitted(&data));
 
         let data = SearchData {
             query: "needle".to_string(),
@@ -8584,6 +8592,7 @@ rename to new name.txt
         };
 
         assert_eq!(search_summary(&data), "1 match(es) for \"needle\"");
+        assert!(!search_results_omitted(&data));
     }
 
     #[test]
