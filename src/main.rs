@@ -4514,7 +4514,7 @@ fn is_pagerank_only_hit(ranking: &str, cochanged_commits: usize) -> bool {
 }
 
 fn pagerank_impact_evidence_reason(seed_files: &[String], score: f64) -> String {
-    pagerank_evidence_reason(&format!("seed file(s) {}", join_or_none(seed_files)), score)
+    pagerank_evidence_reason(&seed_files_evidence_subject(seed_files), score)
 }
 
 fn pagerank_evidence_reason(subject: &str, score: f64) -> String {
@@ -4527,10 +4527,14 @@ fn direct_impact_evidence_reason(
     sample_commits: &[String],
 ) -> String {
     direct_evidence_reason(
-        &format!("seed file(s) {}", join_or_none(seed_files)),
+        &seed_files_evidence_subject(seed_files),
         cochanged_commits,
         sample_commits,
     )
+}
+
+fn seed_files_evidence_subject(seed_files: &[String]) -> String {
+    format!("seed file(s) {}", join_or_none(seed_files))
 }
 
 fn direct_evidence_reason(
@@ -8570,6 +8574,10 @@ rename to new name.txt
         assert_eq!(
             direct_evidence_reason("src/a.rs", 2, &["abc123".to_string()]),
             "changed with src/a.rs in 2 commit(s); samples: abc123"
+        );
+        assert_eq!(
+            seed_files_evidence_subject(&["src/a.rs".to_string(), "src/other.rs".to_string()]),
+            "seed file(s) src/a.rs, src/other.rs"
         );
         assert_eq!(
             related_evidence_reason(&related, &pagerank_related),
