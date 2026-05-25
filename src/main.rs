@@ -681,6 +681,10 @@ impl RelationshipLimits {
         }
     }
 
+    fn from_options(max_commits: usize, max_files_per_commit: usize) -> Self {
+        Self::new(max_commits, max_files_per_commit)
+    }
+
     fn from_cochange_index(index: &CochangeIndex) -> Self {
         Self::new(index.max_commits, index.max_files_per_commit)
     }
@@ -2285,7 +2289,7 @@ fn related_data_for_non_repo(
             false,
         ),
         RelationshipStats::none(),
-        RelationshipLimits::new(max_commits, max_files_per_commit),
+        RelationshipLimits::from_options(max_commits, max_files_per_commit),
         vec![],
     )
 }
@@ -2343,7 +2347,7 @@ fn impact_data_for_non_repo(
         ),
         SeedFileSummary::empty(),
         RelationshipStats::none(),
-        RelationshipLimits::new(max_commits, max_files_per_commit),
+        RelationshipLimits::from_options(max_commits, max_files_per_commit),
         vec![],
     )
 }
@@ -3200,7 +3204,7 @@ fn related_by_cochange(
             ranking.commits_matched,
             ranking.ignored_large_commits,
         ),
-        RelationshipLimits::new(max_commits, max_files_per_commit),
+        RelationshipLimits::from_options(max_commits, max_files_per_commit),
         ranking.related,
     ))
 }
@@ -3224,7 +3228,7 @@ fn related_data_from_related_cli(
             true,
         ),
         RelationshipStats::from_related_cli(commits_matched),
-        RelationshipLimits::new(max_commits, max_files_per_commit),
+        RelationshipLimits::from_options(max_commits, max_files_per_commit),
         related,
     )
 }
@@ -3613,7 +3617,7 @@ fn impact_by_cochange(
             ranking.commits_matched,
             ranking.ignored_large_commits,
         ),
-        RelationshipLimits::new(max_commits, max_files_per_commit),
+        RelationshipLimits::from_options(max_commits, max_files_per_commit),
         ranking.impacted,
     ))
 }
@@ -3681,7 +3685,7 @@ fn impact_by_related_cli(
         ),
         seed_summary,
         RelationshipStats::from_related_cli(commits_matched),
-        RelationshipLimits::new(max_commits, max_files_per_commit),
+        RelationshipLimits::from_options(max_commits, max_files_per_commit),
         impacted,
     )))
 }
@@ -7574,6 +7578,10 @@ rename to new name.txt
         assert_eq!(cli_stats.commits_scanned, 0);
         assert_eq!(cli_stats.commits_matched, 3);
         assert_eq!(cli_stats.ignored_large_commits, 0);
+
+        let option_limits = RelationshipLimits::from_options(300, 40);
+        assert_eq!(option_limits.max_commits, 300);
+        assert_eq!(option_limits.max_files_per_commit, 40);
 
         let limits = RelationshipLimits::from_cochange_index(&index);
         assert_eq!(limits.max_commits, 500);
