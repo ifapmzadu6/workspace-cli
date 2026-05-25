@@ -2043,17 +2043,39 @@ fn observed_run(
     stdout: CapturedOutput,
     stderr: CapturedOutput,
 ) -> ObservedRun {
-    let output_truncated = stdout.truncated || stderr.truncated;
+    let output_truncated = captured_outputs_truncated(&stdout, &stderr);
     ObservedRun {
-        data: RunData {
-            command: command.to_string(),
-            cwd: workspace.root.to_string_lossy().into_owned(),
+        data: run_data(
+            command,
+            workspace.root.to_string_lossy().into_owned(),
             exit_code,
             duration_ms,
-            stdout: stdout.text,
-            stderr: stderr.text,
-        },
+            stdout.text,
+            stderr.text,
+        ),
         output_truncated,
+    }
+}
+
+fn captured_outputs_truncated(stdout: &CapturedOutput, stderr: &CapturedOutput) -> bool {
+    stdout.truncated || stderr.truncated
+}
+
+fn run_data(
+    command: &str,
+    cwd: String,
+    exit_code: Option<i32>,
+    duration_ms: u128,
+    stdout: String,
+    stderr: String,
+) -> RunData {
+    RunData {
+        command: command.to_string(),
+        cwd,
+        exit_code,
+        duration_ms,
+        stdout,
+        stderr,
     }
 }
 
@@ -8427,6 +8449,36 @@ rename to new name.txt
         assert_eq!(run.data.stdout, "out");
         assert_eq!(run.data.stderr, "err");
         assert!(!run.output_truncated);
+    }
+
+    #[test]
+    fn run_data_helpers_preserve_output_contract() {
+        let stdout = CapturedOutput {
+            text: "out".to_string(),
+            truncated: false,
+        };
+        let stderr = CapturedOutput {
+            text: "err".to_string(),
+            truncated: true,
+        };
+
+        assert!(captured_outputs_truncated(&stdout, &stderr));
+
+        let data = run_data(
+            "printf ok",
+            "/repo".to_string(),
+            Some(2),
+            77,
+            stdout.text,
+            stderr.text,
+        );
+
+        assert_eq!(data.command, "printf ok");
+        assert_eq!(data.cwd, "/repo");
+        assert_eq!(data.exit_code, Some(2));
+        assert_eq!(data.duration_ms, 77);
+        assert_eq!(data.stdout, "out");
+        assert_eq!(data.stderr, "err");
     }
 
     #[test]
