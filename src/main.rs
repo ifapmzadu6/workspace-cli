@@ -2716,14 +2716,22 @@ fn read_summary(path: &str, lines: Option<&str>, truncated: bool) -> String {
 }
 
 fn log_summary(data: &LogData) -> String {
-    let mut summary = format!("{} operation(s)", data.entries.len());
+    let mut summary = log_entry_count_summary(data);
+    append_log_lines_omission_note(&mut summary, data);
+    summary
+}
+
+fn log_entry_count_summary(data: &LogData) -> String {
+    format!("{} operation(s)", data.entries.len())
+}
+
+fn append_log_lines_omission_note(summary: &mut String, data: &LogData) {
     if log_lines_omitted(data) {
         summary.push_str(&format!(
             " ({} older log line(s) omitted)",
             data.omitted_lines
         ));
     }
-    summary
 }
 
 fn log_truncated(data: &LogData) -> bool {
