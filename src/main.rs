@@ -3112,9 +3112,8 @@ fn related_by_cochange(
     rank: RankingMethod,
     use_index: bool,
 ) -> Result<RelatedData> {
-    if !uses_cochange_index(use_index, rank)
-        && let Some(cli) = RelatedCli::detect()
-    {
+    let should_use_index = uses_cochange_index(use_index, rank);
+    if !should_use_index && let Some(cli) = RelatedCli::detect() {
         let output = cli.query(
             &workspace.root,
             target,
@@ -3133,7 +3132,7 @@ fn related_by_cochange(
         ));
     }
 
-    if uses_cochange_index(use_index, rank) {
+    if should_use_index {
         let index = read_cochange_index(workspace)?;
         let ranking = match rank {
             RankingMethod::Direct => rank_cochanges_from_index(&index, target, max_results),
@@ -3548,7 +3547,8 @@ fn impact_by_cochange(
 ) -> Result<ImpactData> {
     let seed_files = git_changed_files(workspace)?;
     let seed_summary = SeedFileSummary::from_seed_files(&seed_files, MAX_CHANGED_FILES);
-    if !uses_cochange_index(use_index, rank)
+    let should_use_index = uses_cochange_index(use_index, rank);
+    if !should_use_index
         && let Some(cli) = RelatedCli::detect()
         && let Some(data) = impact_by_related_cli(
             workspace,
@@ -3563,7 +3563,7 @@ fn impact_by_cochange(
         return Ok(data);
     }
 
-    if uses_cochange_index(use_index, rank) {
+    if should_use_index {
         let index = read_cochange_index(workspace)?;
         let ranking = match rank {
             RankingMethod::Direct => {
