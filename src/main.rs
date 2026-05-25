@@ -2512,7 +2512,7 @@ fn impact_seed_files_omitted(data: &ImpactData) -> bool {
 }
 
 fn diff_truncated(data: &DiffData, summary_truncated: bool, patch_truncated: bool) -> bool {
-    summary_truncated || patch_truncated || data.omitted_files > 0
+    summary_truncated || patch_truncated || diff_files_omitted(data)
 }
 
 fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool) -> String {
@@ -2524,10 +2524,14 @@ fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool)
     if let Some(note) = diff_output_truncation_note(summary_truncated, patch_truncated) {
         summary.push_str(note);
     }
-    if data.omitted_files > 0 {
+    if diff_files_omitted(data) {
         summary.push_str(" (files truncated)");
     }
     summary
+}
+
+fn diff_files_omitted(data: &DiffData) -> bool {
+    data.omitted_files > 0
 }
 
 fn diff_output_truncation_note(
@@ -7697,6 +7701,7 @@ rename to new name.txt
             patch: None,
         };
         assert!(diff_truncated(&diff, false, false));
+        assert!(diff_files_omitted(&diff));
         assert!(diff_truncated(&diff, true, false));
 
         let diff = DiffData {
@@ -7705,6 +7710,7 @@ rename to new name.txt
         };
         assert!(diff_truncated(&diff, false, true));
         assert!(!diff_truncated(&diff, false, false));
+        assert!(!diff_files_omitted(&diff));
 
         let log = LogData {
             log_path: ".workspace/log.jsonl".to_string(),
@@ -8644,6 +8650,7 @@ rename to new name.txt
             diff_summary(&data, true, true),
             "3 changed file(s) (summary and patch truncated) (files truncated)"
         );
+        assert!(diff_files_omitted(&data));
         assert_eq!(
             diff_summary(&data, true, false),
             "3 changed file(s) (summary truncated) (files truncated)"
@@ -8666,6 +8673,7 @@ rename to new name.txt
             diff_summary(&data, false, false),
             SUMMARY_NOT_GIT_REPOSITORY
         );
+        assert!(!diff_files_omitted(&data));
     }
 
     #[test]
