@@ -838,6 +838,16 @@ struct BoundedFileList {
     omitted_files: usize,
 }
 
+impl BoundedFileList {
+    fn empty() -> Self {
+        Self {
+            files: vec![],
+            total_files: 0,
+            omitted_files: 0,
+        }
+    }
+}
+
 struct BoundedPathAccumulator {
     paths: Vec<String>,
     total_count: usize,
@@ -1715,14 +1725,7 @@ fn git_observed_diff(workspace: &Workspace, summary_only: bool) -> Result<Observ
         (Some(patch.text), patch.truncated)
     };
     Ok(ObservedDiff {
-        data: DiffData {
-            is_repo: true,
-            summary: summary_output.text,
-            file_count: diff_files.total_files,
-            files: diff_files.files,
-            omitted_files: diff_files.omitted_files,
-            patch,
-        },
+        data: diff_data(true, summary_output.text, diff_files, patch),
         summary_truncated: summary_output.truncated,
         patch_truncated,
     })
@@ -1730,16 +1733,30 @@ fn git_observed_diff(workspace: &Workspace, summary_only: bool) -> Result<Observ
 
 fn non_repo_observed_diff() -> ObservedDiff {
     ObservedDiff {
-        data: DiffData {
-            is_repo: false,
-            summary: SUMMARY_NOT_GIT_REPOSITORY.to_string(),
-            file_count: 0,
-            files: vec![],
-            omitted_files: 0,
-            patch: None,
-        },
+        data: diff_data(
+            false,
+            SUMMARY_NOT_GIT_REPOSITORY.to_string(),
+            BoundedFileList::empty(),
+            None,
+        ),
         summary_truncated: false,
         patch_truncated: false,
+    }
+}
+
+fn diff_data(
+    is_repo: bool,
+    summary: String,
+    changed_files: BoundedFileList,
+    patch: Option<String>,
+) -> DiffData {
+    DiffData {
+        is_repo,
+        summary,
+        file_count: changed_files.total_files,
+        files: changed_files.files,
+        omitted_files: changed_files.omitted_files,
+        patch,
     }
 }
 
@@ -8260,6 +8277,27 @@ rename to new name.txt
             observation.next_observations,
             vec!["workspace read src/main.rs"]
         );
+    }
+
+    #[test]
+    fn diff_data_helper_preserves_changed_file_counts() {
+        let data = diff_data(
+            true,
+            "summary".to_string(),
+            BoundedFileList {
+                files: vec!["src/main.rs".to_string()],
+                total_files: 3,
+                omitted_files: 2,
+            },
+            Some("patch".to_string()),
+        );
+
+        assert!(data.is_repo);
+        assert_eq!(data.summary, "summary");
+        assert_eq!(data.file_count, 3);
+        assert_eq!(data.files, vec!["src/main.rs"]);
+        assert_eq!(data.omitted_files, 2);
+        assert_eq!(data.patch.as_deref(), Some("patch"));
     }
 
     #[test]
