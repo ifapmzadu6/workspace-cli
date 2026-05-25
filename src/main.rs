@@ -1299,6 +1299,10 @@ impl Workspace {
         }
     }
 
+    fn root_string(&self) -> String {
+        self.root.to_string_lossy().into_owned()
+    }
+
     fn resolve_existing_workspace_path(&self, path: &Path) -> Result<PathBuf> {
         let resolved = self.resolve_path(path);
         let canonical_root = self
@@ -1850,7 +1854,7 @@ fn search_observation(workspace: &Workspace, data: SearchData) -> Observation<Se
     let next_observations = search_next_observations(&data.matches);
     observation_with_evidence(
         WORKSPACE_SEARCH_KIND,
-        workspace.root.to_string_lossy().into_owned(),
+        workspace.root_string(),
         summary,
         data,
         evidence,
@@ -2004,7 +2008,7 @@ fn diff_observation(workspace: &Workspace, diff: ObservedDiff) -> Observation<Di
         read_next_observations(workspace, data.files.iter().map(String::as_str));
     observation_with_evidence(
         WORKSPACE_DIFF_KIND,
-        workspace.root.to_string_lossy().into_owned(),
+        workspace.root_string(),
         summary,
         data,
         evidence,
@@ -2062,7 +2066,7 @@ fn status_data(
     recent_operations: StatusRecentOperations,
 ) -> StatusData {
     StatusData {
-        root: workspace.root.to_string_lossy().into_owned(),
+        root: workspace.root_string(),
         git,
         index_status,
         recent_operations: recent_operations.entries,
@@ -2271,7 +2275,7 @@ fn observed_run(
     ObservedRun {
         data: run_data(
             command,
-            workspace.root.to_string_lossy().into_owned(),
+            workspace.root_string(),
             exit_code,
             duration_ms,
             stdout.text,
@@ -2900,7 +2904,7 @@ fn build_map(workspace: &Workspace, depth: usize, include_hidden: bool) -> Resul
     omitted.large_files = large_file_count.saturating_sub(large_files.len());
 
     Ok(WorkspaceMap {
-        root: workspace.root.to_string_lossy().into_owned(),
+        root: workspace.root_string(),
         git,
         stack,
         structure,
