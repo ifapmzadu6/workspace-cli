@@ -2595,6 +2595,19 @@ fn map_file_language_summary(map: &WorkspaceMap) -> String {
     )
 }
 
+fn map_git_human_summary(git: &GitSummary) -> String {
+    if git.is_repo {
+        format!(
+            "branch {}, {} dirty, {} untracked",
+            git.branch.as_deref().unwrap_or("unknown"),
+            git.dirty_file_count,
+            git.untracked_file_count
+        )
+    } else {
+        SUMMARY_NOT_GIT_REPOSITORY.to_string()
+    }
+}
+
 fn status_truncated(data: &StatusData) -> bool {
     data.git.omitted_files() || status_recent_operations_omitted(data)
 }
@@ -6486,19 +6499,7 @@ fn print_map(observation: &Observation<WorkspaceMap>) -> Result<()> {
     let map = &observation.data;
     println!("Workspace Map");
     println!("  root: {}", map.root);
-    println!(
-        "  git: {}",
-        if map.git.is_repo {
-            format!(
-                "branch {}, {} dirty, {} untracked",
-                map.git.branch.as_deref().unwrap_or("unknown"),
-                map.git.dirty_file_count,
-                map.git.untracked_file_count
-            )
-        } else {
-            SUMMARY_NOT_GIT_REPOSITORY.to_string()
-        }
-    );
+    println!("  git: {}", map_git_human_summary(&map.git));
     println!("  languages: {}", join_or_none(&map.stack.languages));
     println!(
         "  package managers: {}",
@@ -8297,6 +8298,24 @@ rename to new name.txt
             map_summary(&map, map_truncated(&map)),
             "3 file(s), languages: none (map truncated)"
         );
+    }
+
+    #[test]
+    fn map_git_human_summary_preserves_display_contract() {
+        let mut git = test_git_summary(true);
+        assert_eq!(
+            map_git_human_summary(&git),
+            "branch main, 2 dirty, 1 untracked"
+        );
+
+        git.branch = None;
+        assert_eq!(
+            map_git_human_summary(&git),
+            "branch unknown, 2 dirty, 1 untracked"
+        );
+
+        git.is_repo = false;
+        assert_eq!(map_git_human_summary(&git), SUMMARY_NOT_GIT_REPOSITORY);
     }
 
     #[test]
