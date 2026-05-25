@@ -2502,13 +2502,17 @@ fn map_truncated(map: &WorkspaceMap) -> bool {
 }
 
 fn map_summary(map: &WorkspaceMap, truncated: bool) -> String {
-    let mut summary = format!(
+    let mut summary = map_file_language_summary(map);
+    append_note_if(&mut summary, truncated, SUMMARY_NOTE_MAP_TRUNCATED);
+    summary
+}
+
+fn map_file_language_summary(map: &WorkspaceMap) -> String {
+    format!(
         "{} file(s), languages: {}",
         map.stats.file_count,
         join_or_none(&map.stack.languages)
-    );
-    append_note_if(&mut summary, truncated, SUMMARY_NOTE_MAP_TRUNCATED);
-    summary
+    )
 }
 
 fn status_truncated(data: &StatusData) -> bool {
