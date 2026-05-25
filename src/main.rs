@@ -2672,7 +2672,7 @@ fn diff_truncated(data: &DiffData, summary_truncated: bool, patch_truncated: boo
 
 fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool) -> String {
     let mut summary = if data.is_repo {
-        format!("{} changed file(s)", data.file_count)
+        diff_repository_summary(data)
     } else {
         data.summary.clone()
     };
@@ -2685,6 +2685,10 @@ fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool)
         SUMMARY_NOTE_FILES_TRUNCATED,
     );
     summary
+}
+
+fn diff_repository_summary(data: &DiffData) -> String {
+    format!("{} changed file(s)", data.file_count)
 }
 
 fn diff_files_omitted(data: &DiffData) -> bool {
