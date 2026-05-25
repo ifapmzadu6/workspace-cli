@@ -674,6 +674,15 @@ impl RelationshipMetadata {
             is_repo,
         }
     }
+
+    fn into_parts(self) -> (String, String, String, bool) {
+        (
+            self.method,
+            self.ranking,
+            self.relationship_source,
+            self.is_repo,
+        )
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2373,12 +2382,7 @@ fn cochange_related_data(
         target,
         relationship,
     } = metadata;
-    let RelationshipMetadata {
-        method,
-        ranking,
-        relationship_source,
-        is_repo,
-    } = relationship;
+    let (method, ranking, relationship_source, is_repo) = relationship.into_parts();
 
     RelatedData {
         target,
@@ -2427,12 +2431,7 @@ fn cochange_impact_data(
         source,
         relationship,
     } = metadata;
-    let RelationshipMetadata {
-        method,
-        ranking,
-        relationship_source,
-        is_repo,
-    } = relationship;
+    let (method, ranking, relationship_source, is_repo) = relationship.into_parts();
 
     ImpactData {
         source,
@@ -7587,6 +7586,18 @@ rename to new name.txt
             RELATIONSHIP_SOURCE_COCHANGE_INDEX
         );
         assert!(metadata.is_repo);
+
+        let (method, ranking, relationship_source, is_repo) = RelationshipMetadata::new(
+            &RelatedMethod::Cochange,
+            RankingMethod::Direct,
+            RELATIONSHIP_SOURCE_GIT_LOG,
+            false,
+        )
+        .into_parts();
+        assert_eq!(method, RELATED_METHOD_COCHANGE);
+        assert_eq!(ranking, RANK_DIRECT);
+        assert_eq!(relationship_source, RELATIONSHIP_SOURCE_GIT_LOG);
+        assert!(!is_repo);
     }
 
     #[test]
