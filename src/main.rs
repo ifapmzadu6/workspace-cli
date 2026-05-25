@@ -4482,10 +4482,7 @@ fn direct_related_evidence_reason(
     cochanged_commits: usize,
     sample_commits: &[String],
 ) -> String {
-    format!(
-        "changed with {target} in {cochanged_commits} commit(s); samples: {}",
-        join_or_none(sample_commits)
-    )
+    direct_evidence_reason(target, cochanged_commits, sample_commits)
 }
 
 fn impact_evidence(data: &ImpactData) -> Vec<Evidence> {
@@ -4529,9 +4526,20 @@ fn direct_impact_evidence_reason(
     cochanged_commits: usize,
     sample_commits: &[String],
 ) -> String {
+    direct_evidence_reason(
+        &format!("seed file(s) {}", join_or_none(seed_files)),
+        cochanged_commits,
+        sample_commits,
+    )
+}
+
+fn direct_evidence_reason(
+    subject: &str,
+    cochanged_commits: usize,
+    sample_commits: &[String],
+) -> String {
     format!(
-        "changed with seed file(s) {} in {cochanged_commits} commit(s); samples: {}",
-        join_or_none(seed_files),
+        "changed with {subject} in {cochanged_commits} commit(s); samples: {}",
         join_or_none(sample_commits)
     )
 }
@@ -8557,6 +8565,10 @@ rename to new name.txt
 
         assert_eq!(
             related_evidence_reason(&related, &direct_related),
+            "changed with src/a.rs in 2 commit(s); samples: abc123"
+        );
+        assert_eq!(
+            direct_evidence_reason("src/a.rs", 2, &["abc123".to_string()]),
             "changed with src/a.rs in 2 commit(s); samples: abc123"
         );
         assert_eq!(
