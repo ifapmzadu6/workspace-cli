@@ -2474,11 +2474,15 @@ fn impact_summary(data: &ImpactData) -> String {
 }
 
 fn search_truncated(data: &SearchData) -> bool {
-    search_results_omitted(data) || data.truncated_match_texts > 0
+    search_results_omitted(data) || search_match_texts_truncated(data)
 }
 
 fn search_results_omitted(data: &SearchData) -> bool {
     data.total_matches > data.matches.len()
+}
+
+fn search_match_texts_truncated(data: &SearchData) -> bool {
+    data.truncated_match_texts > 0
 }
 
 fn search_summary(data: &SearchData) -> String {
@@ -2492,7 +2496,7 @@ fn search_summary(data: &SearchData) -> String {
     } else {
         format!("{} match(es) for {:?}", data.total_matches, data.query)
     };
-    if data.truncated_match_texts > 0 {
+    if search_match_texts_truncated(data) {
         summary.push_str(&format!(
             ", truncated {} match text(s)",
             data.truncated_match_texts
@@ -7659,6 +7663,7 @@ rename to new name.txt
         };
         assert!(search_truncated(&search));
         assert!(search_results_omitted(&search));
+        assert!(!search_match_texts_truncated(&search));
 
         let search = SearchData {
             total_matches: 1,
@@ -7667,6 +7672,7 @@ rename to new name.txt
         };
         assert!(search_truncated(&search));
         assert!(!search_results_omitted(&search));
+        assert!(search_match_texts_truncated(&search));
 
         let search = SearchData {
             total_matches: 1,
@@ -7675,6 +7681,7 @@ rename to new name.txt
         };
         assert!(!search_truncated(&search));
         assert!(!search_results_omitted(&search));
+        assert!(!search_match_texts_truncated(&search));
 
         let impact = ImpactData {
             source: IMPACT_SOURCE_DIFF.to_string(),
@@ -8614,6 +8621,7 @@ rename to new name.txt
             "3 match(es) for \"needle\", showing 1, truncated 2 match text(s)"
         );
         assert!(search_results_omitted(&data));
+        assert!(search_match_texts_truncated(&data));
 
         let data = SearchData {
             query: "needle".to_string(),
@@ -8629,6 +8637,7 @@ rename to new name.txt
 
         assert_eq!(search_summary(&data), "1 match(es) for \"needle\"");
         assert!(!search_results_omitted(&data));
+        assert!(!search_match_texts_truncated(&data));
     }
 
     #[test]
