@@ -2758,6 +2758,10 @@ fn append_search_match_text_truncation_note(summary: &mut String, data: &SearchD
     }
 }
 
+fn search_match_human_summary(item: &SearchMatch) -> String {
+    format!("{}:{}:{}: {}", item.path, item.line, item.column, item.text)
+}
+
 fn impact_truncated(data: &ImpactData) -> bool {
     impact_seed_files_omitted(data)
 }
@@ -6566,7 +6570,7 @@ fn print_status(observation: &Observation<StatusData>) -> Result<()> {
 fn print_search(observation: &Observation<SearchData>) -> Result<()> {
     println!("{}", observation.summary);
     for item in &observation.data.matches {
-        println!("{}:{}:{}: {}", item.path, item.line, item.column, item.text);
+        println!("{}", search_match_human_summary(item));
     }
     if observation.truncated {
         println!("results truncated");
@@ -8160,6 +8164,10 @@ rename to new name.txt
         assert_eq!(first_evidence.path, "file_00.txt");
         assert_eq!(first_evidence.lines.as_deref(), Some("1"));
         assert_eq!(first_evidence.reason, EVIDENCE_REASON_TEXT_MATCH);
+        assert_eq!(
+            search_match_human_summary(&matches[0]),
+            "file_00.txt:1:1: match"
+        );
         assert_eq!(next.len(), MAX_NEXT_OBSERVATIONS);
         assert_eq!(next[0], "workspace read file_00.txt --lines 1:1");
         assert_eq!(next[4], "workspace read file_04.txt --lines 5:5");
