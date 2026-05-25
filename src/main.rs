@@ -1160,10 +1160,10 @@ fn cmd_index_status(workspace: &Workspace, args: IndexStatusArgs) -> Result<()> 
 fn cmd_index_cochange(workspace: &Workspace, args: IndexCochangeArgs) -> Result<()> {
     let data = observed_index_cochange(workspace, &args)?;
     let observation = index_cochange_observation(data);
-    output_recorded_observation(
+    output_required_logged_observation(
         workspace,
         args.json,
-        OperationLogRecord::observe_observation(LOG_OP_INDEX_COCHANGE, &observation),
+        LOG_OP_INDEX_COCHANGE,
         &observation,
         print_index_cochange,
     )
@@ -5727,6 +5727,26 @@ where
     output_observation(json, observation, print_human)
 }
 
+fn output_required_logged_observation<T, F>(
+    workspace: &Workspace,
+    json: bool,
+    op: &str,
+    observation: &Observation<T>,
+    print_human: F,
+) -> Result<()>
+where
+    T: Serialize,
+    F: FnOnce(&Observation<T>) -> Result<()>,
+{
+    output_recorded_observation(
+        workspace,
+        json,
+        OperationLogRecord::observe_observation(op, observation),
+        observation,
+        print_human,
+    )
+}
+
 struct OperationLogRecord<'a> {
     kind: &'a str,
     op: &'a str,
@@ -8415,6 +8435,52 @@ rename to new name.txt
         assert_eq!(log.entries[0].op, LOG_OP_STATUS);
         assert_eq!(log.entries[0].scope, LOG_FILE);
         assert_eq!(log.entries[0].summary, "test summary");
+    }
+
+    #[test]
+    fn output_required_logged_observation_records_required_observe_log() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+        let observation = Observation {
+            kind: WORKSPACE_INDEX_COCHANGE_KIND.to_string(),
+            scope: COCHANGE_INDEX_FILE.to_string(),
+            summary: "index summary".to_string(),
+            data: IndexCochangeData {
+                path: COCHANGE_INDEX_FILE.to_string(),
+                version: 1,
+                generated_at_unix_ms: 1,
+                head: Some("abc123".to_string()),
+                max_commits: 10,
+                max_files_per_commit: 20,
+                commits_scanned: 1,
+                commits_indexed: 1,
+                ignored_large_commits: 0,
+                file_count: 2,
+                edge_count: 1,
+            },
+            evidence: vec![],
+            truncated: false,
+            next_observations: vec![],
+        };
+
+        output_required_logged_observation(
+            &workspace,
+            false,
+            LOG_OP_INDEX_COCHANGE,
+            &observation,
+            |_| Ok(()),
+        )
+        .expect("required observation log should be written and output");
+
+        let log = read_log(&workspace, 10).expect("log should be readable");
+        assert_eq!(log.entries.len(), 1);
+        assert_eq!(log.entries[0].kind, LOG_KIND_OBSERVE);
+        assert_eq!(log.entries[0].op, LOG_OP_INDEX_COCHANGE);
+        assert_eq!(log.entries[0].scope, COCHANGE_INDEX_FILE);
+        assert_eq!(log.entries[0].summary, "index summary");
     }
 
     #[test]
