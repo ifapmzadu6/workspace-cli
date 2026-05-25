@@ -6426,8 +6426,12 @@ fn print_related(observation: &Observation<RelatedData>) -> Result<()> {
     println!("  source: {}", data.relationship_source);
     println!("  ranking: {}", data.ranking);
     println!(
-        "  scanned: {} commit(s), matched: {}, ignored broad commits: {}",
-        data.commits_scanned, data.commits_matched, data.ignored_large_commits
+        "{}",
+        relationship_scan_summary(
+            data.commits_scanned,
+            data.commits_matched,
+            data.ignored_large_commits
+        )
     );
     for file in &data.related {
         println!(
@@ -6454,8 +6458,12 @@ fn print_impact(observation: &Observation<ImpactData>) -> Result<()> {
         print_omitted_items(data.omitted_seed_files, "seed file(s)");
     }
     println!(
-        "  scanned: {} commit(s), matched: {}, ignored broad commits: {}",
-        data.commits_scanned, data.commits_matched, data.ignored_large_commits
+        "{}",
+        relationship_scan_summary(
+            data.commits_scanned,
+            data.commits_matched,
+            data.ignored_large_commits
+        )
     );
     for file in &data.impacted {
         println!(
@@ -6468,6 +6476,16 @@ fn print_impact(observation: &Observation<ImpactData>) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn relationship_scan_summary(
+    commits_scanned: usize,
+    commits_matched: usize,
+    ignored_large_commits: usize,
+) -> String {
+    format!(
+        "  scanned: {commits_scanned} commit(s), matched: {commits_matched}, ignored broad commits: {ignored_large_commits}"
+    )
 }
 
 fn print_read(observation: &Observation<ReadData>) -> Result<()> {
@@ -8425,6 +8443,11 @@ rename to new name.txt
 
     #[test]
     fn relationship_observation_helpers_preserve_contract() {
+        assert_eq!(
+            relationship_scan_summary(5, 2, 1),
+            "  scanned: 5 commit(s), matched: 2, ignored broad commits: 1"
+        );
+
         let temp = tempfile::TempDir::new().expect("temp dir should be created");
         fs::create_dir(temp.path().join("src")).expect("src directory should be created");
         fs::write(temp.path().join("src/b.rs"), "b\n").expect("related file should be written");
