@@ -1979,7 +1979,7 @@ fn read_observation(read: ObservedRead) -> Observation<ReadData> {
 
 fn read_followup_observations(path: &str) -> Vec<String> {
     vec![
-        format!("workspace search {}", shell_hint(path)),
+        workspace_search_command(path),
         WORKSPACE_DIFF_SUMMARY_COMMAND.to_string(),
     ]
 }
@@ -2561,7 +2561,7 @@ fn cochange_impact_data(
 fn patch_followup_observations(transaction_id: &str) -> Vec<String> {
     vec![
         WORKSPACE_DIFF_SUMMARY_COMMAND.to_string(),
-        format!("workspace rollback {transaction_id}"),
+        workspace_rollback_command(transaction_id),
     ]
 }
 
@@ -3342,14 +3342,11 @@ fn map_next_observations(map: &WorkspaceMap) -> Vec<String> {
         next.push(WORKSPACE_INDEX_COCHANGE_COMMAND.to_string());
         next.push(WORKSPACE_IMPACT_COCHANGE_COMMAND.to_string());
         if let Some(entrypoint) = map.structure.entrypoints.first() {
-            next.push(format!(
-                "workspace related {} --by cochange",
-                shell_hint(entrypoint)
-            ));
+            next.push(workspace_related_cochange_command(entrypoint));
         }
     }
     if let Some(command) = map.commands.get("test") {
-        next.push(format!("workspace run {}", shell_hint(command)));
+        next.push(workspace_run_command(command));
     }
     next
 }
@@ -6820,6 +6817,22 @@ fn workspace_read_lines_command(path: &str, start: u64, end: u64) -> String {
     format!("{} --lines {start}:{end}", workspace_read_command(path))
 }
 
+fn workspace_search_command(query: &str) -> String {
+    format!("workspace search {}", shell_hint(query))
+}
+
+fn workspace_related_cochange_command(path: &str) -> String {
+    format!("workspace related {} --by cochange", shell_hint(path))
+}
+
+fn workspace_run_command(command: &str) -> String {
+    format!("workspace run {}", shell_hint(command))
+}
+
+fn workspace_rollback_command(transaction_id: &str) -> String {
+    format!("workspace rollback {transaction_id}")
+}
+
 fn shell_hint(value: &str) -> String {
     if value
         .chars()
@@ -6893,6 +6906,22 @@ mod tests {
         assert_eq!(shell_hint("space name.txt"), "'space name.txt'");
         assert_eq!(shell_hint("weird$path.txt"), "'weird$path.txt'");
         assert_eq!(shell_hint("quote'name.txt"), "'quote'\\''name.txt'");
+        assert_eq!(
+            workspace_search_command("space name.txt"),
+            "workspace search 'space name.txt'"
+        );
+        assert_eq!(
+            workspace_related_cochange_command("src/main.rs"),
+            "workspace related src/main.rs --by cochange"
+        );
+        assert_eq!(
+            workspace_run_command("cargo test"),
+            "workspace run 'cargo test'"
+        );
+        assert_eq!(
+            workspace_rollback_command("tx-1"),
+            "workspace rollback tx-1"
+        );
     }
 
     #[test]
