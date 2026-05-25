@@ -2554,7 +2554,7 @@ fn transaction_file_summary(
 ) -> String {
     let mut summary =
         format!("{action} transaction {transaction_id} touching {file_count} file(s)");
-    if omitted_files > 0 {
+    if transaction_files_truncated(omitted_files) {
         summary.push_str(" (files truncated)");
     }
     summary
@@ -6490,7 +6490,7 @@ fn print_patch(observation: &Observation<PatchData>) -> Result<()> {
     println!("{}", observation.summary);
     println!("  transaction: {}", observation.data.transaction_id);
     print_list("files", &observation.data.files_changed);
-    if observation.data.omitted_files > 0 {
+    if transaction_files_truncated(observation.data.omitted_files) {
         println!("    ... {} more file(s)", observation.data.omitted_files);
     }
     Ok(())
@@ -6539,7 +6539,7 @@ fn print_rollback(observation: &Observation<RollbackData>) -> Result<()> {
         observation.data.rollback_transaction_id
     );
     print_list("files", &observation.data.files_changed);
-    if observation.data.omitted_files > 0 {
+    if transaction_files_truncated(observation.data.omitted_files) {
         println!("    ... {} more file(s)", observation.data.omitted_files);
     }
     Ok(())
@@ -8756,10 +8756,12 @@ rename to new name.txt
 
     #[test]
     fn transaction_file_summary_reports_truncated_files() {
+        assert!(!transaction_files_truncated(0));
         assert_eq!(
             transaction_file_summary("applied patch", "tx-123", 3, 0),
             "applied patch transaction tx-123 touching 3 file(s)"
         );
+        assert!(transaction_files_truncated(2));
         assert_eq!(
             transaction_file_summary("rolled back", "tx-123", 3, 2),
             "rolled back transaction tx-123 touching 3 file(s) (files truncated)"
