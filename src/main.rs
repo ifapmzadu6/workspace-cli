@@ -1725,17 +1725,18 @@ fn patch_observation(data: PatchData, files_changed: &[String]) -> Observation<P
         data.file_count,
         data.omitted_files,
     );
+    let evidence = changed_file_evidence(files_changed, EVIDENCE_REASON_PATCH_FILE_TARGET);
     let next_observations = patch_followup_observations(&data.transaction_id);
     let truncated = transaction_files_truncated(data.omitted_files);
-    Observation {
-        kind: WORKSPACE_PATCH_KIND.to_string(),
-        scope: data.patch_file.clone(),
+    observation_with_evidence(
+        WORKSPACE_PATCH_KIND,
+        data.patch_file.clone(),
         summary,
         data,
-        evidence: changed_file_evidence(files_changed, EVIDENCE_REASON_PATCH_FILE_TARGET),
+        evidence,
         truncated,
         next_observations,
-    }
+    )
 }
 
 fn rollback_data(
@@ -1763,16 +1764,18 @@ fn rollback_observation(data: RollbackData, files_changed: &[String]) -> Observa
         data.file_count,
         data.omitted_files,
     );
+    let evidence = changed_file_evidence(files_changed, EVIDENCE_REASON_ROLLBACK_TARGET);
+    let next_observations = rollback_followup_observations();
     let truncated = transaction_files_truncated(data.omitted_files);
-    Observation {
-        kind: WORKSPACE_ROLLBACK_KIND.to_string(),
-        scope: data.transaction_id.clone(),
+    observation_with_evidence(
+        WORKSPACE_ROLLBACK_KIND,
+        data.transaction_id.clone(),
         summary,
         data,
-        evidence: changed_file_evidence(files_changed, EVIDENCE_REASON_ROLLBACK_TARGET),
+        evidence,
         truncated,
-        next_observations: rollback_followup_observations(),
-    }
+        next_observations,
+    )
 }
 
 fn transaction_files_truncated(omitted_files: usize) -> bool {
@@ -1845,15 +1848,15 @@ fn search_observation(workspace: &Workspace, data: SearchData) -> Observation<Se
     let evidence = search_evidence(&data.matches);
     let truncated = search_truncated(&data);
     let next_observations = search_next_observations(&data.matches);
-    Observation {
-        kind: WORKSPACE_SEARCH_KIND.to_string(),
-        scope: workspace.root.to_string_lossy().into_owned(),
+    observation_with_evidence(
+        WORKSPACE_SEARCH_KIND,
+        workspace.root.to_string_lossy().into_owned(),
         summary,
         data,
         evidence,
         truncated,
         next_observations,
-    }
+    )
 }
 
 fn search_next_observations(matches: &[SearchMatch]) -> Vec<String> {
@@ -1920,15 +1923,15 @@ fn read_observation(read: ObservedRead) -> Observation<ReadData> {
     let summary = read_summary(&data.path, data.lines.as_deref(), content_truncated);
     let evidence = read_evidence(&data);
     let next_observations = read_followup_observations(&data.path);
-    Observation {
-        kind: WORKSPACE_READ_KIND.to_string(),
-        scope: data.path.clone(),
+    observation_with_evidence(
+        WORKSPACE_READ_KIND,
+        data.path.clone(),
         summary,
         data,
         evidence,
-        truncated: content_truncated,
+        content_truncated,
         next_observations,
-    }
+    )
 }
 
 fn read_followup_observations(path: &str) -> Vec<String> {
@@ -1999,15 +2002,15 @@ fn diff_observation(workspace: &Workspace, diff: ObservedDiff) -> Observation<Di
     let truncated = diff_truncated(&data, diff.summary_truncated, diff.patch_truncated);
     let next_observations =
         read_next_observations(workspace, data.files.iter().map(String::as_str));
-    Observation {
-        kind: WORKSPACE_DIFF_KIND.to_string(),
-        scope: workspace.root.to_string_lossy().into_owned(),
+    observation_with_evidence(
+        WORKSPACE_DIFF_KIND,
+        workspace.root.to_string_lossy().into_owned(),
         summary,
         data,
         evidence,
         truncated,
         next_observations,
-    }
+    )
 }
 
 fn observed_map(workspace: &Workspace, args: &MapArgs) -> Result<WorkspaceMap> {
@@ -2019,15 +2022,15 @@ fn map_observation(map: WorkspaceMap) -> Observation<WorkspaceMap> {
     let summary = map_summary(&map, truncated);
     let evidence = map_evidence(&map);
     let next_observations = map_next_observations(&map);
-    Observation {
-        kind: WORKSPACE_MAP_KIND.to_string(),
-        scope: map.root.clone(),
+    observation_with_evidence(
+        WORKSPACE_MAP_KIND,
+        map.root.clone(),
         summary,
-        data: map,
+        map,
         evidence,
         truncated,
         next_observations,
-    }
+    )
 }
 
 fn read_status_recent_operations(workspace: &Workspace, limit: usize) -> StatusRecentOperations {
@@ -2197,15 +2200,15 @@ fn related_observation(
         workspace,
         data.related.iter().map(|file| file.path.as_str()),
     );
-    Observation {
-        kind: WORKSPACE_RELATED_KIND.to_string(),
-        scope: target.to_string(),
+    observation_with_evidence(
+        WORKSPACE_RELATED_KIND,
+        target.to_string(),
         summary,
         data,
         evidence,
-        truncated: false,
+        false,
         next_observations,
-    }
+    )
 }
 
 fn observed_impact_args(workspace: &Workspace, args: &ImpactArgs) -> Result<ImpactData> {
@@ -2245,15 +2248,15 @@ fn impact_observation(workspace: &Workspace, data: ImpactData) -> Observation<Im
         workspace,
         data.impacted.iter().map(|file| file.path.as_str()),
     );
-    Observation {
-        kind: WORKSPACE_IMPACT_KIND.to_string(),
-        scope: data.source.clone(),
+    observation_with_evidence(
+        WORKSPACE_IMPACT_KIND,
+        data.source.clone(),
         summary,
         data,
         evidence,
         truncated,
         next_observations,
-    }
+    )
 }
 
 fn observed_run(
@@ -2347,12 +2350,32 @@ fn observation_without_evidence<T: Serialize>(
     truncated: bool,
     next_observations: Vec<String>,
 ) -> Observation<T> {
+    observation_with_evidence(
+        kind,
+        scope,
+        summary,
+        data,
+        vec![],
+        truncated,
+        next_observations,
+    )
+}
+
+fn observation_with_evidence<T: Serialize>(
+    kind: &str,
+    scope: String,
+    summary: String,
+    data: T,
+    evidence: Vec<Evidence>,
+    truncated: bool,
+    next_observations: Vec<String>,
+) -> Observation<T> {
     Observation {
         kind: kind.to_string(),
         scope,
         summary,
         data,
-        evidence: vec![],
+        evidence,
         truncated,
         next_observations,
     }
