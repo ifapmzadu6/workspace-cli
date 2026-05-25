@@ -2391,7 +2391,7 @@ fn map_summary(map: &WorkspaceMap, truncated: bool) -> String {
 }
 
 fn status_truncated(data: &StatusData) -> bool {
-    data.git.omitted_files() || data.recent_operations_omitted > 0
+    data.git.omitted_files() || status_recent_operations_omitted(data)
 }
 
 fn status_summary(data: &StatusData, truncated: bool) -> String {
@@ -2416,11 +2416,15 @@ fn status_summary(data: &StatusData, truncated: bool) -> String {
 fn status_log_note(data: &StatusData) -> &'static str {
     if data.recent_operations_error.is_some() {
         ", operation log unreadable"
-    } else if data.recent_operations_omitted > 0 {
+    } else if status_recent_operations_omitted(data) {
         ", recent operations truncated"
     } else {
         ""
     }
+}
+
+fn status_recent_operations_omitted(data: &StatusData) -> bool {
+    data.recent_operations_omitted > 0
 }
 
 fn index_status_summary(data: &IndexStatusData) -> String {
@@ -7984,6 +7988,7 @@ rename to new name.txt
     fn status_summary_reports_log_notes_and_truncation() {
         let mut data = test_status_data();
         assert!(!status_truncated(&data));
+        assert!(!status_recent_operations_omitted(&data));
         assert_eq!(
             status_summary(&data, status_truncated(&data)),
             "branch main, 2 dirty file(s), 1 untracked file(s), index fresh"
@@ -7991,6 +7996,7 @@ rename to new name.txt
 
         data.recent_operations_omitted = 3;
         assert!(status_truncated(&data));
+        assert!(status_recent_operations_omitted(&data));
         assert_eq!(
             status_summary(&data, status_truncated(&data)),
             "branch main, 2 dirty file(s), 1 untracked file(s), index fresh, recent operations truncated (status truncated)"
@@ -7999,6 +8005,7 @@ rename to new name.txt
         data.recent_operations_omitted = 0;
         data.recent_operations_error = Some("bad log".to_string());
         assert!(!status_truncated(&data));
+        assert!(!status_recent_operations_omitted(&data));
         assert_eq!(
             status_summary(&data, status_truncated(&data)),
             "branch main, 2 dirty file(s), 1 untracked file(s), index fresh, operation log unreadable"
@@ -8007,6 +8014,7 @@ rename to new name.txt
         data.git.is_repo = false;
         data.recent_operations_error = None;
         data.recent_operations_omitted = 2;
+        assert!(status_recent_operations_omitted(&data));
         assert_eq!(
             status_summary(&data, status_truncated(&data)),
             "not a git repository (status truncated)"
