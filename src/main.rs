@@ -3204,7 +3204,7 @@ fn related_data_from_related_cli(
             target,
             &RelatedMethod::Cochange,
             rank,
-            format!("{RELATIONSHIP_SOURCE_RELATED_CLI}:{}", output.mode),
+            related_cli_relationship_source(&output.mode),
             true,
         ),
         RelationshipStats::new(0, commits_matched, 0),
@@ -3668,10 +3668,7 @@ fn impact_by_related_cli(
         impact_data_metadata(
             &RelatedMethod::Cochange,
             rank,
-            format!(
-                "{RELATIONSHIP_SOURCE_RELATED_CLI}:{}:aggregate",
-                rank.as_str()
-            ),
+            related_cli_aggregate_relationship_source(rank),
             true,
         ),
         seed_summary,
@@ -4539,6 +4536,18 @@ fn relationship_source(use_index: bool) -> &'static str {
 
 fn relationship_source_for_options(use_index: bool, rank: RankingMethod) -> &'static str {
     relationship_source(uses_cochange_index(use_index, rank))
+}
+
+fn related_cli_relationship_source(mode: &str) -> String {
+    format!("{RELATIONSHIP_SOURCE_RELATED_CLI}:{mode}")
+}
+
+fn related_cli_aggregate_relationship_source(rank: RankingMethod) -> String {
+    format!(
+        "{}:{}:aggregate",
+        RELATIONSHIP_SOURCE_RELATED_CLI,
+        rank.as_str()
+    )
 }
 
 fn uses_cochange_index(use_index: bool, rank: RankingMethod) -> bool {
@@ -7447,6 +7456,14 @@ rename to new name.txt
         assert_eq!(
             relationship_source_for_options(false, RankingMethod::Pagerank),
             RELATIONSHIP_SOURCE_COCHANGE_INDEX
+        );
+        assert_eq!(
+            related_cli_relationship_source("direct"),
+            "related-cli:direct"
+        );
+        assert_eq!(
+            related_cli_aggregate_relationship_source(RankingMethod::Direct),
+            "related-cli:direct:aggregate"
         );
     }
 
