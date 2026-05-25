@@ -2711,12 +2711,16 @@ fn run_exit_status_label(exit_code: Option<i32>) -> String {
 }
 
 fn read_summary(path: &str, lines: Option<&str>, truncated: bool) -> String {
-    let mut summary = match lines {
-        Some(lines) => format!("read {path} lines {lines}"),
-        None => format!("read {path}"),
-    };
+    let mut summary = read_target_summary(path, lines);
     append_note_if(&mut summary, truncated, SUMMARY_NOTE_READ_TRUNCATED);
     summary
+}
+
+fn read_target_summary(path: &str, lines: Option<&str>) -> String {
+    match lines {
+        Some(lines) => format!("read {path} lines {lines}"),
+        None => format!("read {path}"),
+    }
 }
 
 fn log_summary(data: &LogData) -> String {
