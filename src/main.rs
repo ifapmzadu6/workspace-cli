@@ -6453,7 +6453,7 @@ fn print_impact(observation: &Observation<ImpactData>) -> Result<()> {
 
 fn print_read(observation: &Observation<ReadData>) -> Result<()> {
     print!("{}", observation.data.content);
-    if !observation.data.content.ends_with('\n') {
+    if needs_trailing_newline(&observation.data.content) {
         println!();
     }
     Ok(())
@@ -6488,13 +6488,13 @@ fn print_run(observation: &Observation<RunData>) -> Result<()> {
     let data = &observation.data;
     if !data.stdout.is_empty() {
         print!("{}", data.stdout);
-        if !data.stdout.ends_with('\n') {
+        if needs_trailing_newline(&data.stdout) {
             println!();
         }
     }
     if !data.stderr.is_empty() {
         eprint!("{}", data.stderr);
-        if !data.stderr.ends_with('\n') {
+        if needs_trailing_newline(&data.stderr) {
             eprintln!();
         }
     }
@@ -6565,6 +6565,10 @@ fn omitted_items_message(count: usize, item_label: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn needs_trailing_newline(text: &str) -> bool {
+    !text.ends_with('\n')
 }
 
 fn join_or_none(values: &[String]) -> String {
@@ -8775,6 +8779,13 @@ rename to new name.txt
             omitted_items_message(2, "dirty file(s)").as_deref(),
             Some("    ... 2 more dirty file(s)")
         );
+    }
+
+    #[test]
+    fn trailing_newline_helper_preserves_output_rule() {
+        assert!(needs_trailing_newline(""));
+        assert!(needs_trailing_newline("line"));
+        assert!(!needs_trailing_newline("line\n"));
     }
 
     #[test]
