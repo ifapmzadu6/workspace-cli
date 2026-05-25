@@ -1790,8 +1790,12 @@ fn changed_file_evidence(files_changed: &[String], reason: &str) -> Vec<Evidence
     files_changed
         .iter()
         .take(MAX_CHANGED_FILES)
-        .map(|path| evidence_item(path.clone(), None, reason.to_string()))
+        .map(|path| path_evidence_item(path.clone(), reason.to_string()))
         .collect()
+}
+
+fn path_evidence_item(path: String, reason: String) -> Evidence {
+    evidence_item(path, None, reason)
 }
 
 fn evidence_item(path: String, lines: Option<String>, reason: String) -> Evidence {
@@ -3285,7 +3289,7 @@ fn map_evidence(map: &WorkspaceMap) -> Vec<Evidence> {
     map.important_files
         .iter()
         .take(MAX_MAP_EVIDENCE_ITEMS)
-        .map(|file| evidence_item(file.path.clone(), None, file.reason.clone()))
+        .map(|file| path_evidence_item(file.path.clone(), file.reason.clone()))
         .collect()
 }
 
@@ -4602,7 +4606,7 @@ fn related_evidence(data: &RelatedData) -> Vec<Evidence> {
     data.related
         .iter()
         .take(MAX_EVIDENCE_ITEMS)
-        .map(|file| evidence_item(file.path.clone(), None, related_evidence_reason(data, file)))
+        .map(|file| path_evidence_item(file.path.clone(), related_evidence_reason(data, file)))
         .collect()
 }
 
@@ -4630,7 +4634,7 @@ fn impact_evidence(data: &ImpactData) -> Vec<Evidence> {
     data.impacted
         .iter()
         .take(MAX_EVIDENCE_ITEMS)
-        .map(|file| evidence_item(file.path.clone(), None, impact_evidence_reason(data, file)))
+        .map(|file| path_evidence_item(file.path.clone(), impact_evidence_reason(data, file)))
         .collect()
 }
 
