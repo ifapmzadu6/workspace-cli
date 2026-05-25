@@ -6451,23 +6451,22 @@ fn parse_log_entries<I>(lines: I) -> Result<Vec<LogEntry>>
 where
     I: IntoIterator<Item = StoredLogLine>,
 {
-    lines
-        .into_iter()
-        .map(|line| {
-            let line_number = line.line_number;
-            if line.oversized {
-                bail!(
-                    "operation log line {} exceeded {} bytes",
-                    line_number,
-                    MAX_LOG_LINE_BYTES
-                );
-            }
-            let text = String::from_utf8(line.bytes)
-                .with_context(|| format!("operation log line {line_number} is not valid UTF-8"))?;
-            serde_json::from_str::<LogEntry>(&text)
-                .with_context(|| format!("invalid operation log JSON at line {line_number}"))
-        })
-        .collect()
+    lines.into_iter().map(parse_log_entry_line).collect()
+}
+
+fn parse_log_entry_line(line: StoredLogLine) -> Result<LogEntry> {
+    let line_number = line.line_number;
+    if line.oversized {
+        bail!(
+            "operation log line {} exceeded {} bytes",
+            line_number,
+            MAX_LOG_LINE_BYTES
+        );
+    }
+    let text = String::from_utf8(line.bytes)
+        .with_context(|| format!("operation log line {line_number} is not valid UTF-8"))?;
+    serde_json::from_str::<LogEntry>(&text)
+        .with_context(|| format!("invalid operation log JSON at line {line_number}"))
 }
 
 fn output_observation<T, F>(json: bool, observation: &Observation<T>, print_human: F) -> Result<()>
@@ -9984,6 +9983,44 @@ not json
 
         assert!(error.contains("line 1"), "unexpected error: {error}");
         assert!(error.contains("exceeded"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn parse_log_entry_line_reports_line_level_errors() {
+        let entry = parse_log_entry_line(StoredLogLine {
+            line_number: 7,
+            bytes: br#"{"id":"op-1","timestamp_unix_ms":1,"kind":"observe","op":"status","scope":".","summary":"ok","transaction_id":null}"#.to_vec(),
+            oversized: false,
+        })
+        .expect("log entry line should parse");
+        assert_eq!(entry.id, "op-1");
+        assert_eq!(entry.summary, "ok");
+
+        let Err(error) = parse_log_entry_line(StoredLogLine {
+            line_number: 8,
+            bytes: vec![0xff],
+            oversized: false,
+        }) else {
+            panic!("invalid UTF-8 line should fail");
+        };
+        let error = format!("{error:#}");
+        assert!(
+            error.contains("operation log line 8 is not valid UTF-8"),
+            "unexpected error: {error}"
+        );
+
+        let Err(error) = parse_log_entry_line(StoredLogLine {
+            line_number: 9,
+            bytes: b"not json".to_vec(),
+            oversized: false,
+        }) else {
+            panic!("invalid JSON line should fail");
+        };
+        let error = format!("{error:#}");
+        assert!(
+            error.contains("invalid operation log JSON at line 9"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
