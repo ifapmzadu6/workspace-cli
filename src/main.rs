@@ -113,6 +113,8 @@ const SUMMARY_NOTE_SUMMARY_TRUNCATED: &str = " (summary truncated)";
 const SUMMARY_NOTE_PATCH_TRUNCATED: &str = " (patch truncated)";
 const SUMMARY_NOTE_OUTPUT_TRUNCATED: &str = " (output truncated)";
 const SUMMARY_NOTE_READ_TRUNCATED: &str = " (truncated)";
+const SUMMARY_NOTE_OPERATION_LOG_UNREADABLE: &str = ", operation log unreadable";
+const SUMMARY_NOTE_RECENT_OPERATIONS_TRUNCATED: &str = ", recent operations truncated";
 const MAP_ENTRYPOINT_NAMES: &[&str] = &[
     "src/main.rs",
     "src/lib.rs",
@@ -2532,9 +2534,9 @@ fn status_summary(data: &StatusData, truncated: bool) -> String {
 
 fn status_log_note(data: &StatusData) -> &'static str {
     if data.recent_operations_error.is_some() {
-        ", operation log unreadable"
+        SUMMARY_NOTE_OPERATION_LOG_UNREADABLE
     } else if status_recent_operations_omitted(data) {
-        ", recent operations truncated"
+        SUMMARY_NOTE_RECENT_OPERATIONS_TRUNCATED
     } else {
         ""
     }
@@ -7468,6 +7470,14 @@ rename to new name.txt
         assert_eq!(SUMMARY_NOTE_PATCH_TRUNCATED, " (patch truncated)");
         assert_eq!(SUMMARY_NOTE_OUTPUT_TRUNCATED, " (output truncated)");
         assert_eq!(SUMMARY_NOTE_READ_TRUNCATED, " (truncated)");
+        assert_eq!(
+            SUMMARY_NOTE_OPERATION_LOG_UNREADABLE,
+            ", operation log unreadable"
+        );
+        assert_eq!(
+            SUMMARY_NOTE_RECENT_OPERATIONS_TRUNCATED,
+            ", recent operations truncated"
+        );
     }
 
     #[test]
