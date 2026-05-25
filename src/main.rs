@@ -5685,10 +5685,6 @@ fn read_captured_output_with_limit<R: Read>(
 }
 
 fn append_operation_log(workspace: &Workspace, record: OperationLogRecord<'_>) -> Result<()> {
-    let log_dir = workspace.root.join(LOG_DIR);
-    fs::create_dir_all(&log_dir)
-        .with_context(|| format!("failed to create log directory {}", log_dir.display()))?;
-
     let entry = operation_log_entry(record);
     let line = serde_json::to_string(&entry)?;
     use std::io::Write;
