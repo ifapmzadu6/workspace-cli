@@ -2517,19 +2517,23 @@ fn status_truncated(data: &StatusData) -> bool {
 
 fn status_summary(data: &StatusData, truncated: bool) -> String {
     let mut summary = if data.git.is_repo {
-        format!(
-            "branch {}, {} dirty file(s), {} untracked file(s), index {}{}",
-            data.git.branch.as_deref().unwrap_or("unknown"),
-            data.git.dirty_file_count,
-            data.git.untracked_file_count,
-            data.index_status.status,
-            status_log_note(data)
-        )
+        status_repository_summary(data)
     } else {
         SUMMARY_NOT_GIT_REPOSITORY.to_string()
     };
     append_note_if(&mut summary, truncated, SUMMARY_NOTE_STATUS_TRUNCATED);
     summary
+}
+
+fn status_repository_summary(data: &StatusData) -> String {
+    format!(
+        "branch {}, {} dirty file(s), {} untracked file(s), index {}{}",
+        data.git.branch.as_deref().unwrap_or("unknown"),
+        data.git.dirty_file_count,
+        data.git.untracked_file_count,
+        data.index_status.status,
+        status_log_note(data)
+    )
 }
 
 fn status_log_note(data: &StatusData) -> &'static str {
