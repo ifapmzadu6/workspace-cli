@@ -2698,12 +2698,16 @@ fn transaction_file_summary(
 }
 
 fn run_summary(exit_code: Option<i32>, duration_ms: u128, truncated: bool) -> String {
-    let status = exit_code
-        .map(|code| code.to_string())
-        .unwrap_or_else(|| "signal".to_string());
+    let status = run_exit_status_label(exit_code);
     let mut summary = format!("command exited with {status} in {duration_ms}ms");
     append_note_if(&mut summary, truncated, SUMMARY_NOTE_OUTPUT_TRUNCATED);
     summary
+}
+
+fn run_exit_status_label(exit_code: Option<i32>) -> String {
+    exit_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "signal".to_string())
 }
 
 fn read_summary(path: &str, lines: Option<&str>, truncated: bool) -> String {
