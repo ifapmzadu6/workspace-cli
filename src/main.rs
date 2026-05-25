@@ -4474,7 +4474,7 @@ fn related_evidence_reason(data: &RelatedData, file: &RelatedFile) -> String {
 }
 
 fn pagerank_related_evidence_reason(target: &str, score: f64) -> String {
-    format!("reached from {target} through the co-change graph; pagerank score {score:.3}")
+    pagerank_evidence_reason(target, score)
 }
 
 fn direct_related_evidence_reason(
@@ -4517,10 +4517,11 @@ fn is_pagerank_only_hit(ranking: &str, cochanged_commits: usize) -> bool {
 }
 
 fn pagerank_impact_evidence_reason(seed_files: &[String], score: f64) -> String {
-    format!(
-        "reached from seed file(s) {} through the co-change graph; pagerank score {score:.3}",
-        join_or_none(seed_files)
-    )
+    pagerank_evidence_reason(&format!("seed file(s) {}", join_or_none(seed_files)), score)
+}
+
+fn pagerank_evidence_reason(subject: &str, score: f64) -> String {
+    format!("reached from {subject} through the co-change graph; pagerank score {score:.3}")
 }
 
 fn direct_impact_evidence_reason(
@@ -8560,6 +8561,10 @@ rename to new name.txt
         );
         assert_eq!(
             related_evidence_reason(&related, &pagerank_related),
+            "reached from src/a.rs through the co-change graph; pagerank score 0.123"
+        );
+        assert_eq!(
+            pagerank_evidence_reason("src/a.rs", 0.12345),
             "reached from src/a.rs through the co-change graph; pagerank score 0.123"
         );
 
