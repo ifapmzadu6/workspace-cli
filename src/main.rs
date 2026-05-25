@@ -2555,13 +2555,19 @@ fn status_recent_operations_omitted(data: &StatusData) -> bool {
 }
 
 fn index_status_summary(data: &IndexStatusData) -> String {
-    match data.status.as_str() {
-        INDEX_STATUS_FRESH => "co-change index is fresh".to_string(),
-        INDEX_STATUS_STALE => "co-change index is stale".to_string(),
-        INDEX_STATUS_MISSING => "co-change index is missing".to_string(),
-        INDEX_STATUS_INVALID => "co-change index is invalid".to_string(),
-        INDEX_STATUS_NOT_GIT_REPO => SUMMARY_NOT_GIT_REPOSITORY.to_string(),
-        _ => data.status.clone(),
+    index_status_summary_label(&data.status)
+        .unwrap_or(data.status.as_str())
+        .to_string()
+}
+
+fn index_status_summary_label(status: &str) -> Option<&'static str> {
+    match status {
+        INDEX_STATUS_FRESH => Some("co-change index is fresh"),
+        INDEX_STATUS_STALE => Some("co-change index is stale"),
+        INDEX_STATUS_MISSING => Some("co-change index is missing"),
+        INDEX_STATUS_INVALID => Some("co-change index is invalid"),
+        INDEX_STATUS_NOT_GIT_REPO => Some(SUMMARY_NOT_GIT_REPOSITORY),
+        _ => None,
     }
 }
 
