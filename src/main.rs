@@ -942,6 +942,15 @@ impl BoundedPathAccumulator {
     fn omitted_count(&self) -> usize {
         self.total_count.saturating_sub(self.paths.len())
     }
+
+    fn into_file_list(self) -> BoundedFileList {
+        let omitted_files = self.omitted_count();
+        BoundedFileList {
+            files: self.paths,
+            total_files: self.total_count,
+            omitted_files,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -3863,8 +3872,7 @@ fn read_git_name_only_paths_limited<R: Read>(
 ) -> Result<BoundedFileList> {
     let mut reader = BufReader::new(reader);
     let mut line_number = 1usize;
-    let mut files = Vec::new();
-    let mut total_files = 0usize;
+    let mut paths = BoundedPathAccumulator::new(max_files);
 
     while let Some(line) = read_bounded_output_line(
         &mut reader,
@@ -3882,18 +3890,11 @@ fn read_git_name_only_paths_limited<R: Read>(
         }
         let line = String::from_utf8_lossy(&line.bytes);
         if let Some(path) = git_name_only_path(&line) {
-            total_files += 1;
-            if files.len() < max_files {
-                files.push(path);
-            }
+            paths.push(path);
         }
     }
 
-    Ok(BoundedFileList {
-        omitted_files: total_files.saturating_sub(files.len()),
-        files,
-        total_files,
-    })
+    Ok(paths.into_file_list())
 }
 
 fn stream_git_name_only_paths_from_reader<R: Read, F>(reader: R, on_path: &mut F) -> Result<()>
@@ -6703,6 +6704,11 @@ mod tests {
         assert_eq!(paths.total_count, 3);
         assert_eq!(paths.paths, vec!["src/a.rs", "src/b.rs"]);
         assert_eq!(paths.omitted_count(), 1);
+
+        let file_list = paths.into_file_list();
+        assert_eq!(file_list.files, vec!["src/a.rs", "src/b.rs"]);
+        assert_eq!(file_list.total_files, 3);
+        assert_eq!(file_list.omitted_files, 1);
     }
 
     #[test]
