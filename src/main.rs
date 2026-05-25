@@ -2671,6 +2671,31 @@ fn index_status_summary_label(status: &str) -> Option<&'static str> {
     }
 }
 
+fn index_status_human_summary_lines(data: &IndexStatusData) -> Vec<String> {
+    let mut lines = vec![
+        format!("  path: {}", data.path),
+        format!("  exists: {}", data.exists),
+        format!("  readable: {}", data.readable),
+        format!("  fresh: {}", data.fresh),
+    ];
+    if let Some(current_head) = &data.current_head {
+        lines.push(format!("  current head: {}", short_commit(current_head)));
+    }
+    if let Some(index_head) = &data.index_head {
+        lines.push(format!("  index head: {}", short_commit(index_head)));
+    }
+    if let Some(file_count) = data.file_count {
+        lines.push(format!("  files: {}", file_count));
+    }
+    if let Some(edge_count) = data.edge_count {
+        lines.push(format!("  edges: {}", edge_count));
+    }
+    if let Some(error) = &data.error {
+        lines.push(format!("  error: {}", error));
+    }
+    lines
+}
+
 fn index_cochange_summary(data: &IndexCochangeData) -> String {
     format!(
         "indexed {} co-change edge(s) from {} commit(s)",
@@ -6594,24 +6619,8 @@ fn print_index_cochange(observation: &Observation<IndexCochangeData>) -> Result<
 fn print_index_status(observation: &Observation<IndexStatusData>) -> Result<()> {
     let data = &observation.data;
     println!("{}", observation.summary);
-    println!("  path: {}", data.path);
-    println!("  exists: {}", data.exists);
-    println!("  readable: {}", data.readable);
-    println!("  fresh: {}", data.fresh);
-    if let Some(current_head) = &data.current_head {
-        println!("  current head: {}", short_commit(current_head));
-    }
-    if let Some(index_head) = &data.index_head {
-        println!("  index head: {}", short_commit(index_head));
-    }
-    if let Some(file_count) = data.file_count {
-        println!("  files: {}", file_count);
-    }
-    if let Some(edge_count) = data.edge_count {
-        println!("  edges: {}", edge_count);
-    }
-    if let Some(error) = &data.error {
-        println!("  error: {}", error);
+    for line in index_status_human_summary_lines(data) {
+        println!("{line}");
     }
     Ok(())
 }
@@ -8562,6 +8571,45 @@ rename to new name.txt
                 expected
             );
         }
+    }
+
+    #[test]
+    fn index_status_human_summary_lines_preserves_display_contract() {
+        let mut data = test_index_status_data(INDEX_STATUS_STALE);
+        data.current_head = Some("0123456789abcdef".to_string());
+        data.index_head = Some("fedcba9876543210".to_string());
+        data.error = Some("stale index".to_string());
+
+        assert_eq!(
+            index_status_human_summary_lines(&data),
+            vec![
+                "  path: .workspace/index/cochange.json".to_string(),
+                "  exists: true".to_string(),
+                "  readable: true".to_string(),
+                "  fresh: false".to_string(),
+                "  current head: 0123456789ab".to_string(),
+                "  index head: fedcba987654".to_string(),
+                "  files: 3".to_string(),
+                "  edges: 2".to_string(),
+                "  error: stale index".to_string(),
+            ]
+        );
+
+        data.current_head = None;
+        data.index_head = None;
+        data.file_count = None;
+        data.edge_count = None;
+        data.error = None;
+
+        assert_eq!(
+            index_status_human_summary_lines(&data),
+            vec![
+                "  path: .workspace/index/cochange.json".to_string(),
+                "  exists: true".to_string(),
+                "  readable: true".to_string(),
+                "  fresh: false".to_string(),
+            ]
+        );
     }
 
     #[test]
