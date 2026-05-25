@@ -2509,17 +2509,25 @@ fn diff_summary(data: &DiffData, summary_truncated: bool, patch_truncated: bool)
     } else {
         data.summary.clone()
     };
-    if summary_truncated && patch_truncated {
-        summary.push_str(" (summary and patch truncated)");
-    } else if summary_truncated {
-        summary.push_str(" (summary truncated)");
-    } else if patch_truncated {
-        summary.push_str(" (patch truncated)");
+    if let Some(note) = diff_output_truncation_note(summary_truncated, patch_truncated) {
+        summary.push_str(note);
     }
     if data.omitted_files > 0 {
         summary.push_str(" (files truncated)");
     }
     summary
+}
+
+fn diff_output_truncation_note(
+    summary_truncated: bool,
+    patch_truncated: bool,
+) -> Option<&'static str> {
+    match (summary_truncated, patch_truncated) {
+        (true, true) => Some(" (summary and patch truncated)"),
+        (true, false) => Some(" (summary truncated)"),
+        (false, true) => Some(" (patch truncated)"),
+        (false, false) => None,
+    }
 }
 
 fn transaction_file_summary(
@@ -8580,6 +8588,20 @@ rename to new name.txt
 
     #[test]
     fn diff_summary_reports_each_truncation_kind() {
+        assert_eq!(
+            diff_output_truncation_note(true, true),
+            Some(" (summary and patch truncated)")
+        );
+        assert_eq!(
+            diff_output_truncation_note(true, false),
+            Some(" (summary truncated)")
+        );
+        assert_eq!(
+            diff_output_truncation_note(false, true),
+            Some(" (patch truncated)")
+        );
+        assert_eq!(diff_output_truncation_note(false, false), None);
+
         let data = DiffData {
             is_repo: true,
             summary: "ignored for repositories".to_string(),
