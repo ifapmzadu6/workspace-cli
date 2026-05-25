@@ -4432,7 +4432,7 @@ fn related_evidence(data: &RelatedData) -> Vec<Evidence> {
 }
 
 fn related_evidence_reason(data: &RelatedData, file: &RelatedFile) -> String {
-    if data.ranking == RANK_PAGERANK && file.cochanged_commits == 0 {
+    if is_pagerank_only_hit(&data.ranking, file.cochanged_commits) {
         pagerank_related_evidence_reason(&data.target, file.score)
     } else {
         direct_related_evidence_reason(&data.target, file.cochanged_commits, &file.sample_commits)
@@ -4467,7 +4467,7 @@ fn impact_evidence(data: &ImpactData) -> Vec<Evidence> {
 }
 
 fn impact_evidence_reason(data: &ImpactData, file: &ImpactFile) -> String {
-    if data.ranking == RANK_PAGERANK && file.cochanged_commits == 0 {
+    if is_pagerank_only_hit(&data.ranking, file.cochanged_commits) {
         pagerank_impact_evidence_reason(&file.seed_files, file.score)
     } else {
         direct_impact_evidence_reason(
@@ -4476,6 +4476,10 @@ fn impact_evidence_reason(data: &ImpactData, file: &ImpactFile) -> String {
             &file.sample_commits,
         )
     }
+}
+
+fn is_pagerank_only_hit(ranking: &str, cochanged_commits: usize) -> bool {
+    ranking == RANK_PAGERANK && cochanged_commits == 0
 }
 
 fn pagerank_impact_evidence_reason(seed_files: &[String], score: f64) -> String {
@@ -8456,6 +8460,10 @@ rename to new name.txt
 
     #[test]
     fn relationship_evidence_reason_helpers_preserve_contract() {
+        assert!(is_pagerank_only_hit(RANK_PAGERANK, 0));
+        assert!(!is_pagerank_only_hit(RANK_PAGERANK, 1));
+        assert!(!is_pagerank_only_hit(RANK_DIRECT, 0));
+
         let related = RelatedData {
             target: "src/a.rs".to_string(),
             method: RELATED_METHOD_COCHANGE.to_string(),
