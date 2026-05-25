@@ -1483,6 +1483,7 @@ fn apply_rollback_transaction(
 
 struct ObservedChangedFiles {
     files: Vec<String>,
+    file_count: usize,
     omitted_files: usize,
 }
 
@@ -1537,6 +1538,7 @@ fn observed_changed_files(files_changed: &[String]) -> ObservedChangedFiles {
     let omitted_files = truncate_vec(&mut files, MAX_CHANGED_FILES);
     ObservedChangedFiles {
         files,
+        file_count: files_changed.len(),
         omitted_files,
     }
 }
@@ -1553,7 +1555,7 @@ fn patch_data(
         transaction_id: transaction_id.to_string(),
         patch_file: workspace.relative(patch_path),
         stored_patch: workspace.relative(stored_patch),
-        file_count: files_changed.len(),
+        file_count: observed_files.file_count,
         files_changed: observed_files.files,
         omitted_files: observed_files.omitted_files,
     }
@@ -1591,7 +1593,7 @@ fn rollback_data(
         transaction_id: transaction_id.to_string(),
         rollback_transaction_id: rollback_transaction_id.to_string(),
         stored_patch: workspace.relative(stored_patch),
-        file_count: files_changed.len(),
+        file_count: observed_files.file_count,
         files_changed: observed_files.files,
         omitted_files: observed_files.omitted_files,
     }
@@ -6907,6 +6909,7 @@ rename to new name.txt
             observed.files[MAX_CHANGED_FILES - 1],
             format!("file_{:03}.txt", MAX_CHANGED_FILES - 1)
         );
+        assert_eq!(observed.file_count, MAX_CHANGED_FILES + 2);
         assert_eq!(observed.omitted_files, 2);
         assert_eq!(evidence.len(), MAX_CHANGED_FILES);
         assert_eq!(evidence[0].path, "file_000.txt");
