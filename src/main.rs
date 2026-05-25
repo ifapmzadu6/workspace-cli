@@ -1213,9 +1213,9 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
     output_recorded_observation(
         workspace,
         args.json,
-        OperationLogRecord::change(
+        OperationLogRecord::change_observation_summary(
             LOG_OP_PATCH,
-            &observation.scope,
+            &observation,
             &log_summary,
             &patch.transaction_id,
         ),
@@ -5771,6 +5771,15 @@ impl<'a> OperationLogRecord<'a> {
         Self::change(op, &observation.scope, &observation.summary, transaction_id)
     }
 
+    fn change_observation_summary<T: Serialize>(
+        op: &'a str,
+        observation: &'a Observation<T>,
+        summary: &'a str,
+        transaction_id: &'a str,
+    ) -> Self {
+        Self::change(op, &observation.scope, summary, transaction_id)
+    }
+
     fn verify(op: &'a str, scope: &'a str, summary: &'a str) -> Self {
         Self {
             kind: LOG_KIND_VERIFY,
@@ -8506,6 +8515,18 @@ rename to new name.txt
         assert_eq!(change_from_observation.scope, "status-scope");
         assert_eq!(change_from_observation.summary, "status observation");
         assert_eq!(change_from_observation.transaction_id, Some("rb-1"));
+
+        let change_with_summary = OperationLogRecord::change_observation_summary(
+            LOG_OP_PATCH,
+            &observation,
+            "custom summary",
+            "tx-2",
+        );
+        assert_eq!(change_with_summary.kind, LOG_KIND_CHANGE);
+        assert_eq!(change_with_summary.op, LOG_OP_PATCH);
+        assert_eq!(change_with_summary.scope, "status-scope");
+        assert_eq!(change_with_summary.summary, "custom summary");
+        assert_eq!(change_with_summary.transaction_id, Some("tx-2"));
 
         let verify = OperationLogRecord::verify(LOG_OP_RUN, "cargo test", "command exited with 0");
         assert_eq!(verify.kind, LOG_KIND_VERIFY);
