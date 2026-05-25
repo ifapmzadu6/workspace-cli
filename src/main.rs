@@ -634,12 +634,16 @@ struct RelationshipStats {
 }
 
 impl RelationshipStats {
-    fn none() -> Self {
+    fn new(commits_scanned: usize, commits_matched: usize, ignored_large_commits: usize) -> Self {
         Self {
-            commits_scanned: 0,
-            commits_matched: 0,
-            ignored_large_commits: 0,
+            commits_scanned,
+            commits_matched,
+            ignored_large_commits,
         }
+    }
+
+    fn none() -> Self {
+        Self::new(0, 0, 0)
     }
 }
 
@@ -647,6 +651,15 @@ impl RelationshipStats {
 struct RelationshipLimits {
     max_commits: usize,
     max_files_per_commit: usize,
+}
+
+impl RelationshipLimits {
+    fn new(max_commits: usize, max_files_per_commit: usize) -> Self {
+        Self {
+            max_commits,
+            max_files_per_commit,
+        }
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -2248,10 +2261,7 @@ fn related_data_for_non_repo(
             false,
         ),
         RelationshipStats::none(),
-        RelationshipLimits {
-            max_commits,
-            max_files_per_commit,
-        },
+        RelationshipLimits::new(max_commits, max_files_per_commit),
         vec![],
     )
 }
@@ -2309,10 +2319,7 @@ fn impact_data_for_non_repo(
         ),
         SeedFileSummary::empty(),
         RelationshipStats::none(),
-        RelationshipLimits {
-            max_commits,
-            max_files_per_commit,
-        },
+        RelationshipLimits::new(max_commits, max_files_per_commit),
         vec![],
     )
 }
@@ -3148,15 +3155,12 @@ fn related_by_cochange(
                 RELATIONSHIP_SOURCE_COCHANGE_INDEX,
                 true,
             ),
-            RelationshipStats {
-                commits_scanned: index.commits_scanned,
-                commits_matched: ranking.commits_matched,
-                ignored_large_commits: index.ignored_large_commits,
-            },
-            RelationshipLimits {
-                max_commits: index.max_commits,
-                max_files_per_commit: index.max_files_per_commit,
-            },
+            RelationshipStats::new(
+                index.commits_scanned,
+                ranking.commits_matched,
+                index.ignored_large_commits,
+            ),
+            RelationshipLimits::new(index.max_commits, index.max_files_per_commit),
             ranking.related,
         ));
     }
@@ -3171,15 +3175,12 @@ fn related_by_cochange(
             RELATIONSHIP_SOURCE_GIT_LOG,
             true,
         ),
-        RelationshipStats {
-            commits_scanned: commits.len(),
-            commits_matched: ranking.commits_matched,
-            ignored_large_commits: ranking.ignored_large_commits,
-        },
-        RelationshipLimits {
-            max_commits,
-            max_files_per_commit,
-        },
+        RelationshipStats::new(
+            commits.len(),
+            ranking.commits_matched,
+            ranking.ignored_large_commits,
+        ),
+        RelationshipLimits::new(max_commits, max_files_per_commit),
         ranking.related,
     ))
 }
@@ -3206,15 +3207,8 @@ fn related_data_from_related_cli(
             format!("{RELATIONSHIP_SOURCE_RELATED_CLI}:{}", output.mode),
             true,
         ),
-        RelationshipStats {
-            commits_scanned: 0,
-            commits_matched,
-            ignored_large_commits: 0,
-        },
-        RelationshipLimits {
-            max_commits,
-            max_files_per_commit,
-        },
+        RelationshipStats::new(0, commits_matched, 0),
+        RelationshipLimits::new(max_commits, max_files_per_commit),
         related,
     )
 }
@@ -3581,15 +3575,12 @@ fn impact_by_cochange(
                 true,
             ),
             seed_summary,
-            RelationshipStats {
-                commits_scanned: index.commits_scanned,
-                commits_matched: ranking.commits_matched,
-                ignored_large_commits: index.ignored_large_commits,
-            },
-            RelationshipLimits {
-                max_commits: index.max_commits,
-                max_files_per_commit: index.max_files_per_commit,
-            },
+            RelationshipStats::new(
+                index.commits_scanned,
+                ranking.commits_matched,
+                index.ignored_large_commits,
+            ),
+            RelationshipLimits::new(index.max_commits, index.max_files_per_commit),
             ranking.impacted,
         ));
     }
@@ -3605,15 +3596,12 @@ fn impact_by_cochange(
             true,
         ),
         seed_summary,
-        RelationshipStats {
-            commits_scanned: commits.len(),
-            commits_matched: ranking.commits_matched,
-            ignored_large_commits: ranking.ignored_large_commits,
-        },
-        RelationshipLimits {
-            max_commits,
-            max_files_per_commit,
-        },
+        RelationshipStats::new(
+            commits.len(),
+            ranking.commits_matched,
+            ranking.ignored_large_commits,
+        ),
+        RelationshipLimits::new(max_commits, max_files_per_commit),
         ranking.impacted,
     ))
 }
@@ -3687,15 +3675,8 @@ fn impact_by_related_cli(
             true,
         ),
         seed_summary,
-        RelationshipStats {
-            commits_scanned: 0,
-            commits_matched,
-            ignored_large_commits: 0,
-        },
-        RelationshipLimits {
-            max_commits,
-            max_files_per_commit,
-        },
+        RelationshipStats::new(0, commits_matched, 0),
+        RelationshipLimits::new(max_commits, max_files_per_commit),
         impacted,
     )))
 }
@@ -7533,15 +7514,8 @@ rename to new name.txt
                 RELATIONSHIP_SOURCE_COCHANGE_INDEX,
                 true,
             ),
-            RelationshipStats {
-                commits_scanned: 8,
-                commits_matched: 3,
-                ignored_large_commits: 2,
-            },
-            RelationshipLimits {
-                max_commits: 500,
-                max_files_per_commit: 80,
-            },
+            RelationshipStats::new(8, 3, 2),
+            RelationshipLimits::new(500, 80),
             vec![RelatedFile {
                 path: "tests/cli.rs".to_string(),
                 score: 0.75,
@@ -7581,15 +7555,8 @@ rename to new name.txt
                 true,
             ),
             SeedFileSummary::from_seed_files(&seed_files, 2),
-            RelationshipStats {
-                commits_scanned: 8,
-                commits_matched: 3,
-                ignored_large_commits: 1,
-            },
-            RelationshipLimits {
-                max_commits: 500,
-                max_files_per_commit: 80,
-            },
+            RelationshipStats::new(8, 3, 1),
+            RelationshipLimits::new(500, 80),
             vec![ImpactFile {
                 path: "tests/cli.rs".to_string(),
                 score: 0.75,
