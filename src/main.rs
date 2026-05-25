@@ -2570,25 +2570,24 @@ fn index_cochange_summary(data: &IndexCochangeData) -> String {
 
 fn related_summary(data: &RelatedData) -> String {
     if data.is_repo {
-        format!(
-            "{} related file(s) for {} using {} history",
-            data.related.len(),
-            data.target,
-            data.method
-        )
+        related_repository_summary(data)
     } else {
         SUMMARY_NOT_GIT_REPOSITORY.to_string()
     }
 }
 
+fn related_repository_summary(data: &RelatedData) -> String {
+    format!(
+        "{} related file(s) for {} using {} history",
+        data.related.len(),
+        data.target,
+        data.method
+    )
+}
+
 fn impact_summary(data: &ImpactData) -> String {
     if data.is_repo {
-        let mut summary = format!(
-            "{} impacted file(s) from {} seed file(s) using {} history",
-            data.impacted.len(),
-            data.seed_file_count,
-            data.method
-        );
+        let mut summary = impact_repository_summary(data);
         append_note_if(
             &mut summary,
             impact_seed_files_omitted(data),
@@ -2598,6 +2597,15 @@ fn impact_summary(data: &ImpactData) -> String {
     } else {
         SUMMARY_NOT_GIT_REPOSITORY.to_string()
     }
+}
+
+fn impact_repository_summary(data: &ImpactData) -> String {
+    format!(
+        "{} impacted file(s) from {} seed file(s) using {} history",
+        data.impacted.len(),
+        data.seed_file_count,
+        data.method
+    )
 }
 
 fn search_truncated(data: &SearchData) -> bool {
