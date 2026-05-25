@@ -1648,12 +1648,24 @@ fn read_evidence(data: &ReadData) -> Vec<Evidence> {
     }]
 }
 
+fn read_line_label(range: Option<(usize, usize)>) -> Option<String> {
+    range.map(|(start, end)| format!("{start}:{end}"))
+}
+
+fn read_data(path: String, lines: Option<String>, content: String) -> ReadData {
+    ReadData {
+        path,
+        lines,
+        content,
+    }
+}
+
 fn observed_read(
     workspace: &Workspace,
     path: &Path,
     range: Option<(usize, usize)>,
 ) -> Result<ObservedRead> {
-    let line_label = range.map(|(start, end)| format!("{start}:{end}"));
+    let line_label = read_line_label(range);
     let read_content = if let Some((start, end)) = range {
         read_line_range_bounded(path, start, end)
     } else {
@@ -1662,11 +1674,7 @@ fn observed_read(
     .with_context(|| format!("failed to read text file {}", path.display()))?;
 
     Ok(ObservedRead {
-        data: ReadData {
-            path: workspace.relative(path),
-            lines: line_label,
-            content: read_content.content,
-        },
+        data: read_data(workspace.relative(path), line_label, read_content.content),
         content_truncated: read_content.truncated,
     })
 }
@@ -6943,6 +6951,22 @@ rename to new name.txt
         assert_eq!(read.data.lines.as_deref(), Some("2:3"));
         assert_eq!(read.data.content, "two\nthree");
         assert!(!read.content_truncated);
+    }
+
+    #[test]
+    fn read_data_helpers_preserve_requested_content() {
+        assert_eq!(read_line_label(Some((4, 9))).as_deref(), Some("4:9"));
+        assert!(read_line_label(None).is_none());
+
+        let data = read_data(
+            "src/main.rs".to_string(),
+            Some("4:9".to_string()),
+            "fn main() {}\n".to_string(),
+        );
+
+        assert_eq!(data.path, "src/main.rs");
+        assert_eq!(data.lines.as_deref(), Some("4:9"));
+        assert_eq!(data.content, "fn main() {}\n");
     }
 
     #[test]
