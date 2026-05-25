@@ -724,6 +724,14 @@ impl RelationshipStats {
     fn from_related_cli(commits_matched: usize) -> Self {
         Self::new(0, commits_matched, 0)
     }
+
+    fn into_parts(self) -> (usize, usize, usize) {
+        (
+            self.commits_scanned,
+            self.commits_matched,
+            self.ignored_large_commits,
+        )
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -746,6 +754,10 @@ impl RelationshipLimits {
 
     fn from_cochange_index(index: &CochangeIndex) -> Self {
         Self::new(index.max_commits, index.max_files_per_commit)
+    }
+
+    fn into_parts(self) -> (usize, usize) {
+        (self.max_commits, self.max_files_per_commit)
     }
 }
 
@@ -2383,6 +2395,8 @@ fn cochange_related_data(
         relationship,
     } = metadata;
     let (method, ranking, relationship_source, is_repo) = relationship.into_parts();
+    let (commits_scanned, commits_matched, ignored_large_commits) = stats.into_parts();
+    let (max_commits, max_files_per_commit) = limits.into_parts();
 
     RelatedData {
         target,
@@ -2390,11 +2404,11 @@ fn cochange_related_data(
         ranking,
         relationship_source,
         is_repo,
-        commits_scanned: stats.commits_scanned,
-        commits_matched: stats.commits_matched,
-        ignored_large_commits: stats.ignored_large_commits,
-        max_commits: limits.max_commits,
-        max_files_per_commit: limits.max_files_per_commit,
+        commits_scanned,
+        commits_matched,
+        ignored_large_commits,
+        max_commits,
+        max_files_per_commit,
         related,
     }
 }
@@ -2432,6 +2446,8 @@ fn cochange_impact_data(
         relationship,
     } = metadata;
     let (method, ranking, relationship_source, is_repo) = relationship.into_parts();
+    let (commits_scanned, commits_matched, ignored_large_commits) = stats.into_parts();
+    let (max_commits, max_files_per_commit) = limits.into_parts();
 
     ImpactData {
         source,
@@ -2442,11 +2458,11 @@ fn cochange_impact_data(
         seed_files: seed_summary.seed_files,
         seed_file_count: seed_summary.seed_file_count,
         omitted_seed_files: seed_summary.omitted_seed_files,
-        commits_scanned: stats.commits_scanned,
-        commits_matched: stats.commits_matched,
-        ignored_large_commits: stats.ignored_large_commits,
-        max_commits: limits.max_commits,
-        max_files_per_commit: limits.max_files_per_commit,
+        commits_scanned,
+        commits_matched,
+        ignored_large_commits,
+        max_commits,
+        max_files_per_commit,
         impacted,
     }
 }
@@ -7619,6 +7635,7 @@ rename to new name.txt
         assert_eq!(index_stats.commits_scanned, 12);
         assert_eq!(index_stats.commits_matched, 4);
         assert_eq!(index_stats.ignored_large_commits, 2);
+        assert_eq!(index_stats.into_parts(), (12, 4, 2));
 
         let commits = vec![
             GitCommitFiles {
@@ -7647,6 +7664,7 @@ rename to new name.txt
         let limits = RelationshipLimits::from_cochange_index(&index);
         assert_eq!(limits.max_commits, 500);
         assert_eq!(limits.max_files_per_commit, 80);
+        assert_eq!(limits.into_parts(), (500, 80));
     }
 
     #[test]
