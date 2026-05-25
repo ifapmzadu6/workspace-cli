@@ -1325,7 +1325,7 @@ fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
     output_recorded_observation(
         workspace,
         args.json,
-        OperationLogRecord::verify(LOG_OP_RUN, &args.command, &observation.summary),
+        OperationLogRecord::verify_observation(LOG_OP_RUN, &observation),
         &observation,
         print_run,
     )
@@ -1371,10 +1371,9 @@ fn cmd_rollback(workspace: &Workspace, args: RollbackArgs) -> Result<()> {
     output_recorded_observation(
         workspace,
         args.json,
-        OperationLogRecord::change(
+        OperationLogRecord::change_observation(
             LOG_OP_ROLLBACK,
-            &args.transaction_id,
-            &observation.summary,
+            &observation,
             &rollback.rollback_transaction_id,
         ),
         &observation,
@@ -5764,6 +5763,14 @@ impl<'a> OperationLogRecord<'a> {
         }
     }
 
+    fn change_observation<T: Serialize>(
+        op: &'a str,
+        observation: &'a Observation<T>,
+        transaction_id: &'a str,
+    ) -> Self {
+        Self::change(op, &observation.scope, &observation.summary, transaction_id)
+    }
+
     fn verify(op: &'a str, scope: &'a str, summary: &'a str) -> Self {
         Self {
             kind: LOG_KIND_VERIFY,
@@ -5772,6 +5779,10 @@ impl<'a> OperationLogRecord<'a> {
             summary,
             transaction_id: None,
         }
+    }
+
+    fn verify_observation<T: Serialize>(op: &'a str, observation: &'a Observation<T>) -> Self {
+        Self::verify(op, &observation.scope, &observation.summary)
     }
 }
 
@@ -8488,12 +8499,28 @@ rename to new name.txt
         assert_eq!(change.summary, "patched");
         assert_eq!(change.transaction_id, Some("tx-1"));
 
+        let change_from_observation =
+            OperationLogRecord::change_observation(LOG_OP_ROLLBACK, &observation, "rb-1");
+        assert_eq!(change_from_observation.kind, LOG_KIND_CHANGE);
+        assert_eq!(change_from_observation.op, LOG_OP_ROLLBACK);
+        assert_eq!(change_from_observation.scope, "status-scope");
+        assert_eq!(change_from_observation.summary, "status observation");
+        assert_eq!(change_from_observation.transaction_id, Some("rb-1"));
+
         let verify = OperationLogRecord::verify(LOG_OP_RUN, "cargo test", "command exited with 0");
         assert_eq!(verify.kind, LOG_KIND_VERIFY);
         assert_eq!(verify.op, LOG_OP_RUN);
         assert_eq!(verify.scope, "cargo test");
         assert_eq!(verify.summary, "command exited with 0");
         assert!(verify.transaction_id.is_none());
+
+        let verify_from_observation =
+            OperationLogRecord::verify_observation(LOG_OP_RUN, &observation);
+        assert_eq!(verify_from_observation.kind, LOG_KIND_VERIFY);
+        assert_eq!(verify_from_observation.op, LOG_OP_RUN);
+        assert_eq!(verify_from_observation.scope, "status-scope");
+        assert_eq!(verify_from_observation.summary, "status observation");
+        assert!(verify_from_observation.transaction_id.is_none());
     }
 
     #[test]
