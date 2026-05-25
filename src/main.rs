@@ -6465,12 +6465,10 @@ fn print_diff(observation: &Observation<DiffData>) -> Result<()> {
         println!("{}", data.summary);
         return Ok(());
     }
-    if !data.summary.trim().is_empty() {
-        println!("{}", data.summary.trim_end());
+    if let Some(summary) = nonblank_trimmed_end(&data.summary) {
+        println!("{summary}");
     }
-    if let Some(patch) = &data.patch
-        && !patch.trim().is_empty()
-    {
+    if let Some(patch) = data.patch.as_deref().and_then(nonblank_trimmed_end) {
         println!("{patch}");
     }
     Ok(())
@@ -6569,6 +6567,14 @@ fn omitted_items_message(count: usize, item_label: &str) -> Option<String> {
 
 fn needs_trailing_newline(text: &str) -> bool {
     !text.ends_with('\n')
+}
+
+fn nonblank_trimmed_end(text: &str) -> Option<&str> {
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text.trim_end())
+    }
 }
 
 fn join_or_none(values: &[String]) -> String {
@@ -8786,6 +8792,13 @@ rename to new name.txt
         assert!(needs_trailing_newline(""));
         assert!(needs_trailing_newline("line"));
         assert!(!needs_trailing_newline("line\n"));
+    }
+
+    #[test]
+    fn nonblank_trimmed_end_preserves_leading_whitespace() {
+        assert_eq!(nonblank_trimmed_end(""), None);
+        assert_eq!(nonblank_trimmed_end(" \n\t "), None);
+        assert_eq!(nonblank_trimmed_end("  patch\n\n"), Some("  patch"));
     }
 
     #[test]
