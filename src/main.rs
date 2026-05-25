@@ -6323,19 +6323,9 @@ fn print_status(observation: &Observation<StatusData>) -> Result<()> {
             data.git.branch.as_deref().unwrap_or("unknown")
         );
         print_list("dirty", &data.git.dirty_files);
-        if data.git.omitted_dirty_files > 0 {
-            println!(
-                "    ... {} more dirty file(s)",
-                data.git.omitted_dirty_files
-            );
-        }
+        print_omitted_items(data.git.omitted_dirty_files, "dirty file(s)");
         print_list("untracked", &data.git.untracked_files);
-        if data.git.omitted_untracked_files > 0 {
-            println!(
-                "    ... {} more untracked file(s)",
-                data.git.omitted_untracked_files
-            );
-        }
+        print_omitted_items(data.git.omitted_untracked_files, "untracked file(s)");
         println!("  index: {}", data.index_status.status);
         println!("  index fresh: {}", data.index_status.fresh);
         if let Some(edge_count) = data.index_status.edge_count {
@@ -6442,7 +6432,7 @@ fn print_impact(observation: &Observation<ImpactData>) -> Result<()> {
     println!("  ranking: {}", data.ranking);
     print_list("seeds", &data.seed_files);
     if impact_seed_files_omitted(data) {
-        println!("    ... {} more seed file(s)", data.omitted_seed_files);
+        print_omitted_items(data.omitted_seed_files, "seed file(s)");
     }
     println!(
         "  scanned: {} commit(s), matched: {}, ignored broad commits: {}",
@@ -6490,9 +6480,7 @@ fn print_patch(observation: &Observation<PatchData>) -> Result<()> {
     println!("{}", observation.summary);
     println!("  transaction: {}", observation.data.transaction_id);
     print_list("files", &observation.data.files_changed);
-    if transaction_files_truncated(observation.data.omitted_files) {
-        println!("    ... {} more file(s)", observation.data.omitted_files);
-    }
+    print_omitted_items(observation.data.omitted_files, "file(s)");
     Ok(())
 }
 
@@ -6539,9 +6527,7 @@ fn print_rollback(observation: &Observation<RollbackData>) -> Result<()> {
         observation.data.rollback_transaction_id
     );
     print_list("files", &observation.data.files_changed);
-    if transaction_files_truncated(observation.data.omitted_files) {
-        println!("    ... {} more file(s)", observation.data.omitted_files);
-    }
+    print_omitted_items(observation.data.omitted_files, "file(s)");
     Ok(())
 }
 
@@ -6564,6 +6550,20 @@ fn print_list(label: &str, values: &[String]) {
     }
     if values.len() > 20 {
         println!("    ... {} more", values.len() - 20);
+    }
+}
+
+fn print_omitted_items(count: usize, item_label: &str) {
+    if let Some(message) = omitted_items_message(count, item_label) {
+        println!("{message}");
+    }
+}
+
+fn omitted_items_message(count: usize, item_label: &str) -> Option<String> {
+    if count > 0 {
+        Some(format!("    ... {count} more {item_label}"))
+    } else {
+        None
     }
 }
 
@@ -8765,6 +8765,15 @@ rename to new name.txt
         assert_eq!(
             transaction_file_summary("rolled back", "tx-123", 3, 2),
             "rolled back transaction tx-123 touching 3 file(s) (files truncated)"
+        );
+    }
+
+    #[test]
+    fn omitted_items_message_reports_counts() {
+        assert_eq!(omitted_items_message(0, "file(s)"), None);
+        assert_eq!(
+            omitted_items_message(2, "dirty file(s)").as_deref(),
+            Some("    ... 2 more dirty file(s)")
         );
     }
 
