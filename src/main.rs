@@ -2071,15 +2071,14 @@ fn status_data(
 fn status_observation(data: StatusData) -> Observation<StatusData> {
     let truncated = status_truncated(&data);
     let summary = status_summary(&data, truncated);
-    Observation {
-        kind: WORKSPACE_STATUS_KIND.to_string(),
-        scope: data.root.clone(),
+    observation_without_evidence(
+        WORKSPACE_STATUS_KIND,
+        data.root.clone(),
         summary,
         data,
-        evidence: vec![],
         truncated,
-        next_observations: status_next_observations(),
-    }
+        status_next_observations(),
+    )
 }
 
 fn observed_index_status(workspace: &Workspace) -> IndexStatusData {
@@ -2088,15 +2087,14 @@ fn observed_index_status(workspace: &Workspace) -> IndexStatusData {
 
 fn index_status_observation(data: IndexStatusData) -> Observation<IndexStatusData> {
     let summary = index_status_summary(&data);
-    Observation {
-        kind: WORKSPACE_INDEX_STATUS_KIND.to_string(),
-        scope: data.path.clone(),
+    observation_without_evidence(
+        WORKSPACE_INDEX_STATUS_KIND,
+        data.path.clone(),
         summary,
         data,
-        evidence: vec![],
-        truncated: false,
-        next_observations: index_status_next_observations(),
-    }
+        false,
+        index_status_next_observations(),
+    )
 }
 
 fn index_cochange_data(
@@ -2145,15 +2143,14 @@ fn write_workspace_cochange_index(workspace: &Workspace, index: &CochangeIndex) 
 
 fn index_cochange_observation(data: IndexCochangeData) -> Observation<IndexCochangeData> {
     let summary = index_cochange_summary(&data);
-    Observation {
-        kind: WORKSPACE_INDEX_COCHANGE_KIND.to_string(),
-        scope: data.path.clone(),
+    observation_without_evidence(
+        WORKSPACE_INDEX_COCHANGE_KIND,
+        data.path.clone(),
         summary,
         data,
-        evidence: vec![],
-        truncated: false,
-        next_observations: index_cochange_next_observations(),
-    }
+        false,
+        index_cochange_next_observations(),
+    )
 }
 
 fn observed_related(
@@ -2306,15 +2303,14 @@ fn run_data(
 fn run_observation(run: ObservedRun) -> Observation<RunData> {
     let data = run.data;
     let summary = run_summary(data.exit_code, data.duration_ms, run.output_truncated);
-    Observation {
-        kind: WORKSPACE_RUN_KIND.to_string(),
-        scope: data.command.clone(),
+    observation_without_evidence(
+        WORKSPACE_RUN_KIND,
+        data.command.clone(),
         summary,
         data,
-        evidence: vec![],
-        truncated: run.output_truncated,
-        next_observations: run_followup_observations(),
-    }
+        run.output_truncated,
+        run_followup_observations(),
+    )
 }
 
 fn log_data(workspace: &Workspace, window: LogWindow) -> LogData {
@@ -2333,14 +2329,32 @@ fn observed_log(workspace: &Workspace, args: &LogArgs) -> Result<LogData> {
 fn log_observation(data: LogData) -> Observation<LogData> {
     let summary = log_summary(&data);
     let truncated = log_truncated(&data);
+    observation_without_evidence(
+        WORKSPACE_LOG_KIND,
+        data.log_path.clone(),
+        summary,
+        data,
+        truncated,
+        log_followup_observations(),
+    )
+}
+
+fn observation_without_evidence<T: Serialize>(
+    kind: &str,
+    scope: String,
+    summary: String,
+    data: T,
+    truncated: bool,
+    next_observations: Vec<String>,
+) -> Observation<T> {
     Observation {
-        kind: WORKSPACE_LOG_KIND.to_string(),
-        scope: data.log_path.clone(),
+        kind: kind.to_string(),
+        scope,
         summary,
         data,
         evidence: vec![],
         truncated,
-        next_observations: log_followup_observations(),
+        next_observations,
     }
 }
 
