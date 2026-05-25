@@ -6704,8 +6704,10 @@ fn print_diff(observation: &Observation<DiffData>) -> Result<()> {
 fn print_patch(observation: &Observation<PatchData>) -> Result<()> {
     println!("{}", observation.summary);
     println!("  transaction: {}", observation.data.transaction_id);
-    print_list("files", &observation.data.files_changed);
-    print_omitted_items(observation.data.omitted_files, "file(s)");
+    print_transaction_files(
+        &observation.data.files_changed,
+        observation.data.omitted_files,
+    );
     Ok(())
 }
 
@@ -6751,9 +6753,16 @@ fn print_rollback(observation: &Observation<RollbackData>) -> Result<()> {
         "  rollback transaction: {}",
         observation.data.rollback_transaction_id
     );
-    print_list("files", &observation.data.files_changed);
-    print_omitted_items(observation.data.omitted_files, "file(s)");
+    print_transaction_files(
+        &observation.data.files_changed,
+        observation.data.omitted_files,
+    );
     Ok(())
+}
+
+fn print_transaction_files(files_changed: &[String], omitted_files: usize) {
+    print_list("files", files_changed);
+    print_omitted_items(omitted_files, "file(s)");
 }
 
 fn is_test_file(path: &str) -> bool {
