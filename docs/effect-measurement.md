@@ -36,6 +36,9 @@ The JSON report includes reproducibility metadata: the workspace commit, dirty
 state, primary cutoff, resampling counts, sign-flip p-value method, holdout
 manifest path/hash, and pinned holdout repositories. The Markdown summary
 renders the same metadata before the metric tables.
+For paper-style holdout reports, the threshold log gates both AP effect-size
+floors and Holm-adjusted paired sign-flip p-value ceilings for the key
+hybrid-vs-baseline deltas.
 
 To add an optional temporal holdout measurement on a real repository, pass a
 repository path:
@@ -156,6 +159,9 @@ cutoff, which defaults to 5:
 - an optional hybrid direct-weight sweep for ablation
 - an optional leave-one-repo-out direct-weight selection check when multiple
   temporal holdout repositories and sweep weights are provided
+- paper-style threshold gates for both AP deltas and corrected paired
+  significance against direct, PageRank, lexical, content, recent-activity, and
+  global-PageRank baselines
 
 The suite compares `git diff --name-only`, seed-specific path-locality,
 lexical-similarity, and content-similarity baselines, a seed-agnostic

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail CI when effect measurement drops below expected fixture thresholds."""
+"""Fail CI when effect measurement drops below expected effect thresholds."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ EXPECTED_HYBRID_WEIGHT_SWEEP = [
     1.0,
 ]
 FLOAT_TOLERANCE = 1e-12
+MAX_HOLDOUT_HOLM_P = 0.005
 
 
 def load_report(path: str) -> dict[str, Any]:
@@ -187,9 +188,13 @@ def check_repo_holdout_thresholds(
     min_direct_delta = 0.09 if predictable else 0.07
     min_lexical_delta = 0.40 if predictable else 0.35
     min_content_delta = 0.25 if predictable else 0.20
+    min_recent_delta = 0.20 if predictable else 0.15
+    min_global_delta = 0.18 if predictable else 0.15
     min_pagerank_delta = 0.11 if predictable else 0.10
     min_oracle_normalized = 0.75
     min_loro_ap = 0.71 if predictable else 0.63
+    ap_metric = "mean_average_precision_at_5"
+    delta_metric = "average_precision_at_5"
 
     require_mean(
         failures,
@@ -210,7 +215,7 @@ def check_repo_holdout_thresholds(
         aggregate,
         left="workspace_related_hybrid",
         right="workspace_related_direct",
-        metric="mean_average_precision_at_5",
+        metric=ap_metric,
         minimum=min_direct_delta,
     )
     require_delta(
@@ -218,7 +223,7 @@ def check_repo_holdout_thresholds(
         aggregate,
         left="workspace_related_hybrid",
         right="baseline_lexical_similarity",
-        metric="mean_average_precision_at_5",
+        metric=ap_metric,
         minimum=min_lexical_delta,
     )
     require_delta(
@@ -226,15 +231,31 @@ def check_repo_holdout_thresholds(
         aggregate,
         left="workspace_related_hybrid",
         right="baseline_content_similarity",
-        metric="mean_average_precision_at_5",
+        metric=ap_metric,
         minimum=min_content_delta,
     )
     require_delta(
         failures,
         aggregate,
         left="workspace_related_hybrid",
+        right="baseline_recent_activity",
+        metric=ap_metric,
+        minimum=min_recent_delta,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid",
+        right="baseline_global_pagerank",
+        metric=ap_metric,
+        minimum=min_global_delta,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid",
         right="workspace_related_pagerank",
-        metric="mean_average_precision_at_5",
+        metric=ap_metric,
         minimum=min_pagerank_delta,
     )
     require_oracle_normalized(
@@ -242,8 +263,23 @@ def check_repo_holdout_thresholds(
         aggregate,
         method="workspace_related_hybrid",
         oracle="history_oracle_ceiling",
-        metric="mean_average_precision_at_5",
+        metric=ap_metric,
         minimum=min_oracle_normalized,
+    )
+    require_holm_evidence(
+        failures,
+        holdout.get("paired_deltas", {}),
+        [
+            "workspace_related_hybrid_minus_workspace_related_direct",
+            "workspace_related_hybrid_minus_workspace_related_pagerank",
+            "workspace_related_hybrid_minus_baseline_lexical_similarity",
+            "workspace_related_hybrid_minus_baseline_content_similarity",
+            "workspace_related_hybrid_minus_baseline_recent_activity",
+            "workspace_related_hybrid_minus_baseline_global_pagerank",
+        ],
+        metric=delta_metric,
+        maximum=MAX_HOLDOUT_HOLM_P,
+        label=label,
     )
 
     require_weight_sweep(failures, holdout, EXPECTED_HYBRID_WEIGHT_SWEEP, label)
@@ -262,6 +298,10 @@ def check_repo_holdout_thresholds(
         min_direct_delta=min_direct_delta,
         min_lexical_delta=min_lexical_delta,
         min_content_delta=min_content_delta,
+        min_recent_delta=min_recent_delta,
+        min_global_delta=min_global_delta,
+        min_pagerank_delta=min_pagerank_delta,
+        max_holm_p=MAX_HOLDOUT_HOLM_P,
         label=label,
     )
 
@@ -337,6 +377,29 @@ def require_oracle_normalized(
         failures.append(
             f"{method}.{metric} / {oracle}.{metric} < {minimum}: {normalized}"
         )
+
+
+def require_holm_evidence(
+    failures: list[str],
+    deltas: dict[str, Any],
+    comparisons: list[str],
+    *,
+    metric: str,
+    maximum: float,
+    label: str,
+) -> None:
+    for comparison in comparisons:
+        summary = deltas.get(comparison)
+        if summary is None:
+            failures.append(f"{label}.{comparison} missing paired delta evidence")
+            continue
+        key = f"p_greater_holm_delta_{metric}"
+        if key not in summary:
+            failures.append(f"{label}.{comparison} missing {key}")
+            continue
+        value = float(summary[key])
+        if value > maximum:
+            failures.append(f"{label}.{comparison}.{key} > {maximum}: {value}")
 
 
 def require_weight_sweep(
@@ -416,6 +479,10 @@ def require_loro_thresholds(
     min_direct_delta: float,
     min_lexical_delta: float,
     min_content_delta: float,
+    min_recent_delta: float,
+    min_global_delta: float,
+    min_pagerank_delta: float,
+    max_holm_p: float,
     label: str,
 ) -> None:
     loro = holdout.get("leave_one_repo_out_weight_selection")
@@ -432,11 +499,12 @@ def require_loro_thresholds(
         f"{label}.leave_one_repo_out_weight_selection.candidate_weights",
     )
     aggregate = loro.get("aggregate", {})
+    ap_metric = "mean_average_precision_at_5"
     require_mean(
         failures,
         aggregate,
         "workspace_related_hybrid_loro",
-        "mean_average_precision_at_5",
+        ap_metric,
         min_ap,
     )
     require_delta(
@@ -444,15 +512,23 @@ def require_loro_thresholds(
         aggregate,
         left="workspace_related_hybrid_loro",
         right="workspace_related_direct",
-        metric="mean_average_precision_at_5",
+        metric=ap_metric,
         minimum=min_direct_delta,
     )
     require_delta(
         failures,
         aggregate,
         left="workspace_related_hybrid_loro",
+        right="workspace_related_pagerank",
+        metric=ap_metric,
+        minimum=min_pagerank_delta,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid_loro",
         right="baseline_lexical_similarity",
-        metric="mean_average_precision_at_5",
+        metric=ap_metric,
         minimum=min_lexical_delta,
     )
     require_delta(
@@ -460,8 +536,39 @@ def require_loro_thresholds(
         aggregate,
         left="workspace_related_hybrid_loro",
         right="baseline_content_similarity",
-        metric="mean_average_precision_at_5",
+        metric=ap_metric,
         minimum=min_content_delta,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid_loro",
+        right="baseline_recent_activity",
+        metric=ap_metric,
+        minimum=min_recent_delta,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid_loro",
+        right="baseline_global_pagerank",
+        metric=ap_metric,
+        minimum=min_global_delta,
+    )
+    require_holm_evidence(
+        failures,
+        loro.get("paired_deltas", {}),
+        [
+            "workspace_related_hybrid_loro_minus_workspace_related_direct",
+            "workspace_related_hybrid_loro_minus_workspace_related_pagerank",
+            "workspace_related_hybrid_loro_minus_baseline_lexical_similarity",
+            "workspace_related_hybrid_loro_minus_baseline_content_similarity",
+            "workspace_related_hybrid_loro_minus_baseline_recent_activity",
+            "workspace_related_hybrid_loro_minus_baseline_global_pagerank",
+        ],
+        metric="average_precision_at_5",
+        maximum=max_holm_p,
+        label=f"{label}.leave_one_repo_out_weight_selection",
     )
 
 

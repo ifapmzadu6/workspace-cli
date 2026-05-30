@@ -209,6 +209,57 @@ class SummaryFormattingTests(unittest.TestCase):
         self.assertIn("AP/oracle", table)
         self.assertIn("| related hybrid | 0.600 | 0.800 | 0.750 | 0.200 |", table)
 
+    def test_per_repo_holdout_table_includes_static_baselines(self) -> None:
+        def method(ap: float) -> dict:
+            return {
+                "mean_average_precision_at_5": ap,
+                "mean_ndcg_at_5": ap,
+            }
+
+        def delta(value: float) -> dict:
+            return {"mean_delta_average_precision_at_5": value}
+
+        table = summarize_effect.render_repo_holdout_table(
+            {
+                "measurements": [
+                    {
+                        "metric": "repo_temporal_holdout",
+                        "repo": "/tmp/example",
+                        "k": 5,
+                        "case_count": 1,
+                        "target_count": 2,
+                        "aggregate": {
+                            "baseline_path_locality": method(0.1),
+                            "baseline_lexical_similarity": method(0.2),
+                            "baseline_content_similarity": method(0.3),
+                            "baseline_recent_activity": method(0.4),
+                            "baseline_global_pagerank": method(0.5),
+                            "history_oracle_ceiling": method(1.0),
+                            "workspace_related_direct": method(0.6),
+                            "workspace_related_pagerank": method(0.7),
+                            "workspace_related_hybrid": method(0.8),
+                        },
+                        "paired_deltas": {
+                            (
+                                "workspace_related_hybrid_minus_"
+                                "baseline_lexical_similarity"
+                            ): delta(0.6),
+                            (
+                                "workspace_related_hybrid_minus_"
+                                "baseline_content_similarity"
+                            ): delta(0.5),
+                        },
+                    }
+                ]
+            },
+            "Per-Repo Temporal Holdout",
+        )
+
+        self.assertIn("lexical AP", table)
+        self.assertIn("content AP", table)
+        self.assertIn("hybrid-content delta AP", table)
+        self.assertIn("| example | 1 | 2 | 1.000 | 0.100 | 0.200 | 0.300 |", table)
+
 
 class EffectThresholdTests(unittest.TestCase):
     def weight_sweep(self, ap: float) -> list[dict]:
@@ -233,7 +284,30 @@ class EffectThresholdTests(unittest.TestCase):
             )
         return entries
 
-    def loro_selection(self, ap: float, direct_ap: float, lexical_ap: float) -> dict:
+    def paired_deltas(self, left: str) -> dict:
+        return {
+            f"{left}_minus_workspace_related_direct": self.passing_delta(),
+            f"{left}_minus_workspace_related_pagerank": self.passing_delta(),
+            f"{left}_minus_baseline_lexical_similarity": self.passing_delta(),
+            f"{left}_minus_baseline_content_similarity": self.passing_delta(),
+            f"{left}_minus_baseline_recent_activity": self.passing_delta(),
+            f"{left}_minus_baseline_global_pagerank": self.passing_delta(),
+        }
+
+    def passing_delta(self) -> dict:
+        return {"p_greater_holm_delta_average_precision_at_5": 0.001}
+
+    def loro_selection(
+        self,
+        *,
+        ap: float,
+        direct_ap: float,
+        pagerank_ap: float,
+        lexical_ap: float,
+        content_ap: float,
+        recent_ap: float,
+        global_ap: float,
+    ) -> dict:
         return {
             "candidate_weights": check_effect_thresholds.EXPECTED_HYBRID_WEIGHT_SWEEP,
             "selections": [{}, {}, {}],
@@ -241,16 +315,26 @@ class EffectThresholdTests(unittest.TestCase):
                 "workspace_related_direct": {
                     "mean_average_precision_at_5": direct_ap,
                 },
+                "workspace_related_pagerank": {
+                    "mean_average_precision_at_5": pagerank_ap,
+                },
                 "baseline_lexical_similarity": {
                     "mean_average_precision_at_5": lexical_ap,
                 },
                 "baseline_content_similarity": {
-                    "mean_average_precision_at_5": 0.30,
+                    "mean_average_precision_at_5": content_ap,
+                },
+                "baseline_recent_activity": {
+                    "mean_average_precision_at_5": recent_ap,
+                },
+                "baseline_global_pagerank": {
+                    "mean_average_precision_at_5": global_ap,
                 },
                 "workspace_related_hybrid_loro": {
                     "mean_average_precision_at_5": ap,
                 },
             },
+            "paired_deltas": self.paired_deltas("workspace_related_hybrid_loro"),
         }
 
     def repo_holdout(self, *, predictable: bool) -> dict:
@@ -268,6 +352,12 @@ class EffectThresholdTests(unittest.TestCase):
                     "baseline_content_similarity": {
                         "mean_average_precision_at_5": 0.30,
                     },
+                    "baseline_recent_activity": {
+                        "mean_average_precision_at_5": 0.45,
+                    },
+                    "baseline_global_pagerank": {
+                        "mean_average_precision_at_5": 0.50,
+                    },
                     "workspace_related_pagerank": {
                         "mean_average_precision_at_5": 0.60,
                     },
@@ -280,10 +370,15 @@ class EffectThresholdTests(unittest.TestCase):
                 },
                 "hybrid_weight_sweep": self.weight_sweep(0.72),
                 "leave_one_repo_out_weight_selection": self.loro_selection(
-                    0.71,
-                    0.62,
-                    0.20,
+                    ap=0.71,
+                    direct_ap=0.62,
+                    pagerank_ap=0.60,
+                    lexical_ap=0.20,
+                    content_ap=0.30,
+                    recent_ap=0.45,
+                    global_ap=0.50,
                 ),
+                "paired_deltas": self.paired_deltas("workspace_related_hybrid"),
             }
         return {
             "metric": "repo_temporal_holdout_aggregate",
@@ -300,6 +395,12 @@ class EffectThresholdTests(unittest.TestCase):
                 "baseline_content_similarity": {
                     "mean_average_precision_at_5": 0.30,
                 },
+                "baseline_recent_activity": {
+                    "mean_average_precision_at_5": 0.40,
+                },
+                "baseline_global_pagerank": {
+                    "mean_average_precision_at_5": 0.42,
+                },
                 "workspace_related_pagerank": {
                     "mean_average_precision_at_5": 0.53,
                 },
@@ -312,10 +413,15 @@ class EffectThresholdTests(unittest.TestCase):
             },
             "hybrid_weight_sweep": self.weight_sweep(0.64),
             "leave_one_repo_out_weight_selection": self.loro_selection(
-                0.63,
-                0.56,
-                0.20,
+                ap=0.63,
+                direct_ap=0.56,
+                pagerank_ap=0.53,
+                lexical_ap=0.20,
+                content_ap=0.30,
+                recent_ap=0.40,
+                global_ap=0.42,
             ),
+            "paired_deltas": self.paired_deltas("workspace_related_hybrid"),
             "predictable_only": self.repo_holdout(predictable=True),
         }
 
@@ -413,6 +519,31 @@ class EffectThresholdTests(unittest.TestCase):
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any("baseline_content_similarity" in item for item in failures),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_when_recent_baseline_catches_hybrid(self) -> None:
+        report = self.passing_report()
+        report["measurements"][-1]["aggregate"]["baseline_recent_activity"][
+            "mean_average_precision_at_5"
+        ] = 0.55
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any("baseline_recent_activity" in item for item in failures),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_when_holdout_holm_p_is_too_large(self) -> None:
+        report = self.passing_report()
+        report["measurements"][-1]["paired_deltas"][
+            "workspace_related_hybrid_minus_workspace_related_direct"
+        ]["p_greater_holm_delta_average_precision_at_5"] = 0.02
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any(
+                "p_greater_holm_delta_average_precision_at_5" in item
+                for item in failures
+            ),
             failures,
         )
 

@@ -575,9 +575,13 @@ def render_repo_holdout_table(
         hybrid_direct = "workspace_related_hybrid_minus_workspace_related_direct"
         hybrid_pagerank = "workspace_related_hybrid_minus_workspace_related_pagerank"
         hybrid_path = "workspace_related_hybrid_minus_baseline_path_locality"
+        hybrid_lexical = "workspace_related_hybrid_minus_baseline_lexical_similarity"
+        hybrid_content = "workspace_related_hybrid_minus_baseline_content_similarity"
         hybrid_recent = "workspace_related_hybrid_minus_baseline_recent_activity"
         hybrid_global = "workspace_related_hybrid_minus_baseline_global_pagerank"
         path_locality = aggregate.get("baseline_path_locality")
+        lexical_similarity = aggregate.get("baseline_lexical_similarity")
+        content_similarity = aggregate.get("baseline_content_similarity")
         global_pagerank = aggregate.get("baseline_global_pagerank")
         history_oracle = aggregate.get("history_oracle_ceiling")
         rows.append(
@@ -587,6 +591,8 @@ def render_repo_holdout_table(
                 str(summary.get("target_count", "")),
                 fmt_mean(history_oracle, ap_metric) if history_oracle else "",
                 fmt_mean(path_locality, ap_metric) if path_locality else "",
+                fmt_mean(lexical_similarity, ap_metric) if lexical_similarity else "",
+                fmt_mean(content_similarity, ap_metric) if content_similarity else "",
                 fmt_mean(aggregate["baseline_recent_activity"], ap_metric),
                 fmt_mean(global_pagerank, ap_metric) if global_pagerank else "",
                 fmt_mean(aggregate["workspace_related_direct"], ap_metric),
@@ -595,6 +601,12 @@ def render_repo_holdout_table(
                 fmt_mean(aggregate["workspace_related_hybrid"], ndcg_metric),
                 fmt_delta(deltas[hybrid_path], ap_metric)
                 if hybrid_path in deltas
+                else "",
+                fmt_delta(deltas[hybrid_lexical], ap_metric)
+                if hybrid_lexical in deltas
+                else "",
+                fmt_delta(deltas[hybrid_content], ap_metric)
+                if hybrid_content in deltas
                 else "",
                 fmt_delta(deltas[hybrid_recent], ap_metric)
                 if hybrid_recent in deltas
@@ -623,6 +635,8 @@ def render_repo_holdout_table(
                     "targets",
                     "history oracle AP",
                     "path AP",
+                    "lexical AP",
+                    "content AP",
                     "recent AP",
                     "global PR AP",
                     "direct AP",
@@ -630,6 +644,8 @@ def render_repo_holdout_table(
                     "hybrid AP",
                     "hybrid nDCG",
                     "hybrid-path delta AP",
+                    "hybrid-lexical delta AP",
+                    "hybrid-content delta AP",
                     "hybrid-recent delta AP",
                     "hybrid-global delta AP",
                     "hybrid-direct delta AP",
@@ -959,6 +975,8 @@ def render_report(report: dict[str, Any]) -> str:
             "Cross-Repo Temporal Holdout",
             [
                 "baseline_path_locality",
+                "baseline_lexical_similarity",
+                "baseline_content_similarity",
                 "baseline_recent_activity",
                 "baseline_global_pagerank",
                 "workspace_related_direct",
@@ -1048,6 +1066,8 @@ def render_report(report: dict[str, Any]) -> str:
                 "Predictable Cross-Repo Temporal Holdout",
                 [
                     "baseline_path_locality",
+                    "baseline_lexical_similarity",
+                    "baseline_content_similarity",
                     "baseline_recent_activity",
                     "baseline_global_pagerank",
                     "workspace_related_direct",
