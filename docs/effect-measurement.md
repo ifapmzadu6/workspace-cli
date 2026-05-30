@@ -25,8 +25,8 @@ python3 tools/measure_effect.py > /tmp/workspace-effect.json
 python3 tools/summarize_effect.py /tmp/workspace-effect.json
 ```
 
-To generate the JSON report, threshold log, Markdown summary, and run manifest
-in one artifact directory:
+To generate the JSON report, threshold log, Markdown summary, headline result
+summary, and run manifest in one artifact directory:
 
 ```sh
 python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
@@ -35,7 +35,9 @@ python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
 The JSON report includes reproducibility metadata: the workspace commit, dirty
 state, primary cutoff, resampling counts, sign-flip p-value method, holdout
 manifest path/hash, and pinned holdout repositories. The Markdown summary
-renders the same metadata before the metric tables.
+renders the same metadata before the metric tables, while
+`result_summary.json` extracts the headline metrics, weight sweep result, and
+leakage audit into a compact machine-readable form.
 For paper-style holdout reports, the threshold log gates case-weighted and
 repo-macro AP effect-size floors plus Holm-adjusted paired sign-flip p-value
 ceilings for the key hybrid-vs-baseline deltas.

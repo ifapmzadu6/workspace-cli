@@ -96,7 +96,8 @@ including minimum AP deltas against static, activity, centrality, direct, and
 PageRank baselines, repo-macro checks that prevent one repository from
 dominating the aggregate, plus Holm-adjusted paired sign-flip p-value ceilings.
 `tools/run_effect_artifacts.py --paper` runs measurement, threshold checking,
-and Markdown rendering into one reproducible artifact directory:
+Markdown rendering, and headline JSON extraction into one reproducible artifact
+directory:
 
 ```sh
 python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
@@ -122,6 +123,8 @@ oracle-normalized AP, oracle gaps, and leave-one-repo-out hybrid weight
 selection when sweep weights are provided. Paper holdout threshold checks gate
 case-weighted and repo-macro effect sizes plus the corrected paired
 significance of the key deltas.
+The artifact runner also writes `result_summary.json`, a compact machine-readable
+summary of the headline metrics, weight sweep result, and leakage audit.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`.

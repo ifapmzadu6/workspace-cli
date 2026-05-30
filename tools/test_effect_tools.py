@@ -28,6 +28,7 @@ measure_effect = load_tool("measure_effect")
 summarize_effect = load_tool("summarize_effect")
 check_effect_thresholds = load_tool("check_effect_thresholds")
 run_effect_artifacts = load_tool("run_effect_artifacts")
+extract_effect_summary = load_tool("extract_effect_summary")
 
 
 class ExactSignFlipTests(unittest.TestCase):
@@ -324,6 +325,112 @@ class SummaryFormattingTests(unittest.TestCase):
         self.assertIn("Temporal Holdout Leakage Audit", table)
         self.assertIn("| cross-repo | 1 | 3 | 3 | 3 | 0 | 0 |", table)
         self.assertIn("| example | 1 | 3 | 3 | 3 | 0 | 0 |", table)
+
+
+class EffectSummaryExtractionTests(unittest.TestCase):
+    def test_extract_summary_includes_headline_holdout_metrics(self) -> None:
+        report = {
+            "metadata": {"workspace_commit": "abcdef"},
+            "measurements": [
+                {"metric": "map_fact_recall", "recall": 1.0},
+                {"metric": "transaction_audit_signal_recall", "recall": 1.0},
+                {
+                    "metric": "retrieval_suite",
+                    "k": 5,
+                    "scenario_count": 4,
+                    "aggregate": {
+                        "workspace_related_hybrid": {
+                            "mean_recall_at_5": 1.0,
+                            "mean_average_precision_at_5": 0.9,
+                            "mean_ndcg_at_5": 0.95,
+                        },
+                        "workspace_impact_hybrid": {
+                            "mean_recall_at_5": 1.0,
+                            "mean_average_precision_at_5": 1.0,
+                            "mean_ndcg_at_5": 1.0,
+                        },
+                    },
+                    "paired_deltas": {},
+                },
+                {
+                    "metric": "repo_temporal_holdout_aggregate",
+                    "k": 5,
+                    "repo_count": 3,
+                    "case_count": 50,
+                    "target_count": 207,
+                    "heldout_commit_count": 15,
+                    "temporal_leakage_audit": {
+                        "case_count": 50,
+                        "checked_case_count": 50,
+                        "head_matches_parent_count": 50,
+                        "failure_count": 0,
+                    },
+                    "aggregate": {
+                        "workspace_related_hybrid": {
+                            "mean_average_precision_at_5": 0.651,
+                            "ci95_low_average_precision_at_5": 0.555,
+                            "ci95_high_average_precision_at_5": 0.741,
+                        },
+                        "workspace_related_direct": {
+                            "mean_average_precision_at_5": 0.564,
+                        },
+                    },
+                    "paired_deltas": {
+                        "workspace_related_hybrid_minus_workspace_related_direct": {
+                            "mean_delta_average_precision_at_5": 0.087,
+                            "p_greater_holm_delta_average_precision_at_5": 0.00003,
+                            "win_count_delta_average_precision_at_5": 21,
+                            "tie_count_delta_average_precision_at_5": 24,
+                            "loss_count_delta_average_precision_at_5": 5,
+                        },
+                    },
+                    "hybrid_weight_sweep": [
+                        {
+                            "hybrid_direct_weight": 0.5,
+                            "related": {
+                                "method": "workspace_related_hybrid_w_0_5",
+                                "aggregate": {
+                                    "workspace_related_hybrid_w_0_5": {
+                                        "mean_average_precision_at_5": 0.64,
+                                    }
+                                },
+                            },
+                        },
+                        {
+                            "hybrid_direct_weight": 0.8,
+                            "related": {
+                                "method": "workspace_related_hybrid_w_0_8",
+                                "aggregate": {
+                                    "workspace_related_hybrid_w_0_8": {
+                                        "mean_average_precision_at_5": 0.651,
+                                    }
+                                },
+                            },
+                        },
+                    ],
+                },
+            ],
+        }
+
+        summary = extract_effect_summary.extract_summary(report)
+
+        self.assertEqual(summary["schema_version"], 1)
+        self.assertEqual(summary["observation_recall"]["map_fact_recall"], 1.0)
+        holdout = summary["repo_temporal_holdout"]
+        self.assertEqual(holdout["temporal_leakage_audit"]["failure_count"], 0)
+        self.assertEqual(holdout["best_weight_sweep"]["direct_weight"], 0.8)
+        self.assertEqual(
+            holdout["methods"]["workspace_related_hybrid"][
+                "average_precision_at_5"
+            ]["mean"],
+            0.651,
+        )
+        self.assertEqual(
+            holdout["key_deltas"][
+                "workspace_related_hybrid_minus_workspace_related_direct"
+            ]["wins"],
+            21,
+        )
 
 
 class EffectThresholdTests(unittest.TestCase):
@@ -724,6 +831,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
         self.assertIn("--require-holdout", plan["threshold_command"])
         self.assertEqual(plan["json_path"].name, "effect.json")
         self.assertEqual(plan["markdown_path"].name, "effect.md")
+        self.assertEqual(plan["result_summary_path"].name, "result_summary.json")
         self.assertEqual(plan["threshold_path"].name, "thresholds.txt")
 
     def test_fixture_plan_keeps_holdout_thresholds_optional(self) -> None:
@@ -753,14 +861,24 @@ class EffectArtifactRunnerTests(unittest.TestCase):
                 plan["measurement_command"],
                 plan["threshold_command"],
                 plan["summary_command"],
+                plan["result_summary_command"],
             ])
             self.assertTrue(plan["json_path"].exists())
             self.assertTrue(plan["markdown_path"].exists())
+            self.assertTrue(plan["result_summary_path"].exists())
             self.assertTrue(plan["threshold_path"].exists())
             run_manifest = json.loads(plan["run_manifest_path"].read_text())
             self.assertEqual(
                 run_manifest["commands"]["measure"],
                 plan["measurement_command"],
+            )
+            self.assertEqual(
+                run_manifest["commands"]["extract_result_summary"],
+                plan["result_summary_command"],
+            )
+            self.assertEqual(
+                run_manifest["result_summary"],
+                str(plan["result_summary_path"]),
             )
             self.assertFalse(run_manifest["require_holdout_thresholds"])
 

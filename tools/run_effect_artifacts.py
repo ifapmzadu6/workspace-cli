@@ -39,6 +39,7 @@ def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
     manifest = resolve_user_path(manifest) if manifest is not None else None
     json_path = output_dir / "effect.json"
     markdown_path = output_dir / "effect.md"
+    result_summary_path = output_dir / "result_summary.json"
     threshold_path = output_dir / "thresholds.txt"
     run_manifest_path = output_dir / "run_manifest.json"
 
@@ -62,16 +63,23 @@ def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
         str(TOOLS_DIR / "summarize_effect.py"),
         str(json_path),
     ]
+    result_summary_command = [
+        sys.executable,
+        str(TOOLS_DIR / "extract_effect_summary.py"),
+        str(json_path),
+    ]
 
     return {
         "output_dir": output_dir,
         "json_path": json_path,
         "markdown_path": markdown_path,
+        "result_summary_path": result_summary_path,
         "threshold_path": threshold_path,
         "run_manifest_path": run_manifest_path,
         "measurement_command": measurement_command,
         "threshold_command": threshold_command,
         "summary_command": summary_command,
+        "result_summary_command": result_summary_command,
         "manifest": manifest,
         "require_holdout_thresholds": manifest is not None,
     }
@@ -103,6 +111,7 @@ def write_run_manifest(plan: dict[str, Any]) -> None:
         "output_dir": str(plan["output_dir"]),
         "json": repo_relative(plan["json_path"]),
         "markdown": repo_relative(plan["markdown_path"]),
+        "result_summary": repo_relative(plan["result_summary_path"]),
         "thresholds": repo_relative(plan["threshold_path"]),
         "paper_manifest": (
             repo_relative(plan["manifest"]) if plan["manifest"] is not None else None
@@ -112,6 +121,7 @@ def write_run_manifest(plan: dict[str, Any]) -> None:
             "measure": plan["measurement_command"],
             "check_thresholds": plan["threshold_command"],
             "summarize": plan["summary_command"],
+            "extract_result_summary": plan["result_summary_command"],
         },
     }
     plan["run_manifest_path"].write_text(
@@ -134,6 +144,11 @@ def run_plan(
         merge_stderr=True,
     )
     run_stdout_to_file(plan["summary_command"], plan["markdown_path"], runner=runner)
+    run_stdout_to_file(
+        plan["result_summary_command"],
+        plan["result_summary_path"],
+        runner=runner,
+    )
     write_run_manifest(plan)
 
 
@@ -153,7 +168,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
-        help="directory for effect.json, effect.md, thresholds.txt, and run_manifest.json",
+        help=(
+            "directory for effect.json, effect.md, result_summary.json, "
+            "thresholds.txt, and run_manifest.json"
+        ),
     )
     args = parser.parse_args(argv)
     if args.paper and args.manifest is not None:
