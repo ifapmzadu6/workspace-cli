@@ -29,6 +29,7 @@ EXPECTED_HYBRID_WEIGHT_SWEEP = [
     0.95,
     1.0,
 ]
+EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT = 0.9
 FLOAT_TOLERANCE = 1e-12
 MAX_HOLDOUT_HOLM_P = 0.005
 
@@ -309,12 +310,26 @@ def check_repo_holdout_thresholds(
         )
 
     require_weight_sweep(failures, holdout, EXPECTED_HYBRID_WEIGHT_SWEEP, label)
+    require_default_weight_alignment(
+        failures,
+        holdout,
+        weight=EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT,
+        metric="mean_average_precision_at_5",
+        label=label,
+    )
+    require_weight_is_sweep_best(
+        failures,
+        holdout,
+        weight=EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT,
+        metric="mean_average_precision_at_5",
+        label=label,
+    )
     require_weight_ap(
         failures,
         holdout,
-        weight=0.75,
+        weight=EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT,
         metric="mean_average_precision_at_5",
-        minimum=0.70 if predictable else 0.63,
+        minimum=0.73 if predictable else 0.65,
         label=label,
     )
     require_loro_thresholds(
@@ -617,6 +632,86 @@ def require_weight_ap(
         failures.append(
             f"{label}.hybrid_weight_sweep[{weight}].{metric} < {minimum}: {value}"
         )
+
+
+def weight_sweep_value(
+    holdout: dict[str, Any],
+    *,
+    weight: float,
+    metric: str,
+) -> float | None:
+    entry = next(
+        (
+            item
+            for item in holdout.get("hybrid_weight_sweep", [])
+            if abs(float(item.get("hybrid_direct_weight", -1.0)) - weight) < 1e-9
+        ),
+        None,
+    )
+    if entry is None:
+        return None
+    related = entry.get("related", {})
+    method = related.get(
+        "method",
+        hybrid_weight_method("workspace_related_hybrid", weight),
+    )
+    summary = related.get("aggregate", {}).get(method)
+    if not isinstance(summary, dict) or metric not in summary:
+        return None
+    return float(summary[metric])
+
+
+def require_default_weight_alignment(
+    failures: list[str],
+    holdout: dict[str, Any],
+    *,
+    weight: float,
+    metric: str,
+    label: str,
+) -> None:
+    default_summary = holdout.get("aggregate", {}).get("workspace_related_hybrid", {})
+    if metric not in default_summary:
+        failures.append(f"{label}.workspace_related_hybrid missing {metric}")
+        return
+    default_value = float(default_summary[metric])
+    sweep_value = weight_sweep_value(holdout, weight=weight, metric=metric)
+    if sweep_value is None:
+        failures.append(f"{label}.hybrid_weight_sweep[{weight}] missing {metric}")
+        return
+    if abs(default_value - sweep_value) > 0.001:
+        failures.append(
+            f"{label}.workspace_related_hybrid.{metric} must match "
+            f"hybrid_weight_sweep[{weight}]: {default_value} != {sweep_value}"
+        )
+
+
+def require_weight_is_sweep_best(
+    failures: list[str],
+    holdout: dict[str, Any],
+    *,
+    weight: float,
+    metric: str,
+    label: str,
+) -> None:
+    selected_value = weight_sweep_value(holdout, weight=weight, metric=metric)
+    if selected_value is None:
+        failures.append(f"{label}.hybrid_weight_sweep[{weight}] missing {metric}")
+        return
+    for entry in holdout.get("hybrid_weight_sweep", []):
+        candidate_weight = float(entry.get("hybrid_direct_weight", -1.0))
+        candidate_value = weight_sweep_value(
+            holdout,
+            weight=candidate_weight,
+            metric=metric,
+        )
+        if candidate_value is None:
+            continue
+        if candidate_value > selected_value + 0.001:
+            failures.append(
+                f"{label}.hybrid_weight_sweep[{weight}].{metric} "
+                f"is below weight {candidate_weight}: "
+                f"{selected_value} < {candidate_value}"
+            )
 
 
 def require_loro_thresholds(

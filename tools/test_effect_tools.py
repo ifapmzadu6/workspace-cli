@@ -399,16 +399,16 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                             },
                         },
                         {
-                            "hybrid_direct_weight": 0.8,
+                            "hybrid_direct_weight": 0.9,
                             "related": {
-                                "method": "workspace_related_hybrid_w_0_8",
+                                "method": "workspace_related_hybrid_w_0_9",
                                 "aggregate": {
-                                    "workspace_related_hybrid_w_0_8": {
+                                    "workspace_related_hybrid_w_0_9": {
                                         "mean_average_precision_at_5": 0.651,
                                     }
                                 },
                                 "paired_deltas": {
-                                    "workspace_related_hybrid_w_0_8_minus_workspace_related_direct": {
+                                    "workspace_related_hybrid_w_0_9_minus_workspace_related_direct": {
                                         "mean_delta_average_precision_at_5": 0.087,
                                         "p_greater_holm_delta_average_precision_at_5": 0.00003,
                                     },
@@ -444,10 +444,10 @@ class EffectSummaryExtractionTests(unittest.TestCase):
         self.assertEqual(summary["observation_recall"]["map_fact_recall"], 1.0)
         holdout = summary["repo_temporal_holdout"]
         self.assertEqual(holdout["temporal_leakage_audit"]["failure_count"], 0)
-        self.assertEqual(holdout["best_weight_sweep"]["direct_weight"], 0.8)
+        self.assertEqual(holdout["best_weight_sweep"]["direct_weight"], 0.9)
         self.assertEqual(
             [entry["direct_weight"] for entry in holdout["weight_sweep"]],
-            [0.5, 0.8],
+            [0.5, 0.9],
         )
         self.assertEqual(
             holdout["weight_sweep"][1]["average_precision_at_5"],
@@ -621,13 +621,13 @@ class EffectThresholdTests(unittest.TestCase):
                         "mean_average_precision_at_5": 0.60,
                     },
                     "workspace_related_hybrid": {
-                        "mean_average_precision_at_5": 0.72,
+                        "mean_average_precision_at_5": 0.735,
                     },
                     "history_oracle_ceiling": {
                         "mean_average_precision_at_5": 0.90,
                     },
                 },
-                "hybrid_weight_sweep": self.weight_sweep(0.72),
+                "hybrid_weight_sweep": self.weight_sweep(0.735),
                 "leave_one_repo_out_weight_selection": self.loro_selection(
                     ap=0.71,
                     direct_ap=0.62,
@@ -665,13 +665,13 @@ class EffectThresholdTests(unittest.TestCase):
                     "mean_average_precision_at_5": 0.53,
                 },
                 "workspace_related_hybrid": {
-                    "mean_average_precision_at_5": 0.64,
+                    "mean_average_precision_at_5": 0.655,
                 },
                 "history_oracle_ceiling": {
                     "mean_average_precision_at_5": 0.81,
                 },
             },
-            "hybrid_weight_sweep": self.weight_sweep(0.64),
+            "hybrid_weight_sweep": self.weight_sweep(0.655),
             "leave_one_repo_out_weight_selection": self.loro_selection(
                 ap=0.63,
                 direct_ap=0.56,
@@ -847,6 +847,32 @@ class EffectThresholdTests(unittest.TestCase):
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any("hybrid_weight_sweep missing weights" in item for item in failures),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_when_default_weight_does_not_match_sweep(self) -> None:
+        report = self.passing_report()
+        report["measurements"][-1]["aggregate"]["workspace_related_hybrid"][
+            "mean_average_precision_at_5"
+        ] = 0.66
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any("must match hybrid_weight_sweep[0.9]" in item for item in failures),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_when_default_weight_is_not_best_sweep(self) -> None:
+        report = self.passing_report()
+        holdout = report["measurements"][-1]
+        for entry in holdout["hybrid_weight_sweep"]:
+            if entry["hybrid_direct_weight"] == 0.8:
+                method = entry["related"]["method"]
+                entry["related"]["aggregate"][method][
+                    "mean_average_precision_at_5"
+                ] = 0.70
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any("is below weight 0.8" in item for item in failures),
             failures,
         )
 
