@@ -39,6 +39,9 @@ renders the same metadata before the metric tables.
 For paper-style holdout reports, the threshold log gates case-weighted and
 repo-macro AP effect-size floors plus Holm-adjusted paired sign-flip p-value
 ceilings for the key hybrid-vs-baseline deltas.
+It also gates a temporal leakage audit: every held-out seed case must have
+been scored with a co-change index whose head exactly matches the held-out
+commit's parent.
 
 To add an optional temporal holdout measurement on a real repository, pass a
 repository path:
@@ -162,6 +165,9 @@ cutoff, which defaults to 5:
 - paper-style threshold gates for case-weighted and repo-macro AP deltas plus
   corrected paired significance against direct, PageRank, lexical, content,
   recent-activity, and global-PageRank baselines
+- a temporal leakage audit that records whether each training index was built
+  from the held-out commit's parent, not from the held-out commit or later
+  history
 
 The suite compares `git diff --name-only`, seed-specific path-locality,
 lexical-similarity, and content-similarity baselines, a seed-agnostic
@@ -539,6 +545,7 @@ That expanded run contains 15 held-out commits, 50 seed cases, and 207 target
 file labels. It preserves the main result with tighter aggregate evidence:
 
 ```text
+expanded temporal leakage audit: 50/50 cases checked, index head matched held-out parent for 50, failures 0
 expanded cross_repo hybrid average_precision@5: 0.651 (0.555, 0.741)
 expanded cross_repo direct average_precision@5: 0.564 (0.468, 0.655)
 expanded cross_repo pagerank average_precision@5: 0.536 (0.443, 0.626)

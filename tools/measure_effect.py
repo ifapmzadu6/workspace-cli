@@ -597,6 +597,38 @@ def repo_holdout_metric_summary(
     }
 
 
+def temporal_leakage_audit(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    failures = []
+    checked = 0
+    matched = 0
+    for case in cases:
+        index = case.get("index", {})
+        if not isinstance(index, dict) or "head_matches_parent" not in index:
+            continue
+        checked += 1
+        if index["head_matches_parent"]:
+            matched += 1
+            continue
+        failures.append(
+            {
+                "repo": case.get("repo", ""),
+                "seed": case.get("seed", ""),
+                "heldout_commit": case.get("heldout_commit", ""),
+                "parent": case.get("parent", ""),
+                "index_head": index.get("head"),
+            }
+        )
+    failure_limit = 10
+    return {
+        "case_count": len(cases),
+        "checked_case_count": checked,
+        "head_matches_parent_count": matched,
+        "failure_count": len(failures),
+        "failures": failures[:failure_limit],
+        "omitted_failures": max(0, len(failures) - failure_limit),
+    }
+
+
 def repo_holdout_leave_one_repo_out_weight_selection(
     holdouts: list[dict[str, Any]],
     k: int,
@@ -2143,6 +2175,7 @@ def measure_repo_holdout(
                 str(max_files_per_commit),
                 "--json",
             )
+            index_head = index["data"].get("head")
             parent_paths = tracked_repo_paths(clone)
 
             heldout_commits += 1
@@ -2268,6 +2301,8 @@ def measure_repo_holdout(
                             expected - predictable_expected
                         ),
                         "index": {
+                            "head": index_head[:12] if index_head else None,
+                            "head_matches_parent": index_head == parent,
                             "commits_indexed": index["data"]["commits_indexed"],
                             "ignored_large_commits": index["data"][
                                 "ignored_large_commits"
@@ -2332,6 +2367,7 @@ def measure_repo_holdout(
         "hybrid_weight_sweep": all_target_summary["hybrid_weight_sweep"],
         "paired_deltas": all_target_summary["paired_deltas"],
         "target_count": all_target_summary["target_count"],
+        "temporal_leakage_audit": temporal_leakage_audit(cases),
         "predictable_only": predictable_summary,
         "dataset": holdout_dataset_summary(
             candidate_commit_count=len(commits),
@@ -2413,6 +2449,7 @@ def aggregate_repo_holdouts(
             RELATED_COMPARISON_PAIRS,
         ),
         "paired_deltas": all_target_summary["paired_deltas"],
+        "temporal_leakage_audit": temporal_leakage_audit(cases),
         "predictable_only": predictable_summary,
         "leave_one_repo_out_weight_selection": (
             repo_holdout_leave_one_repo_out_weight_selection(

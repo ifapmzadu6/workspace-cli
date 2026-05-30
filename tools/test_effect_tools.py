@@ -119,6 +119,38 @@ class HoldoutOracleTests(unittest.TestCase):
         self.assertEqual(oracle["mean_recall_at_5"], 1.0)
         self.assertEqual(oracle["mean_average_precision_at_5"], 1.0)
 
+    def test_temporal_leakage_audit_requires_index_head_to_match_parent(self) -> None:
+        audit = measure_effect.temporal_leakage_audit(
+            [
+                {
+                    "repo": "repo",
+                    "heldout_commit": "bbbb",
+                    "parent": "aaaa",
+                    "seed": "src/a.rs",
+                    "index": {
+                        "head": "aaaa",
+                        "head_matches_parent": True,
+                    },
+                },
+                {
+                    "repo": "repo",
+                    "heldout_commit": "dddd",
+                    "parent": "cccc",
+                    "seed": "src/b.rs",
+                    "index": {
+                        "head": "eeee",
+                        "head_matches_parent": False,
+                    },
+                },
+            ]
+        )
+
+        self.assertEqual(audit["case_count"], 2)
+        self.assertEqual(audit["checked_case_count"], 2)
+        self.assertEqual(audit["head_matches_parent_count"], 1)
+        self.assertEqual(audit["failure_count"], 1)
+        self.assertEqual(audit["failures"][0]["seed"], "src/b.rs")
+
 
 class StaticBaselineTests(unittest.TestCase):
     def test_path_tokens_split_names_and_ignore_structural_tokens(self) -> None:
@@ -259,6 +291,39 @@ class SummaryFormattingTests(unittest.TestCase):
         self.assertIn("content AP", table)
         self.assertIn("hybrid-content delta AP", table)
         self.assertIn("| example | 1 | 2 | 1.000 | 0.100 | 0.200 | 0.300 |", table)
+
+    def test_temporal_leakage_audit_table_reports_matching_heads(self) -> None:
+        table = summarize_effect.render_temporal_leakage_audit_table(
+            {
+                "measurements": [
+                    {
+                        "metric": "repo_temporal_holdout",
+                        "repo": "/tmp/example",
+                        "temporal_leakage_audit": {
+                            "case_count": 3,
+                            "checked_case_count": 3,
+                            "head_matches_parent_count": 3,
+                            "failure_count": 0,
+                            "omitted_failures": 0,
+                        },
+                    }
+                ]
+            },
+            {
+                "repo_count": 1,
+                "temporal_leakage_audit": {
+                    "case_count": 3,
+                    "checked_case_count": 3,
+                    "head_matches_parent_count": 3,
+                    "failure_count": 0,
+                    "omitted_failures": 0,
+                },
+            },
+        )
+
+        self.assertIn("Temporal Holdout Leakage Audit", table)
+        self.assertIn("| cross-repo | 1 | 3 | 3 | 3 | 0 | 0 |", table)
+        self.assertIn("| example | 1 | 3 | 3 | 3 | 0 | 0 |", table)
 
 
 class EffectThresholdTests(unittest.TestCase):
@@ -466,6 +531,12 @@ class EffectThresholdTests(unittest.TestCase):
             ),
             "paired_deltas": self.paired_deltas("workspace_related_hybrid"),
             "repo_macro_average": self.repo_macro_average(predictable=False),
+            "temporal_leakage_audit": {
+                "case_count": 50,
+                "checked_case_count": 50,
+                "head_matches_parent_count": 50,
+                "failure_count": 0,
+            },
             "predictable_only": self.repo_holdout(predictable=True),
         }
 
@@ -599,6 +670,17 @@ class EffectThresholdTests(unittest.TestCase):
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any("repo_macro_average" in item for item in failures),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_when_temporal_leakage_audit_fails(self) -> None:
+        report = self.passing_report()
+        report["measurements"][-1]["temporal_leakage_audit"][
+            "head_matches_parent_count"
+        ] = 49
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any("temporal_leakage_audit" in item for item in failures),
             failures,
         )
 

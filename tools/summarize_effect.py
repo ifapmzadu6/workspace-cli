@@ -839,6 +839,56 @@ def render_holdout_dataset_table(
     )
 
 
+def render_temporal_leakage_audit_table(
+    report: dict[str, Any],
+    aggregate: dict[str, Any],
+) -> str:
+    rows = []
+
+    def add_row(scope: str, repo_count: str, audit: dict[str, Any]) -> None:
+        rows.append(
+            [
+                scope,
+                repo_count,
+                str(audit.get("case_count", "")),
+                str(audit.get("checked_case_count", "")),
+                str(audit.get("head_matches_parent_count", "")),
+                str(audit.get("failure_count", "")),
+                str(audit.get("omitted_failures", "")),
+            ]
+        )
+
+    aggregate_audit = aggregate.get("temporal_leakage_audit")
+    if isinstance(aggregate_audit, dict):
+        add_row("cross-repo", str(aggregate["repo_count"]), aggregate_audit)
+    for holdout in report["measurements"]:
+        if holdout["metric"] != "repo_temporal_holdout":
+            continue
+        audit = holdout.get("temporal_leakage_audit")
+        if isinstance(audit, dict):
+            add_row(repo_label(holdout["repo"]), "1", audit)
+
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            "## Temporal Holdout Leakage Audit",
+            markdown_table(
+                [
+                    "scope",
+                    "repos",
+                    "cases",
+                    "checked",
+                    "index head = parent",
+                    "failures",
+                    "omitted failures",
+                ],
+                rows,
+            ),
+        ]
+    )
+
+
 def render_loro_weight_selection_table(
     measurement: dict[str, Any],
     title: str,
@@ -953,6 +1003,9 @@ def render_report(report: dict[str, Any]) -> str:
         dataset = render_holdout_dataset_table(report, holdout)
         if dataset:
             sections.append(dataset)
+        leakage_audit = render_temporal_leakage_audit_table(report, holdout)
+        if leakage_audit:
+            sections.append(leakage_audit)
         per_repo = render_repo_holdout_table(report, "Per-Repo Temporal Holdout")
         if per_repo:
             sections.append(per_repo)

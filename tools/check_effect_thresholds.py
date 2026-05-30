@@ -180,6 +180,7 @@ def check_repo_holdout_thresholds(
     )
     if not predictable:
         require_count(failures, holdout, "repo_count", 3, label)
+        require_temporal_leakage_audit(failures, holdout, label)
     require_count(failures, holdout, "case_count", 45, label)
     require_count(failures, holdout, "target_count", 180, label)
 
@@ -335,6 +336,41 @@ def require_count(
     value = int(measurement.get(key, 0))
     if value < minimum:
         failures.append(f"{label}.{key} < {minimum}: {value}")
+
+
+def require_temporal_leakage_audit(
+    failures: list[str],
+    holdout: dict[str, Any],
+    label: str,
+) -> None:
+    audit = holdout.get("temporal_leakage_audit")
+    if not isinstance(audit, dict):
+        failures.append(f"{label} missing temporal_leakage_audit")
+        return
+    case_count = int(holdout.get("case_count", 0))
+    audit_case_count = int(audit.get("case_count", 0))
+    checked = int(audit.get("checked_case_count", 0))
+    matched = int(audit.get("head_matches_parent_count", 0))
+    failures_count = int(audit.get("failure_count", 0))
+    if audit_case_count != case_count:
+        failures.append(
+            f"{label}.temporal_leakage_audit case_count != holdout case_count: "
+            f"{audit_case_count} != {case_count}"
+        )
+    if checked != case_count:
+        failures.append(
+            f"{label}.temporal_leakage_audit checked_case_count != case_count: "
+            f"{checked} != {case_count}"
+        )
+    if matched != checked:
+        failures.append(
+            f"{label}.temporal_leakage_audit head_matches_parent_count != "
+            f"checked_case_count: {matched} != {checked}"
+        )
+    if failures_count != 0:
+        failures.append(
+            f"{label}.temporal_leakage_audit failure_count != 0: {failures_count}"
+        )
 
 
 def check_repo_macro_thresholds(
