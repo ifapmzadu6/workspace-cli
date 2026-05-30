@@ -9,6 +9,7 @@ current git diff or direct co-change only.
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import tempfile
@@ -75,6 +76,72 @@ def precision_recall(results: list[str], expected: set[str], k: int) -> dict[str
     }
 
 
+def ranking_metrics(results: list[str], expected: set[str], k: int) -> dict[str, Any]:
+    top = results[:k]
+    seen_hits: set[str] = set()
+    precision_sum = 0.0
+    reciprocal_rank = 0.0
+    dcg = 0.0
+
+    for index, path in enumerate(top, start=1):
+        if path not in expected or path in seen_hits:
+            continue
+        seen_hits.add(path)
+        precision_sum += len(seen_hits) / index
+        if reciprocal_rank == 0.0:
+            reciprocal_rank = 1.0 / index
+        dcg += 1.0 / math.log2(index + 1)
+
+    ideal_hits = min(len(expected), k)
+    idcg = sum(1.0 / math.log2(index + 1) for index in range(1, ideal_hits + 1))
+    return {
+        "top": top,
+        "hits": [path for path in top if path in expected],
+        "returned": len(top),
+        f"precision_at_{k}": round(len(seen_hits) / k, 3) if k else 0.0,
+        f"recall_at_{k}": round(len(seen_hits) / len(expected), 3) if expected else 1.0,
+        f"average_precision_at_{k}": round(precision_sum / len(expected), 3)
+        if expected
+        else 1.0,
+        "mrr": round(reciprocal_rank, 3),
+        f"ndcg_at_{k}": round(dcg / idcg, 3) if idcg else 1.0,
+        "hit_count": len(seen_hits),
+        "expected_count": len(expected),
+    }
+
+
+def aggregate_metric_sets(scenarios: list[dict[str, Any]], k: int) -> dict[str, Any]:
+    method_names = sorted(
+        {
+            method
+            for scenario in scenarios
+            for method in scenario["methods"].keys()
+        }
+    )
+    metric_names = [
+        f"precision_at_{k}",
+        f"recall_at_{k}",
+        f"average_precision_at_{k}",
+        "mrr",
+        f"ndcg_at_{k}",
+    ]
+    aggregate: dict[str, Any] = {}
+    for method in method_names:
+        values = [
+            scenario["methods"][method]
+            for scenario in scenarios
+            if method in scenario["methods"]
+        ]
+        aggregate[method] = {
+            f"mean_{name}": round(
+                sum(value[name] for value in values) / len(values), 3
+            )
+            for name in metric_names
+        }
+        aggregate[method]["scenario_count"] = len(values)
+    return aggregate
+
+
 def paths(value: dict[str, Any], *segments: str) -> list[str]:
     cursor: Any = value
     for segment in segments:
@@ -112,6 +179,53 @@ def make_history_fixture() -> tempfile.TemporaryDirectory[str]:
     write(root / "docs/auth.md", "auth docs\n")
     write(root / "src/unrelated.rs", "unrelated\n")
     commit_all(root, "unrelated docs")
+    return temp
+
+
+def make_broad_noise_fixture() -> tempfile.TemporaryDirectory[str]:
+    temp = tempfile.TemporaryDirectory()
+    root = Path(temp.name)
+    git(root, "init", "-q")
+    git(root, "config", "user.email", "measure@example.com")
+    git(root, "config", "user.name", "Measure")
+
+    write(root / "README.md", "# broad noise fixture\n")
+    write(root / "src/main.rs", "fn main() {}\n")
+    commit_all(root, "initial project scaffold")
+
+    write(root / "src/core.rs", "core module\n")
+    write(root / "tests/core_test.rs", "core tests\n")
+    commit_all(root, "core with tests")
+
+    append(root / "src/core.rs", "generated churn touch\n")
+    for index in range(20):
+        write(root / f"generated/snapshot_{index:02}.txt", f"snapshot {index}\n")
+    commit_all(root, "large generated update")
+    return temp
+
+
+def make_multi_seed_fixture() -> tempfile.TemporaryDirectory[str]:
+    temp = tempfile.TemporaryDirectory()
+    root = Path(temp.name)
+    git(root, "init", "-q")
+    git(root, "config", "user.email", "measure@example.com")
+    git(root, "config", "user.name", "Measure")
+
+    write(root / "README.md", "# multi seed fixture\n")
+    write(root / "src/main.rs", "fn main() {}\n")
+    commit_all(root, "initial project scaffold")
+
+    write(root / "src/api.rs", "api module\n")
+    write(root / "src/shared.rs", "shared module\n")
+    commit_all(root, "api with shared")
+
+    write(root / "src/worker.rs", "worker module\n")
+    append(root / "src/shared.rs", "worker shared change\n")
+    commit_all(root, "worker with shared")
+
+    append(root / "src/shared.rs", "tested behavior\n")
+    write(root / "tests/shared_test.rs", "shared tests\n")
+    commit_all(root, "shared with tests")
     return temp
 
 
@@ -197,6 +311,203 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
         }
 
 
+def evaluate_related_case(
+    bin_path: Path,
+    *,
+    name: str,
+    root: Path,
+    target: str,
+    expected: set[str],
+    max_files_per_commit: int = 40,
+    k: int = 5,
+) -> dict[str, Any]:
+    index = workspace_json(
+        bin_path,
+        root,
+        "index",
+        "cochange",
+        "--max-files-per-commit",
+        str(max_files_per_commit),
+        "--json",
+    )
+    direct = workspace_json(
+        bin_path,
+        root,
+        "related",
+        target,
+        "--by",
+        "cochange",
+        "--use-index",
+        "--json",
+    )
+    pagerank = workspace_json(
+        bin_path,
+        root,
+        "related",
+        target,
+        "--by",
+        "cochange",
+        "--rank",
+        "pagerank",
+        "--json",
+    )
+
+    append(root / target, "local evaluation change\n")
+    impact = workspace_json(
+        bin_path,
+        root,
+        "impact",
+        "--diff",
+        "--by",
+        "cochange",
+        "--rank",
+        "pagerank",
+        "--json",
+    )
+    git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
+
+    return {
+        "name": name,
+        "task": "single_seed_related_and_impact",
+        "target": target,
+        "expected": sorted(expected),
+        "index": {
+            "commits_indexed": index["data"]["commits_indexed"],
+            "ignored_large_commits": index["data"]["ignored_large_commits"],
+            "edge_count": index["data"]["edge_count"],
+        },
+        "methods": {
+            "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
+            "workspace_related_direct": ranking_metrics(
+                paths(direct, "data", "related"), expected, k
+            ),
+            "workspace_related_pagerank": ranking_metrics(
+                paths(pagerank, "data", "related"), expected, k
+            ),
+            "workspace_impact_pagerank": ranking_metrics(
+                paths(impact, "data", "impacted"), expected, k
+            ),
+        },
+    }
+
+
+def evaluate_impact_case(
+    bin_path: Path,
+    *,
+    name: str,
+    root: Path,
+    seed_files: list[str],
+    expected: set[str],
+    max_files_per_commit: int = 40,
+    k: int = 5,
+) -> dict[str, Any]:
+    index = workspace_json(
+        bin_path,
+        root,
+        "index",
+        "cochange",
+        "--max-files-per-commit",
+        str(max_files_per_commit),
+        "--json",
+    )
+    for seed in seed_files:
+        append(root / seed, "local evaluation change\n")
+
+    direct = workspace_json(
+        bin_path,
+        root,
+        "impact",
+        "--diff",
+        "--by",
+        "cochange",
+        "--use-index",
+        "--json",
+    )
+    pagerank = workspace_json(
+        bin_path,
+        root,
+        "impact",
+        "--diff",
+        "--by",
+        "cochange",
+        "--rank",
+        "pagerank",
+        "--json",
+    )
+    git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
+
+    return {
+        "name": name,
+        "task": "multi_seed_impact",
+        "seed_files": seed_files,
+        "expected": sorted(expected),
+        "index": {
+            "commits_indexed": index["data"]["commits_indexed"],
+            "ignored_large_commits": index["data"]["ignored_large_commits"],
+            "edge_count": index["data"]["edge_count"],
+        },
+        "methods": {
+            "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
+            "workspace_impact_direct": ranking_metrics(
+                paths(direct, "data", "impacted"), expected, k
+            ),
+            "workspace_impact_pagerank": ranking_metrics(
+                paths(pagerank, "data", "impacted"), expected, k
+            ),
+        },
+    }
+
+
+def measure_retrieval_suite(bin_path: Path) -> dict[str, Any]:
+    k = 5
+    scenarios: list[dict[str, Any]] = []
+
+    with make_history_fixture() as name:
+        scenarios.append(
+            evaluate_related_case(
+                bin_path,
+                name="transitive_auth_chain",
+                root=Path(name),
+                target="src/auth.rs",
+                expected={"src/session.rs", "src/cookie.rs", "tests/cookie_test.rs"},
+                k=k,
+            )
+        )
+
+    with make_broad_noise_fixture() as name:
+        scenarios.append(
+            evaluate_related_case(
+                bin_path,
+                name="broad_generated_commit_filtered",
+                root=Path(name),
+                target="src/core.rs",
+                expected={"tests/core_test.rs"},
+                max_files_per_commit=8,
+                k=k,
+            )
+        )
+
+    with make_multi_seed_fixture() as name:
+        scenarios.append(
+            evaluate_impact_case(
+                bin_path,
+                name="multi_seed_shared_test_discovery",
+                root=Path(name),
+                seed_files=["src/api.rs", "src/worker.rs"],
+                expected={"src/shared.rs", "tests/shared_test.rs"},
+                k=k,
+            )
+        )
+
+    return {
+        "metric": "retrieval_suite",
+        "k": k,
+        "scenario_count": len(scenarios),
+        "scenarios": scenarios,
+        "aggregate": aggregate_metric_sets(scenarios, k),
+    }
+
+
 def measure_transaction(bin_path: Path) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as name:
         root = Path(name)
@@ -266,6 +577,7 @@ def main() -> None:
         "measurements": [
             measure_observation(bin_path),
             measure_related_and_impact(bin_path),
+            measure_retrieval_suite(bin_path),
             measure_transaction(bin_path),
         ],
     }

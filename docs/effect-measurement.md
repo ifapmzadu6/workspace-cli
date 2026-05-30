@@ -58,6 +58,26 @@ The measurement compares:
 - `workspace related --rank pagerank`
 - `workspace impact --diff --rank pagerank`
 
+### Retrieval Suite
+
+Measures related-file discovery across several small, reproducible git-history
+topologies instead of relying on one perfect fixture:
+
+- transitive chain: code to session to cookie to test
+- broad generated update: a large generated commit should be filtered out
+- multi-seed bridge: two changed files share a dependency that reaches a test
+
+For each scenario the script reports:
+
+- precision@5
+- recall@5
+- average precision@5
+- mean reciprocal rank
+- nDCG@5
+
+The suite compares `git diff --name-only`, direct co-change ranking, and
+personalized PageRank over the saved co-change index.
+
 ### Transaction Audit Signal Recall
 
 Measures whether a patch workflow produces the evidence needed to audit and
@@ -82,9 +102,14 @@ git_diff_only recall@3: 0.000
 workspace_related_direct recall@3: 0.333
 workspace_related_pagerank recall@3: 1.000
 workspace_impact_pagerank recall@3: 1.000
+retrieval_suite git_diff_only mean_recall@5: 0.000
+retrieval_suite direct_cochange mean_recall@5: 0.500-0.666
+retrieval_suite pagerank mean_recall@5: 1.000
+retrieval_suite pagerank mean_average_precision@5: 1.000
+retrieval_suite pagerank mean_ndcg@5: 1.000
 transaction_audit_signal_recall: 1.000
 ```
 
 Interpretation: the CLI is not just running; it measurably improves observation
-coverage and related-file discovery in the fixture, while preserving auditable
-change/rollback evidence.
+coverage and related-file discovery across direct, indirect, noisy, and
+multi-seed fixtures, while preserving auditable change/rollback evidence.
