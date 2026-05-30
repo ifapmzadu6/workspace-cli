@@ -407,6 +407,12 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                                         "mean_average_precision_at_5": 0.651,
                                     }
                                 },
+                                "paired_deltas": {
+                                    "workspace_related_hybrid_w_0_8_minus_workspace_related_direct": {
+                                        "mean_delta_average_precision_at_5": 0.087,
+                                        "p_greater_holm_delta_average_precision_at_5": 0.00003,
+                                    },
+                                },
                             },
                         },
                     ],
@@ -421,6 +427,18 @@ class EffectSummaryExtractionTests(unittest.TestCase):
         holdout = summary["repo_temporal_holdout"]
         self.assertEqual(holdout["temporal_leakage_audit"]["failure_count"], 0)
         self.assertEqual(holdout["best_weight_sweep"]["direct_weight"], 0.8)
+        self.assertEqual(
+            [entry["direct_weight"] for entry in holdout["weight_sweep"]],
+            [0.5, 0.8],
+        )
+        self.assertEqual(
+            holdout["weight_sweep"][1]["average_precision_at_5"],
+            0.651,
+        )
+        self.assertEqual(
+            holdout["weight_sweep"][1]["delta_vs_direct"]["mean_delta"],
+            0.087,
+        )
         self.assertEqual(
             holdout["methods"]["workspace_related_hybrid"][
                 "average_precision_at_5"

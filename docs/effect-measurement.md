@@ -37,13 +37,12 @@ The JSON report includes reproducibility metadata: the workspace commit, dirty
 state, primary cutoff, resampling counts, sign-flip p-value method, holdout
 manifest path/hash, and pinned holdout repositories. The Markdown summary
 renders the same metadata before the metric tables, while
-`result_summary.json` extracts the headline metrics, weight sweep result, and
-leakage audit into a compact machine-readable form. The run manifest records
-the exact commands and SHA-256 checksums for each generated artifact. The
-verifier checks required files, JSON parseability, a passing threshold log,
-manifest hash consistency, recomputed threshold gates, and result-summary
-consistency with `effect.json`. The run manifest records the verifier command
-alongside the generation commands.
+`result_summary.json` extracts the headline metrics, full weight sweep, best
+weight result, and leakage audit into a compact machine-readable form. The run
+manifest records the exact generation commands, verifier command, and SHA-256
+checksums for each generated artifact. The verifier checks required files,
+JSON parseability, a passing threshold log, manifest hash consistency,
+recomputed threshold gates, and result-summary consistency with `effect.json`.
 For paper-style holdout reports, the threshold log gates case-weighted and
 repo-macro AP effect-size floors plus Holm-adjusted paired sign-flip p-value
 ceilings for the key hybrid-vs-baseline deltas.

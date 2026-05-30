@@ -131,6 +131,54 @@ def best_weight_sweep(measurement: dict[str, Any], group: str) -> dict[str, Any]
     return best or {}
 
 
+def weight_sweep_summary(
+    measurement: dict[str, Any],
+    group: str,
+    *,
+    direct_method: str,
+    pagerank_method: str,
+) -> list[dict[str, Any]]:
+    k = measurement.get("k", 5)
+    ap_metric = f"average_precision_at_{k}"
+    ndcg_metric = f"ndcg_at_{k}"
+    rows = []
+    for entry in measurement.get("hybrid_weight_sweep", []):
+        group_data = entry.get(group)
+        if not isinstance(group_data, dict):
+            continue
+        method = group_data.get("method")
+        aggregate = group_data.get("aggregate", {})
+        if not isinstance(method, str) or method not in aggregate:
+            continue
+        summary = aggregate[method]
+        if f"mean_{ap_metric}" not in summary:
+            continue
+        row: dict[str, Any] = {
+            "direct_weight": rounded(entry.get("hybrid_direct_weight")),
+            "method": method,
+            ap_metric: rounded(summary[f"mean_{ap_metric}"]),
+        }
+        if f"mean_{ndcg_metric}" in summary:
+            row[ndcg_metric] = rounded(summary[f"mean_{ndcg_metric}"])
+
+        deltas = group_data.get("paired_deltas", {})
+        for label, baseline in [
+            ("delta_vs_direct", direct_method),
+            ("delta_vs_pagerank", pagerank_method),
+        ]:
+            comparison = f"{method}_minus_{baseline}"
+            if isinstance(deltas, dict) and comparison in deltas:
+                delta = delta_metrics(
+                    {"k": k, "paired_deltas": deltas},
+                    comparison,
+                    metric=ap_metric,
+                )
+                if delta:
+                    row[label] = delta
+        rows.append(row)
+    return rows
+
+
 def headline_retrieval_summary(report: dict[str, Any]) -> dict[str, Any]:
     retrieval = measurement_by_name(report, "retrieval_suite")
     if not retrieval:
@@ -223,6 +271,12 @@ def headline_holdout_summary(holdout: dict[str, Any]) -> dict[str, Any]:
             ]
         },
         "best_weight_sweep": best_weight_sweep(holdout, "related"),
+        "weight_sweep": weight_sweep_summary(
+            holdout,
+            "related",
+            direct_method="workspace_related_direct",
+            pagerank_method="workspace_related_pagerank",
+        ),
     }
     predictable = holdout.get("predictable_only")
     if isinstance(predictable, dict):

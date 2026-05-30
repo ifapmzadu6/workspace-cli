@@ -125,7 +125,8 @@ selection when sweep weights are provided. Paper holdout threshold checks gate
 case-weighted and repo-macro effect sizes plus the corrected paired
 significance of the key deltas.
 The artifact runner also writes `result_summary.json`, a compact machine-readable
-summary of the headline metrics, weight sweep result, and leakage audit.
+summary of the headline metrics, full weight sweep, best weight result, and
+leakage audit.
 `run_manifest.json` records the exact commands and SHA-256 checksums for each
 generated artifact. `tools/verify_effect_artifacts.py` checks that the artifact
 directory has all required files, parseable JSON outputs, a passing threshold
