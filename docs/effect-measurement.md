@@ -98,7 +98,8 @@ For each scenario the script reports:
 - mean reciprocal rank
 - nDCG@5
 - deterministic bootstrap 95% confidence intervals for aggregate means
-- paired mean deltas with deterministic bootstrap 95% confidence intervals
+- paired mean deltas, win/tie/loss counts, and paired sign-flip randomization
+  p-values
 
 The suite compares `git diff --name-only`, direct co-change ranking,
 personalized PageRank over the saved co-change index, hybrid ranking that
@@ -176,7 +177,9 @@ transaction_audit_signal_recall: 1.000
 ```
 
 Representative paired deltas over the retrieval suite. Parentheses show
-deterministic bootstrap 95% confidence intervals for the mean paired delta:
+deterministic bootstrap 95% confidence intervals for the mean paired delta. The
+JSON output also includes win/tie/loss counts and one-sided/two-sided paired
+sign-flip p-values for each delta:
 
 ```text
 retrieval_suite related_hybrid - direct average_precision@5: +0.414 (0.000, 0.667)
@@ -200,25 +203,25 @@ python3 tools/measure_effect.py \
   --max-candidate-commits 20
 ```
 
-Representative aggregate over 9 held-out commits and 27 seed cases. Parentheses
+Representative aggregate over 9 held-out commits and 24 seed cases. Parentheses
 show deterministic bootstrap 95% confidence intervals for the mean:
 
 ```text
-cross_repo direct recall@5: 0.772 (0.648, 0.877)
-cross_repo direct average_precision@5: 0.663 (0.540, 0.786)
-cross_repo direct ndcg@5: 0.728 (0.612, 0.837)
-cross_repo pagerank recall@5: 0.827 (0.691, 0.938)
-cross_repo pagerank average_precision@5: 0.643 (0.513, 0.773)
-cross_repo pagerank ndcg@5: 0.714 (0.584, 0.833)
-cross_repo hybrid recall@5: 0.827 (0.704, 0.938)
-cross_repo hybrid average_precision@5: 0.776 (0.650, 0.895)
-cross_repo hybrid ndcg@5: 0.817 (0.693, 0.917)
-cross_repo hybrid - direct average_precision@5: +0.113 (0.059, 0.174)
-cross_repo hybrid - direct ndcg@5: +0.089 (0.047, 0.135)
-cross_repo hybrid - pagerank average_precision@5: +0.133 (0.047, 0.234)
-cross_repo hybrid - pagerank ndcg@5: +0.103 (0.031, 0.179)
-cross_repo pagerank - direct average_precision@5: -0.020 (-0.147, 0.099)
-cross_repo pagerank - direct ndcg@5: -0.014 (-0.112, 0.069)
+cross_repo direct recall@5: 0.806 (0.667, 0.931)
+cross_repo direct average_precision@5: 0.689 (0.547, 0.826)
+cross_repo direct ndcg@5: 0.741 (0.600, 0.864)
+cross_repo pagerank recall@5: 0.806 (0.667, 0.931)
+cross_repo pagerank average_precision@5: 0.613 (0.477, 0.739)
+cross_repo pagerank ndcg@5: 0.692 (0.555, 0.813)
+cross_repo hybrid recall@5: 0.806 (0.667, 0.931)
+cross_repo hybrid average_precision@5: 0.748 (0.620, 0.869)
+cross_repo hybrid ndcg@5: 0.794 (0.669, 0.909)
+cross_repo hybrid - direct average_precision@5: +0.059 (0.025, 0.097), wins/ties/losses 10/14/0, p_greater=0.0011
+cross_repo hybrid - direct ndcg@5: +0.053 (0.023, 0.082), wins/ties/losses 10/14/0, p_greater=0.0008
+cross_repo hybrid - pagerank average_precision@5: +0.135 (0.031, 0.250), wins/ties/losses 5/19/0, p_greater=0.0318
+cross_repo hybrid - pagerank ndcg@5: +0.102 (0.031, 0.181), wins/ties/losses 5/19/0, p_greater=0.0311
+cross_repo pagerank - direct average_precision@5: -0.076 (-0.205, 0.035), wins/ties/losses 10/9/5, p_greater=0.8742
+cross_repo pagerank - direct ndcg@5: -0.049 (-0.153, 0.039), wins/ties/losses 10/9/5, p_greater=0.8239
 ```
 
 Interpretation: the CLI is not just running; it measurably improves observation

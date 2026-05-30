@@ -22,6 +22,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_SAMPLES = 1000
+SIGN_FLIP_SAMPLES = 10000
 RELATED_COMPARISON_PAIRS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "workspace_related_pagerank"),
@@ -196,6 +197,22 @@ def paired_delta_metric_sets(
             low, high = bootstrap_mean_ci(values, comparison_name, metric_name)
             comparison[f"ci95_low_delta_{metric_name}"] = round(low, 3)
             comparison[f"ci95_high_delta_{metric_name}"] = round(high, 3)
+            wins = sum(1 for value in values if value > 0)
+            ties = sum(1 for value in values if value == 0)
+            losses = sum(1 for value in values if value < 0)
+            comparison[f"win_count_delta_{metric_name}"] = wins
+            comparison[f"tie_count_delta_{metric_name}"] = ties
+            comparison[f"loss_count_delta_{metric_name}"] = losses
+            comparison[f"win_rate_delta_{metric_name}"] = round(
+                wins / len(values), 3
+            )
+            p_greater, p_two_sided = paired_sign_flip_p_values(
+                values,
+                comparison_name,
+                metric_name,
+            )
+            comparison[f"p_greater_delta_{metric_name}"] = round(p_greater, 4)
+            comparison[f"p_two_sided_delta_{metric_name}"] = round(p_two_sided, 4)
         deltas[comparison_name] = comparison
     return deltas
 
@@ -228,6 +245,57 @@ def bootstrap_mean_ci(
         percentile_sorted(means, 0.025),
         percentile_sorted(means, 0.975),
     )
+
+
+def paired_sign_flip_p_values(
+    values: list[float],
+    comparison_name: str,
+    metric_name: str,
+    samples: int = SIGN_FLIP_SAMPLES,
+) -> tuple[float, float]:
+    if not values:
+        return (1.0, 1.0)
+
+    observed = mean(values)
+    observed_abs = abs(observed)
+    absolute_values = [abs(value) for value in values]
+    tolerance = 1e-12
+
+    if len(values) <= 16:
+        total = 1 << len(values)
+        greater_or_equal = 0
+        two_sided_or_equal = 0
+        for mask in range(total):
+            signed_sum = 0.0
+            for index, value in enumerate(absolute_values):
+                signed_sum += value if (mask >> index) & 1 else -value
+            signed_mean = signed_sum / len(values)
+            if signed_mean >= observed - tolerance:
+                greater_or_equal += 1
+            if abs(signed_mean) >= observed_abs - tolerance:
+                two_sided_or_equal += 1
+        return (greater_or_equal / total, two_sided_or_equal / total)
+
+    seed = int.from_bytes(
+        hashlib.sha256(
+            f"signflip:{comparison_name}:{metric_name}:{len(values)}".encode()
+        ).digest()[:8],
+        "big",
+    )
+    rng = random.Random(seed)
+    greater_or_equal = 1
+    two_sided_or_equal = 1
+    for _ in range(samples):
+        signed_sum = sum(
+            value if rng.randrange(2) else -value for value in absolute_values
+        )
+        signed_mean = signed_sum / len(values)
+        if signed_mean >= observed - tolerance:
+            greater_or_equal += 1
+        if abs(signed_mean) >= observed_abs - tolerance:
+            two_sided_or_equal += 1
+    denominator = samples + 1
+    return (greater_or_equal / denominator, two_sided_or_equal / denominator)
 
 
 def percentile_sorted(values: list[float], quantile: float) -> float:
