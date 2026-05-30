@@ -90,6 +90,7 @@ const IMPACT_HYBRID_PAGERANK_SCORE_WEIGHT: f64 = 0.95;
 const IMPACT_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.05;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
+const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
 const RELATIONSHIP_SOURCE_COCHANGE_INDEX: &str = "cochange-index";
 const RELATIONSHIP_SOURCE_GIT_LOG: &str = "git-log";
 const RELATIONSHIP_SOURCE_RELATED_CLI: &str = "related-cli";
@@ -4400,7 +4401,7 @@ fn rank_cochanges_pagerank_from_index(
 ) -> CochangeRanking {
     let target = normalize_repo_path(target);
     let seeds = BTreeSet::from([target.clone()]);
-    let hits = personalized_pagerank(index, &seeds, 40, 0.85);
+    let hits = personalized_pagerank(index, &seeds, pagerank_candidate_limit(max_results), 0.85);
     let edge_lookup = cochange_edge_lookup(index);
     let mut related = hits
         .into_iter()
@@ -4426,7 +4427,8 @@ fn rank_cochanges_hybrid_from_index(
 ) -> CochangeRanking {
     let target = normalize_repo_path(target);
     let seeds = BTreeSet::from([target.clone()]);
-    let mut hits = personalized_pagerank(index, &seeds, 40, 0.85);
+    let mut hits =
+        personalized_pagerank(index, &seeds, pagerank_candidate_limit(max_results), 0.85);
     let edge_lookup = cochange_edge_lookup(index);
     let max_direct_weight = max_related_direct_edge_weight(index, &target);
     for hit in &mut hits {
@@ -4591,7 +4593,12 @@ fn rank_cochange_impact_pagerank_from_index(
     max_results: usize,
 ) -> ImpactRanking {
     let seed_files = normalized_seed_file_set(seed_files);
-    let mut hits = personalized_pagerank(index, &seed_files, 40, 0.85);
+    let mut hits = personalized_pagerank(
+        index,
+        &seed_files,
+        pagerank_candidate_limit(max_results),
+        0.85,
+    );
     apply_impact_pagerank_path_prior(&mut hits);
     let edge_lookup = cochange_edge_lookup(index);
     let mut impacted = hits
@@ -4615,7 +4622,12 @@ fn rank_cochange_impact_hybrid_from_index(
     max_results: usize,
 ) -> ImpactRanking {
     let seed_files = normalized_seed_file_set(seed_files);
-    let mut hits = personalized_pagerank(index, &seed_files, 40, 0.85);
+    let mut hits = personalized_pagerank(
+        index,
+        &seed_files,
+        pagerank_candidate_limit(max_results),
+        0.85,
+    );
     let edge_lookup = cochange_edge_lookup(index);
     let max_direct_weight = max_impact_direct_edge_weight(index, &seed_files);
     for hit in &mut hits {
@@ -4677,6 +4689,10 @@ fn related_hybrid_rank_score(pagerank_score: f64, direct_score: f64) -> f64 {
 fn impact_hybrid_rank_score(pagerank_score: f64, direct_score: f64) -> f64 {
     (IMPACT_HYBRID_PAGERANK_SCORE_WEIGHT * pagerank_score)
         + (IMPACT_HYBRID_DIRECT_SCORE_WEIGHT * direct_score)
+}
+
+fn pagerank_candidate_limit(max_results: usize) -> usize {
+    max_results.max(PAGERANK_DEFAULT_CANDIDATE_LIMIT)
 }
 
 fn normalized_direct_score(weight: f64, max_weight: f64) -> f64 {
@@ -11179,6 +11195,22 @@ src/b.rs
             .unwrap();
         assert_eq!(indirect.cochanged_commits, 0);
         assert!(indirect.score > 0.0);
+    }
+
+    #[test]
+    fn pagerank_related_honors_requested_result_count_above_default_candidate_limit() {
+        let mut commits = Vec::new();
+        for index in 0..45 {
+            commits.push(GitCommitFiles {
+                hash: format!("{index:012}"),
+                files: vec!["src/a.rs".to_string(), format!("src/related_{index:02}.rs")],
+            });
+        }
+        let index = cochange_index_from_commits(&commits, 100, 10, None);
+
+        let ranking = rank_cochanges_pagerank_from_index(&index, "src/a.rs", 45);
+
+        assert_eq!(ranking.related.len(), 45);
     }
 
     #[test]
