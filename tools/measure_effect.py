@@ -23,6 +23,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_SAMPLES = 1000
 SIGN_FLIP_SAMPLES = 10000
+SIGN_FLIP_EXACT_SCALE = 1000
+SIGN_FLIP_EXACT_MAX_STATES = 200_001
 DEFAULT_CUTOFF_SWEEP = [1, 3, 5]
 RECENT_ACTIVITY_MAX_COMMITS = 500
 GLOBAL_PAGERANK_ITERATIONS = 50
@@ -390,8 +392,10 @@ def macro_paired_delta_metric_sets(
                 f"repo_macro:{comparison_name}",
                 metric_name,
             )
-            comparison[f"p_greater_delta_{metric_name}"] = round(p_greater, 4)
-            comparison[f"p_two_sided_delta_{metric_name}"] = round(p_two_sided, 4)
+            comparison[f"p_greater_delta_{metric_name}"] = bounded_p_value(p_greater)
+            comparison[f"p_two_sided_delta_{metric_name}"] = bounded_p_value(
+                p_two_sided
+            )
         deltas[comparison_name] = comparison
     apply_holm_adjusted_p_values(deltas, metric_names)
     return deltas
@@ -779,8 +783,10 @@ def paired_delta_metric_sets(
                 comparison_name,
                 metric_name,
             )
-            comparison[f"p_greater_delta_{metric_name}"] = round(p_greater, 4)
-            comparison[f"p_two_sided_delta_{metric_name}"] = round(p_two_sided, 4)
+            comparison[f"p_greater_delta_{metric_name}"] = bounded_p_value(p_greater)
+            comparison[f"p_two_sided_delta_{metric_name}"] = bounded_p_value(
+                p_two_sided
+            )
         deltas[comparison_name] = comparison
     apply_holm_adjusted_p_values(deltas, metric_names)
     return deltas
@@ -818,8 +824,12 @@ def holm_adjusted_p_values(values: list[float]) -> list[float]:
         adjusted_value = min(max(value, 0.0) * multiplier, 1.0)
         adjusted_value = max(previous, adjusted_value)
         previous = adjusted_value
-        adjusted[original_index] = round(adjusted_value, 4)
+        adjusted[original_index] = bounded_p_value(adjusted_value)
     return adjusted
+
+
+def bounded_p_value(value: float) -> float:
+    return min(max(value, 0.0), 1.0)
 
 
 def mean(values: list[float]) -> float:
@@ -861,6 +871,10 @@ def paired_sign_flip_p_values(
     if not values:
         return (1.0, 1.0)
 
+    exact = exact_grid_sign_flip_p_values(values)
+    if exact is not None:
+        return exact
+
     observed = mean(values)
     observed_abs = abs(observed)
     absolute_values = [abs(value) for value in values]
@@ -901,6 +915,44 @@ def paired_sign_flip_p_values(
             two_sided_or_equal += 1
     denominator = samples + 1
     return (greater_or_equal / denominator, two_sided_or_equal / denominator)
+
+
+def exact_grid_sign_flip_p_values(values: list[float]) -> tuple[float, float] | None:
+    signed_values = []
+    absolute_values = []
+    for value in values:
+        scaled_value = int(round(value * SIGN_FLIP_EXACT_SCALE))
+        if abs(value - (scaled_value / SIGN_FLIP_EXACT_SCALE)) > 1e-9:
+            return None
+        signed_values.append(scaled_value)
+        absolute_values.append(abs(scaled_value))
+
+    max_abs_sum = sum(absolute_values)
+    if (max_abs_sum * 2) + 1 > SIGN_FLIP_EXACT_MAX_STATES:
+        return None
+
+    counts = {0: 1}
+    for value in absolute_values:
+        next_counts: dict[int, int] = {}
+        for signed_sum, count in counts.items():
+            positive_sum = signed_sum + value
+            negative_sum = signed_sum - value
+            next_counts[positive_sum] = next_counts.get(positive_sum, 0) + count
+            next_counts[negative_sum] = next_counts.get(negative_sum, 0) + count
+        counts = next_counts
+
+    observed_sum = sum(signed_values)
+    observed_abs_sum = abs(observed_sum)
+    greater_or_equal = sum(
+        count for signed_sum, count in counts.items() if signed_sum >= observed_sum
+    )
+    two_sided_or_equal = sum(
+        count
+        for signed_sum, count in counts.items()
+        if abs(signed_sum) >= observed_abs_sum
+    )
+    total = 1 << len(values)
+    return (greater_or_equal / total, two_sided_or_equal / total)
 
 
 def percentile_sorted(values: list[float], quantile: float) -> float:
@@ -2317,6 +2369,9 @@ def measurement_metadata(
         "primary_k": args.k,
         "bootstrap_samples": BOOTSTRAP_SAMPLES,
         "sign_flip_samples": SIGN_FLIP_SAMPLES,
+        "sign_flip_method": "exact_grid_dp_with_sampled_fallback",
+        "sign_flip_exact_scale": SIGN_FLIP_EXACT_SCALE,
+        "sign_flip_exact_max_states": SIGN_FLIP_EXACT_MAX_STATES,
         "default_cutoff_sweep": DEFAULT_CUTOFF_SWEEP,
         "max_heldout_commits": args.max_heldout_commits,
         "max_candidate_commits": args.max_candidate_commits,

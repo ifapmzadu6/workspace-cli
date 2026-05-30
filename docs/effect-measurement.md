@@ -26,9 +26,9 @@ python3 tools/summarize_effect.py /tmp/workspace-effect.json
 ```
 
 The JSON report includes reproducibility metadata: the workspace commit, dirty
-state, primary cutoff, resampling counts, holdout manifest path/hash, and pinned
-holdout repositories. The Markdown summary renders the same metadata before the
-metric tables.
+state, primary cutoff, resampling counts, sign-flip p-value method, holdout
+manifest path/hash, and pinned holdout repositories. The Markdown summary
+renders the same metadata before the metric tables.
 
 To add an optional temporal holdout measurement on a real repository, pass a
 repository path:
@@ -140,8 +140,9 @@ cutoff, which defaults to 5:
 - mean reciprocal rank
 - nDCG@k
 - deterministic bootstrap 95% confidence intervals for aggregate means
-- paired mean deltas, win/tie/loss counts, and paired sign-flip randomization
-  p-values, including Holm-adjusted p-values within each comparison family
+- paired mean deltas, win/tie/loss counts, exact paired sign-flip p-values
+  when the metric grid is finite, and deterministic sampled fallback p-values,
+  including Holm-adjusted p-values within each comparison family
 - a default cutoff sweep at @1, @3, and @5
 - an optional hybrid direct-weight sweep for ablation
 - an optional leave-one-repo-out direct-weight selection check when multiple
@@ -252,7 +253,10 @@ transaction_audit_signal_recall: 1.000
 Representative paired deltas over the retrieval suite. Parentheses show
 deterministic bootstrap 95% confidence intervals for the mean paired delta. The
 JSON output also includes win/tie/loss counts, one-sided/two-sided paired
-sign-flip p-values, and Holm-adjusted p-values for each delta family:
+sign-flip p-values, and Holm-adjusted p-values for each delta family. The
+script uses exact dynamic-programming sign-flip counts for the rounded ranking
+metric grid and falls back to deterministic sampling only if the state space is
+too large:
 
 ```text
 retrieval_suite related_hybrid - direct average_precision@5: +0.414 (0.000, 0.667)
@@ -328,18 +332,18 @@ cross_repo pagerank ndcg@5: 0.692 (0.555, 0.813)
 cross_repo hybrid recall@5: 0.806 (0.667, 0.931)
 cross_repo hybrid average_precision@5: 0.748 (0.620, 0.869)
 cross_repo hybrid ndcg@5: 0.794 (0.669, 0.909)
-cross_repo hybrid - direct average_precision@5: +0.059 (0.025, 0.097), wins/ties/losses 10/14/0, p_greater=0.0011, holm_p_greater=0.0033
-cross_repo hybrid - direct ndcg@5: +0.053 (0.023, 0.082), wins/ties/losses 10/14/0, p_greater=0.0008, holm_p_greater=0.0024
-cross_repo hybrid - pagerank average_precision@5: +0.135 (0.031, 0.250), wins/ties/losses 5/19/0, p_greater=0.0318, holm_p_greater=0.0636
-cross_repo hybrid - pagerank ndcg@5: +0.102 (0.031, 0.181), wins/ties/losses 5/19/0, p_greater=0.0311, holm_p_greater=0.0622
-cross_repo hybrid - path_locality average_precision@5: +0.649 (0.490, 0.790), wins/ties/losses 21/2/1, p_greater=0.0001, holm_p_greater=0.0006
-cross_repo hybrid - path_locality ndcg@5: +0.623 (0.469, 0.767), wins/ties/losses 21/2/1, p_greater=0.0001, holm_p_greater=0.0006
-cross_repo hybrid - recent_activity average_precision@5: +0.293 (0.182, 0.395), wins/ties/losses 17/6/1, p_greater=0.0002, holm_p_greater=0.0010
-cross_repo hybrid - recent_activity ndcg@5: +0.252 (0.141, 0.358), wins/ties/losses 17/6/1, p_greater=0.0005, holm_p_greater=0.0020
+cross_repo hybrid - direct average_precision@5: +0.059 (0.025, 0.097), wins/ties/losses 10/14/0, p_greater=0.0010, holm_p_greater=0.0029
+cross_repo hybrid - direct ndcg@5: +0.053 (0.023, 0.082), wins/ties/losses 10/14/0, p_greater=0.0010, holm_p_greater=0.0029
+cross_repo hybrid - pagerank average_precision@5: +0.135 (0.031, 0.250), wins/ties/losses 5/19/0, p_greater=0.0312, holm_p_greater=0.0625
+cross_repo hybrid - pagerank ndcg@5: +0.102 (0.031, 0.181), wins/ties/losses 5/19/0, p_greater=0.0312, holm_p_greater=0.0625
+cross_repo hybrid - path_locality average_precision@5: +0.649 (0.490, 0.790), wins/ties/losses 21/2/1, p_greater=<0.0001, holm_p_greater=<0.0001
+cross_repo hybrid - path_locality ndcg@5: +0.623 (0.469, 0.767), wins/ties/losses 21/2/1, p_greater=<0.0001, holm_p_greater=<0.0001
+cross_repo hybrid - recent_activity average_precision@5: +0.293 (0.182, 0.395), wins/ties/losses 17/6/1, p_greater=<0.0001, holm_p_greater=0.0002
+cross_repo hybrid - recent_activity ndcg@5: +0.252 (0.141, 0.358), wins/ties/losses 17/6/1, p_greater=0.0002, holm_p_greater=0.0008
 cross_repo hybrid - global_pagerank average_precision@5: +0.275 (0.148, 0.401), wins/ties/losses 11/13/0, p_greater=0.0005, holm_p_greater=0.0020
-cross_repo hybrid - global_pagerank ndcg@5: +0.225 (0.129, 0.334), wins/ties/losses 11/13/0, p_greater=0.0003, holm_p_greater=0.0015
-cross_repo pagerank - direct average_precision@5: -0.076 (-0.205, 0.035), wins/ties/losses 10/9/5, p_greater=0.8742, holm_p_greater=0.8742
-cross_repo pagerank - direct ndcg@5: -0.049 (-0.153, 0.039), wins/ties/losses 10/9/5, p_greater=0.8239, holm_p_greater=0.8239
+cross_repo hybrid - global_pagerank ndcg@5: +0.225 (0.129, 0.334), wins/ties/losses 11/13/0, p_greater=0.0005, holm_p_greater=0.0020
+cross_repo pagerank - direct average_precision@5: -0.076 (-0.205, 0.035), wins/ties/losses 10/9/5, p_greater=0.8720, holm_p_greater=0.8720
+cross_repo pagerank - direct ndcg@5: -0.049 (-0.153, 0.039), wins/ties/losses 10/9/5, p_greater=0.8262, holm_p_greater=0.8262
 ```
 
 Per-repository means show where the aggregate gain comes from:
@@ -359,11 +363,11 @@ predictable cross_repo global_pagerank average_precision@5: 0.538 (0.398, 0.687)
 predictable cross_repo direct average_precision@5: 0.799 (0.697, 0.899)
 predictable cross_repo pagerank average_precision@5: 0.738 (0.595, 0.856)
 predictable cross_repo hybrid average_precision@5: 0.885 (0.781, 0.957)
-predictable cross_repo hybrid - direct average_precision@5: +0.086 (0.035, 0.142), wins/ties/losses 10/12/0, p_greater=0.0011, holm_p_greater=0.0033
-predictable cross_repo hybrid - pagerank average_precision@5: +0.148 (0.045, 0.273), wins/ties/losses 5/17/0, p_greater=0.0305, holm_p_greater=0.0610
-predictable cross_repo hybrid - path_locality average_precision@5: +0.753 (0.616, 0.876), wins/ties/losses 21/0/1, p_greater=0.0001, holm_p_greater=0.0006
-predictable cross_repo hybrid - recent_activity average_precision@5: +0.368 (0.214, 0.512), wins/ties/losses 17/4/1, p_greater=0.0001, holm_p_greater=0.0006
-predictable cross_repo hybrid - global_pagerank average_precision@5: +0.347 (0.196, 0.491), wins/ties/losses 11/11/0, p_greater=0.0006, holm_p_greater=0.0024
+predictable cross_repo hybrid - direct average_precision@5: +0.086 (0.035, 0.142), wins/ties/losses 10/12/0, p_greater=0.0010, holm_p_greater=0.0029
+predictable cross_repo hybrid - pagerank average_precision@5: +0.148 (0.045, 0.273), wins/ties/losses 5/17/0, p_greater=0.0312, holm_p_greater=0.0625
+predictable cross_repo hybrid - path_locality average_precision@5: +0.753 (0.616, 0.876), wins/ties/losses 21/0/1, p_greater=<0.0001, holm_p_greater=<0.0001
+predictable cross_repo hybrid - recent_activity average_precision@5: +0.368 (0.214, 0.512), wins/ties/losses 17/4/1, p_greater=<0.0001, holm_p_greater=0.0003
+predictable cross_repo hybrid - global_pagerank average_precision@5: +0.347 (0.196, 0.491), wins/ties/losses 11/11/0, p_greater=0.0005, holm_p_greater=0.0020
 ```
 
 Predictable-only per-repository means:
@@ -416,16 +420,16 @@ cross_repo recent_activity average_precision@1: 0.208
 cross_repo global_pagerank average_precision@1: 0.094
 cross_repo pagerank average_precision@1: 0.205
 cross_repo hybrid average_precision@1: 0.413
-cross_repo hybrid - direct average_precision@1: +0.073 (0.024, 0.122), wins/ties/losses 6/18/0, p_greater=0.0170, holm_p_greater=0.0510
-cross_repo hybrid - pagerank average_precision@1: +0.208 (0.042, 0.375), wins/ties/losses 5/19/0, p_greater=0.0314, holm_p_greater=0.0628
+cross_repo hybrid - direct average_precision@1: +0.073 (0.024, 0.122), wins/ties/losses 6/18/0, p_greater=0.0156, holm_p_greater=0.0469
+cross_repo hybrid - pagerank average_precision@1: +0.208 (0.042, 0.375), wins/ties/losses 5/19/0, p_greater=0.0312, holm_p_greater=0.0625
 cross_repo direct average_precision@3: 0.546
 cross_repo path_locality average_precision@3: 0.072
 cross_repo recent_activity average_precision@3: 0.335
 cross_repo global_pagerank average_precision@3: 0.252
 cross_repo pagerank average_precision@3: 0.442
 cross_repo hybrid average_precision@3: 0.608
-cross_repo hybrid - direct average_precision@3: +0.062 (0.024, 0.110), wins/ties/losses 8/16/0, p_greater=0.0027, holm_p_greater=0.0081
-cross_repo hybrid - pagerank average_precision@3: +0.167 (0.042, 0.312), wins/ties/losses 5/19/0, p_greater=0.0303, holm_p_greater=0.0606
+cross_repo hybrid - direct average_precision@3: +0.062 (0.024, 0.110), wins/ties/losses 8/16/0, p_greater=0.0039, holm_p_greater=0.0117
+cross_repo hybrid - pagerank average_precision@3: +0.167 (0.042, 0.312), wins/ties/losses 5/19/0, p_greater=0.0312, holm_p_greater=0.0625
 ```
 
 The rendered summary also reports case-level AP deltas for the largest wins and
@@ -449,7 +453,7 @@ cross_repo hybrid direct_weight=0.05 average_precision@5: 0.644
 cross_repo hybrid direct_weight=0.50 average_precision@5: 0.748
 cross_repo hybrid direct_weight=1.00 average_precision@5: 0.689
 cross_repo hybrid direct_weight=0.50 - direct average_precision@5: +0.059 (0.028, 0.093), p_greater=0.0010, holm_p_greater=0.0020
-cross_repo hybrid direct_weight=0.50 - pagerank average_precision@5: +0.135 (0.042, 0.240), p_greater=0.0335, holm_p_greater=0.0335
+cross_repo hybrid direct_weight=0.50 - pagerank average_precision@5: +0.135 (0.042, 0.240), p_greater=0.0312, holm_p_greater=0.0312
 ```
 
 To check whether the default hybrid direct weight is just overfit to the same
@@ -462,20 +466,20 @@ LORO all-target workspace-cli selected_weight=0.50, train AP@5: 0.664, test AP@5
 LORO all-target related-cli selected_weight=0.50, train AP@5: 0.876, test AP@5: 0.437
 LORO all-target llm-json-extract selected_weight=0.50, train AP@5: 0.697, test AP@5: 0.809
 LORO all-target aggregate AP@5: 0.748 (0.615, 0.864)
-LORO all-target hybrid - direct average_precision@5: +0.059 (0.029, 0.095), wins/ties/losses 10/14/0, p_greater=0.0016, holm_p_greater=0.0048
-LORO all-target hybrid - pagerank average_precision@5: +0.135 (0.042, 0.240), wins/ties/losses 5/19/0, p_greater=0.0339, holm_p_greater=0.0678
-LORO all-target hybrid - path_locality average_precision@5: +0.649 (0.485, 0.780), wins/ties/losses 21/2/1, p_greater=0.0001, holm_p_greater=0.0006
-LORO all-target hybrid - recent_activity average_precision@5: +0.293 (0.189, 0.392), wins/ties/losses 17/6/1, p_greater=0.0001, holm_p_greater=0.0006
-LORO all-target hybrid - global_pagerank average_precision@5: +0.275 (0.150, 0.407), wins/ties/losses 11/13/0, p_greater=0.0006, holm_p_greater=0.0024
+LORO all-target hybrid - direct average_precision@5: +0.059 (0.029, 0.095), wins/ties/losses 10/14/0, p_greater=0.0010, holm_p_greater=0.0029
+LORO all-target hybrid - pagerank average_precision@5: +0.135 (0.042, 0.240), wins/ties/losses 5/19/0, p_greater=0.0312, holm_p_greater=0.0625
+LORO all-target hybrid - path_locality average_precision@5: +0.649 (0.485, 0.780), wins/ties/losses 21/2/1, p_greater=<0.0001, holm_p_greater=<0.0001
+LORO all-target hybrid - recent_activity average_precision@5: +0.293 (0.189, 0.392), wins/ties/losses 17/6/1, p_greater=<0.0001, holm_p_greater=0.0002
+LORO all-target hybrid - global_pagerank average_precision@5: +0.275 (0.150, 0.407), wins/ties/losses 11/13/0, p_greater=0.0005, holm_p_greater=0.0020
 LORO predictable workspace-cli selected_weight=0.50, train AP@5: 0.842, test AP@5: 1.000
 LORO predictable related-cli selected_weight=0.50, train AP@5: 0.931, test AP@5: 0.764
 LORO predictable llm-json-extract selected_weight=0.50, train AP@5: 0.882, test AP@5: 0.889
 LORO predictable aggregate AP@5: 0.885 (0.779, 0.956)
-LORO predictable hybrid - direct average_precision@5: +0.086 (0.040, 0.143), wins/ties/losses 10/12/0, p_greater=0.0013, holm_p_greater=0.0039
-LORO predictable hybrid - pagerank average_precision@5: +0.148 (0.045, 0.273), wins/ties/losses 5/17/0, p_greater=0.0300, holm_p_greater=0.0600
-LORO predictable hybrid - path_locality average_precision@5: +0.753 (0.598, 0.876), wins/ties/losses 21/0/1, p_greater=0.0001, holm_p_greater=0.0006
-LORO predictable hybrid - recent_activity average_precision@5: +0.368 (0.218, 0.501), wins/ties/losses 17/4/1, p_greater=0.0001, holm_p_greater=0.0006
-LORO predictable hybrid - global_pagerank average_precision@5: +0.347 (0.211, 0.497), wins/ties/losses 11/11/0, p_greater=0.0009, holm_p_greater=0.0036
+LORO predictable hybrid - direct average_precision@5: +0.086 (0.040, 0.143), wins/ties/losses 10/12/0, p_greater=0.0010, holm_p_greater=0.0029
+LORO predictable hybrid - pagerank average_precision@5: +0.148 (0.045, 0.273), wins/ties/losses 5/17/0, p_greater=0.0312, holm_p_greater=0.0625
+LORO predictable hybrid - path_locality average_precision@5: +0.753 (0.598, 0.876), wins/ties/losses 21/0/1, p_greater=<0.0001, holm_p_greater=<0.0001
+LORO predictable hybrid - recent_activity average_precision@5: +0.368 (0.218, 0.501), wins/ties/losses 17/4/1, p_greater=<0.0001, holm_p_greater=0.0003
+LORO predictable hybrid - global_pagerank average_precision@5: +0.347 (0.211, 0.497), wins/ties/losses 11/11/0, p_greater=0.0005, holm_p_greater=0.0020
 ```
 
 A larger fixed-ref stress run increases the temporal holdout window to 50
@@ -496,13 +500,13 @@ expanded cross_repo pagerank average_precision@5: 0.536 (0.443, 0.626)
 expanded cross_repo recent_activity average_precision@5: 0.450 (0.357, 0.543)
 expanded cross_repo global_pagerank average_precision@5: 0.471 (0.385, 0.562)
 expanded cross_repo path_locality average_precision@5: 0.100 (0.069, 0.135)
-expanded cross_repo hybrid - direct average_precision@5: +0.076 (0.028, 0.127), wins/ties/losses 23/19/8, p_greater=0.0019, holm_p_greater=0.0038
-expanded cross_repo hybrid - pagerank average_precision@5: +0.104 (0.046, 0.169), wins/ties/losses 12/38/0, p_greater=0.0006, holm_p_greater=0.0018
-expanded cross_repo hybrid - recent_activity average_precision@5: +0.190 (0.125, 0.263), wins/ties/losses 36/11/3, p_greater=0.0001, holm_p_greater=0.0006
-expanded cross_repo hybrid - global_pagerank average_precision@5: +0.169 (0.092, 0.250), wins/ties/losses 19/28/3, p_greater=0.0001, holm_p_greater=0.0006
+expanded cross_repo hybrid - direct average_precision@5: +0.076 (0.028, 0.127), wins/ties/losses 23/19/8, p_greater=0.0019, holm_p_greater=0.0039
+expanded cross_repo hybrid - pagerank average_precision@5: +0.104 (0.046, 0.169), wins/ties/losses 12/38/0, p_greater=0.0002, holm_p_greater=0.0007
+expanded cross_repo hybrid - recent_activity average_precision@5: +0.190 (0.125, 0.263), wins/ties/losses 36/11/3, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - global_pagerank average_precision@5: +0.169 (0.092, 0.250), wins/ties/losses 19/28/3, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded predictable cross_repo hybrid average_precision@5: 0.719 (0.626, 0.818)
-expanded predictable cross_repo hybrid - direct average_precision@5: +0.094 (0.039, 0.151), wins/ties/losses 23/17/8, p_greater=0.0006, holm_p_greater=0.0015
-expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.117 (0.057, 0.183), wins/ties/losses 12/36/0, p_greater=0.0005, holm_p_greater=0.0015
+expanded predictable cross_repo hybrid - direct average_precision@5: +0.094 (0.039, 0.151), wins/ties/losses 23/17/8, p_greater=0.0008, holm_p_greater=0.0016
+expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.117 (0.057, 0.183), wins/ties/losses 12/36/0, p_greater=0.0002, holm_p_greater=0.0007
 ```
 
 Interpretation: the CLI is not just running; it measurably improves observation

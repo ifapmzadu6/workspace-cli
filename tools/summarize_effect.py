@@ -149,7 +149,10 @@ def fmt_wtl(summary: dict[str, Any], metric: str) -> str:
 def fmt_p_value(summary: dict[str, Any], key: str) -> str:
     if key not in summary:
         return ""
-    return fmt_number(summary[key], 4)
+    value = float(summary[key])
+    if 0.0 < value < 0.0001:
+        return "<0.0001"
+    return fmt_number(value, 4)
 
 
 def fmt_distribution(summary: dict[str, Any]) -> str:
@@ -262,6 +265,8 @@ def render_metadata_table(report: dict[str, Any]) -> str:
         ["sign-flip samples", str(metadata.get("sign_flip_samples", ""))],
         ["repo holdouts", holdout_text or "none"],
     ]
+    if metadata.get("sign_flip_method"):
+        rows.insert(-1, ["sign-flip method", str(metadata["sign_flip_method"])])
     if metadata.get("repo_holdout_manifest"):
         rows.append(["holdout manifest", str(metadata["repo_holdout_manifest"])])
     if metadata.get("repo_holdout_manifest_sha256"):
