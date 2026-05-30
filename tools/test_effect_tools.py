@@ -880,6 +880,22 @@ class EffectArtifactRunnerTests(unittest.TestCase):
                 run_manifest["result_summary"],
                 str(plan["result_summary_path"]),
             )
+            self.assertEqual(
+                run_manifest["sha256"]["json"],
+                run_effect_artifacts.file_sha256(plan["json_path"]),
+            )
+            self.assertEqual(
+                run_manifest["sha256"]["markdown"],
+                run_effect_artifacts.file_sha256(plan["markdown_path"]),
+            )
+            self.assertEqual(
+                run_manifest["sha256"]["result_summary"],
+                run_effect_artifacts.file_sha256(plan["result_summary_path"]),
+            )
+            self.assertEqual(
+                run_manifest["sha256"]["thresholds"],
+                run_effect_artifacts.file_sha256(plan["threshold_path"]),
+            )
             self.assertFalse(run_manifest["require_holdout_thresholds"])
 
 

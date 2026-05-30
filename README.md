@@ -125,6 +125,8 @@ case-weighted and repo-macro effect sizes plus the corrected paired
 significance of the key deltas.
 The artifact runner also writes `result_summary.json`, a compact machine-readable
 summary of the headline metrics, weight sweep result, and leakage audit.
+`run_manifest.json` records the exact commands and SHA-256 checksums for each
+generated artifact.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`.

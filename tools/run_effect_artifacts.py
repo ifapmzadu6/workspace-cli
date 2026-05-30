@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -104,6 +105,23 @@ def run_stdout_to_file(
         )
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as input_file:
+        for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def artifact_checksums(plan: dict[str, Any]) -> dict[str, str]:
+    return {
+        "json": file_sha256(plan["json_path"]),
+        "markdown": file_sha256(plan["markdown_path"]),
+        "result_summary": file_sha256(plan["result_summary_path"]),
+        "thresholds": file_sha256(plan["threshold_path"]),
+    }
+
+
 def write_run_manifest(plan: dict[str, Any]) -> None:
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -117,6 +135,7 @@ def write_run_manifest(plan: dict[str, Any]) -> None:
             repo_relative(plan["manifest"]) if plan["manifest"] is not None else None
         ),
         "require_holdout_thresholds": plan["require_holdout_thresholds"],
+        "sha256": artifact_checksums(plan),
         "commands": {
             "measure": plan["measurement_command"],
             "check_thresholds": plan["threshold_command"],
