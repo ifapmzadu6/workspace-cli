@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""Generate effect measurement artifacts in one reproducible directory."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, TextIO
+
+
+ROOT = Path(__file__).resolve().parent.parent
+TOOLS_DIR = ROOT / "tools"
+DEFAULT_OUTPUT_DIR = ROOT / "target" / "effect-artifacts"
+DEFAULT_PAPER_MANIFEST = TOOLS_DIR / "effect_paper_holdouts.json"
+
+
+Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def repo_relative(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def resolve_user_path(path: Path) -> Path:
+    if path.is_absolute():
+        return path
+    return (Path.cwd() / path).resolve()
+
+
+def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
+    output_dir = resolve_user_path(output_dir)
+    manifest = resolve_user_path(manifest) if manifest is not None else None
+    json_path = output_dir / "effect.json"
+    markdown_path = output_dir / "effect.md"
+    threshold_path = output_dir / "thresholds.txt"
+    run_manifest_path = output_dir / "run_manifest.json"
+
+    measurement_command = [
+        sys.executable,
+        str(TOOLS_DIR / "measure_effect.py"),
+    ]
+    if manifest is not None:
+        measurement_command.extend(["--repo-holdout-manifest", str(manifest)])
+
+    threshold_command = [
+        sys.executable,
+        str(TOOLS_DIR / "check_effect_thresholds.py"),
+    ]
+    if manifest is not None:
+        threshold_command.append("--require-holdout")
+    threshold_command.append(str(json_path))
+
+    summary_command = [
+        sys.executable,
+        str(TOOLS_DIR / "summarize_effect.py"),
+        str(json_path),
+    ]
+
+    return {
+        "output_dir": output_dir,
+        "json_path": json_path,
+        "markdown_path": markdown_path,
+        "threshold_path": threshold_path,
+        "run_manifest_path": run_manifest_path,
+        "measurement_command": measurement_command,
+        "threshold_command": threshold_command,
+        "summary_command": summary_command,
+        "manifest": manifest,
+        "require_holdout_thresholds": manifest is not None,
+    }
+
+
+def run_stdout_to_file(
+    command: list[str],
+    path: Path,
+    *,
+    runner: Runner,
+    merge_stderr: bool = False,
+) -> None:
+    with path.open("w", encoding="utf-8") as output:
+        stderr: int | TextIO | None = subprocess.STDOUT if merge_stderr else None
+        runner(
+            command,
+            cwd=ROOT,
+            check=True,
+            stdout=output,
+            stderr=stderr,
+            text=True,
+        )
+
+
+def write_run_manifest(plan: dict[str, Any]) -> None:
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "workspace_repo": str(ROOT),
+        "output_dir": str(plan["output_dir"]),
+        "json": repo_relative(plan["json_path"]),
+        "markdown": repo_relative(plan["markdown_path"]),
+        "thresholds": repo_relative(plan["threshold_path"]),
+        "paper_manifest": (
+            repo_relative(plan["manifest"]) if plan["manifest"] is not None else None
+        ),
+        "require_holdout_thresholds": plan["require_holdout_thresholds"],
+        "commands": {
+            "measure": plan["measurement_command"],
+            "check_thresholds": plan["threshold_command"],
+            "summarize": plan["summary_command"],
+        },
+    }
+    plan["run_manifest_path"].write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def run_plan(
+    plan: dict[str, Any],
+    *,
+    runner: Runner = subprocess.run,
+) -> None:
+    plan["output_dir"].mkdir(parents=True, exist_ok=True)
+    run_stdout_to_file(plan["measurement_command"], plan["json_path"], runner=runner)
+    run_stdout_to_file(
+        plan["threshold_command"],
+        plan["threshold_path"],
+        runner=runner,
+        merge_stderr=True,
+    )
+    run_stdout_to_file(plan["summary_command"], plan["markdown_path"], runner=runner)
+    write_run_manifest(plan)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--paper",
+        action="store_true",
+        help="use tools/effect_paper_holdouts.json and require holdout thresholds",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="holdout manifest to pass to tools/measure_effect.py",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help="directory for effect.json, effect.md, thresholds.txt, and run_manifest.json",
+    )
+    args = parser.parse_args(argv)
+    if args.paper and args.manifest is not None:
+        parser.error("--paper cannot be combined with --manifest")
+    if args.paper:
+        args.manifest = DEFAULT_PAPER_MANIFEST
+    return args
+
+
+def main() -> None:
+    args = parse_args()
+    plan = build_plan(args.output_dir, args.manifest)
+    run_plan(plan)
+    print(f"wrote effect artifacts to {plan['output_dir']}")
+
+
+if __name__ == "__main__":
+    main()

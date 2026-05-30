@@ -92,6 +92,12 @@ on pushes to `main` and pull requests. The threshold check consumes the JSON
 report from `tools/measure_effect.py` and fails if the fixture effect drops
 below the expected floor. For paper-style temporal holdout reports, add
 `--require-holdout` to also enforce the dense cross-repo holdout thresholds.
+`tools/run_effect_artifacts.py --paper` runs measurement, threshold checking,
+and Markdown rendering into one reproducible artifact directory:
+
+```sh
+python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
+```
 
 In addition to unit tests, the repository has integration tests that run the
 real `workspace` binary inside temporary workspaces. The tests cover

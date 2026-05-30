@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import importlib.util
 import itertools
+import json
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,6 +27,7 @@ def load_tool(name: str):
 measure_effect = load_tool("measure_effect")
 summarize_effect = load_tool("summarize_effect")
 check_effect_thresholds = load_tool("check_effect_thresholds")
+run_effect_artifacts = load_tool("run_effect_artifacts")
 
 
 class ExactSignFlipTests(unittest.TestCase):
@@ -344,6 +348,57 @@ class EffectThresholdTests(unittest.TestCase):
             ),
             failures,
         )
+
+
+class EffectArtifactRunnerTests(unittest.TestCase):
+    def test_paper_plan_uses_manifest_and_requires_holdout_thresholds(self) -> None:
+        plan = run_effect_artifacts.build_plan(
+            Path("target/test-effect-artifacts"),
+            run_effect_artifacts.DEFAULT_PAPER_MANIFEST,
+        )
+        self.assertIn("--repo-holdout-manifest", plan["measurement_command"])
+        self.assertIn("--require-holdout", plan["threshold_command"])
+        self.assertEqual(plan["json_path"].name, "effect.json")
+        self.assertEqual(plan["markdown_path"].name, "effect.md")
+        self.assertEqual(plan["threshold_path"].name, "thresholds.txt")
+
+    def test_fixture_plan_keeps_holdout_thresholds_optional(self) -> None:
+        plan = run_effect_artifacts.build_plan(
+            Path("target/test-effect-artifacts"),
+            None,
+        )
+        self.assertNotIn("--repo-holdout-manifest", plan["measurement_command"])
+        self.assertNotIn("--require-holdout", plan["threshold_command"])
+
+    def test_artifact_runner_writes_all_outputs_and_run_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            plan = run_effect_artifacts.build_plan(output_dir, None)
+            calls = []
+
+            def fake_runner(command, **kwargs):
+                calls.append(command)
+                stdout = kwargs.get("stdout")
+                if stdout is not None:
+                    stdout.write("{}\n")
+                return subprocess.CompletedProcess(command, 0)
+
+            run_effect_artifacts.run_plan(plan, runner=fake_runner)
+
+            self.assertEqual(calls, [
+                plan["measurement_command"],
+                plan["threshold_command"],
+                plan["summary_command"],
+            ])
+            self.assertTrue(plan["json_path"].exists())
+            self.assertTrue(plan["markdown_path"].exists())
+            self.assertTrue(plan["threshold_path"].exists())
+            run_manifest = json.loads(plan["run_manifest_path"].read_text())
+            self.assertEqual(
+                run_manifest["commands"]["measure"],
+                plan["measurement_command"],
+            )
+            self.assertFalse(run_manifest["require_holdout_thresholds"])
 
 
 if __name__ == "__main__":

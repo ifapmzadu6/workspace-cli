@@ -25,6 +25,13 @@ python3 tools/measure_effect.py > /tmp/workspace-effect.json
 python3 tools/summarize_effect.py /tmp/workspace-effect.json
 ```
 
+To generate the JSON report, threshold log, Markdown summary, and run manifest
+in one artifact directory:
+
+```sh
+python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
+```
+
 The JSON report includes reproducibility metadata: the workspace commit, dirty
 state, primary cutoff, resampling counts, sign-flip p-value method, holdout
 manifest path/hash, and pinned holdout repositories. The Markdown summary
