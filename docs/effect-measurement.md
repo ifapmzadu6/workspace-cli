@@ -75,7 +75,7 @@ Use `--hybrid-direct-weight-sweep` to evaluate additional hybrid direct weights
 without changing the CLI defaults:
 
 ```sh
-python3 tools/measure_effect.py --hybrid-direct-weight-sweep 0,0.05,0.1,0.25,0.5,0.6,0.75,0.8,0.9,1
+python3 tools/measure_effect.py --hybrid-direct-weight-sweep 0,0.05,0.1,0.25,0.5,0.6,0.7,0.75,0.8,0.82,0.85,0.88,0.9,0.92,0.95,1
 ```
 
 The fixed-ref cross-repository setup used for the paper-style results is stored
@@ -584,9 +584,15 @@ expanded cross_repo hybrid direct_weight=0.10 average_precision@5: 0.570
 expanded cross_repo hybrid direct_weight=0.25 average_precision@5: 0.613
 expanded cross_repo hybrid direct_weight=0.50 average_precision@5: 0.640
 expanded cross_repo hybrid direct_weight=0.60 average_precision@5: 0.645
+expanded cross_repo hybrid direct_weight=0.70 average_precision@5: 0.641
 expanded cross_repo hybrid direct_weight=0.75 average_precision@5: 0.641
 expanded cross_repo hybrid direct_weight=0.80 average_precision@5: 0.651
+expanded cross_repo hybrid direct_weight=0.82 average_precision@5: 0.651
+expanded cross_repo hybrid direct_weight=0.85 average_precision@5: 0.651
+expanded cross_repo hybrid direct_weight=0.88 average_precision@5: 0.651
 expanded cross_repo hybrid direct_weight=0.90 average_precision@5: 0.651
+expanded cross_repo hybrid direct_weight=0.92 average_precision@5: 0.650
+expanded cross_repo hybrid direct_weight=0.95 average_precision@5: 0.648
 expanded cross_repo hybrid direct_weight=1.00 average_precision@5: 0.564
 expanded cross_repo hybrid direct_weight=0.80 - direct average_precision@5: +0.087 (0.048, 0.130), p_greater=<0.0001, holm_p_greater=<0.0001
 expanded cross_repo hybrid direct_weight=0.80 - pagerank average_precision@5: +0.115 (0.054, 0.179), p_greater=0.0003, holm_p_greater=0.0003
@@ -594,14 +600,16 @@ expanded predictable cross_repo hybrid direct_weight=0.50 average_precision@5: 0
 expanded predictable cross_repo hybrid direct_weight=0.80 average_precision@5: 0.731
 ```
 
+The fine sweep shows a flat AP@5 plateau from 0.80 through 0.90, with 0.92 and
+0.95 starting to decline and 1.00 reducing to the direct-only result.
 Leave-one-repo-out selection over that dense grid chooses 0.60 for
 `workspace-cli` and 0.80 for the other two repositories. Its aggregate AP@5 is
 0.644 versus 0.651 for the fixed 0.80 default, still above the former 0.50
 default's 0.640. On the predictable-only slice it selects 0.80 for
 `related-cli` and `llm-json-extract`, and its aggregate AP@5 is 0.724 versus
-0.731 for the fixed 0.80 default. Because 0.80 improves all-target and
-predictable AP while preserving the fixture retrieval result, the CLI related
-hybrid default is 0.80.
+0.731 for the fixed 0.80 default. Because 0.80 is the first point on the best
+all-target and predictable plateau while preserving the fixture retrieval
+result, the CLI related hybrid default is 0.80.
 
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and

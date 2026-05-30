@@ -18,9 +18,15 @@ EXPECTED_HYBRID_WEIGHT_SWEEP = [
     0.25,
     0.5,
     0.6,
+    0.7,
     0.75,
     0.8,
+    0.82,
+    0.85,
+    0.88,
     0.9,
+    0.92,
+    0.95,
     1.0,
 ]
 FLOAT_TOLERANCE = 1e-12
