@@ -34,6 +34,20 @@ IMPACT_COMPARISON_PAIRS = [
     ("workspace_impact_hybrid", "workspace_impact_pagerank"),
     ("workspace_impact_pagerank", "workspace_impact_direct"),
 ]
+RETRIEVAL_BASE_METHODS = [
+    "baseline_git_diff_only",
+    "workspace_related_direct",
+    "workspace_related_pagerank",
+    "workspace_related_hybrid",
+    "workspace_impact_direct",
+    "workspace_impact_pagerank",
+    "workspace_impact_hybrid",
+]
+REPO_HOLDOUT_BASE_METHODS = [
+    "workspace_related_direct",
+    "workspace_related_pagerank",
+    "workspace_related_hybrid",
+]
 
 
 def run(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -56,6 +70,14 @@ def workspace_bin() -> Path:
 def workspace_json(bin_path: Path, cwd: Path, *args: str) -> dict[str, Any]:
     result = run([str(bin_path), *args], cwd)
     return json.loads(result.stdout)
+
+
+def cli_weight(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def hybrid_weight_method(prefix: str, weight: float) -> str:
+    return f"{prefix}_w_{cli_weight(weight).replace('.', '_')}"
 
 
 def write(path: Path, content: str) -> None:
@@ -202,6 +224,77 @@ def cutoff_sweep_metric_sets(
                 else {},
             }
         )
+    return sweep
+
+
+def selected_metric_scenarios(
+    scenarios: list[dict[str, Any]],
+    methods: list[str],
+) -> list[dict[str, Any]]:
+    selected = []
+    for scenario in scenarios:
+        scenario_methods = {
+            method: scenario["methods"][method]
+            for method in methods
+            if method in scenario["methods"]
+        }
+        if scenario_methods:
+            selected_scenario = {"methods": scenario_methods}
+            if "expected" in scenario:
+                selected_scenario["expected"] = scenario["expected"]
+            selected.append(selected_scenario)
+    return selected
+
+
+def hybrid_weight_sweep_metric_sets(
+    scenarios: list[dict[str, Any]],
+    k: int,
+    weights: list[float],
+) -> list[dict[str, Any]]:
+    sweep = []
+    for weight in weights:
+        related_method = hybrid_weight_method("workspace_related_hybrid", weight)
+        impact_method = hybrid_weight_method("workspace_impact_hybrid", weight)
+        related_methods = [
+            related_method,
+            "workspace_related_direct",
+            "workspace_related_pagerank",
+        ]
+        impact_methods = [
+            impact_method,
+            "workspace_impact_direct",
+            "workspace_impact_pagerank",
+        ]
+        related_scenarios = selected_metric_scenarios(scenarios, related_methods)
+        impact_scenarios = selected_metric_scenarios(scenarios, impact_methods)
+        entry: dict[str, Any] = {"hybrid_direct_weight": weight}
+        if related_scenarios:
+            entry["related"] = {
+                "method": related_method,
+                "aggregate": aggregate_metric_sets(related_scenarios, k),
+                "paired_deltas": paired_delta_metric_sets(
+                    related_scenarios,
+                    k,
+                    [
+                        (related_method, "workspace_related_direct"),
+                        (related_method, "workspace_related_pagerank"),
+                    ],
+                ),
+            }
+        if impact_scenarios:
+            entry["impact"] = {
+                "method": impact_method,
+                "aggregate": aggregate_metric_sets(impact_scenarios, k),
+                "paired_deltas": paired_delta_metric_sets(
+                    impact_scenarios,
+                    k,
+                    [
+                        (impact_method, "workspace_impact_direct"),
+                        (impact_method, "workspace_impact_pagerank"),
+                    ],
+                ),
+            }
+        sweep.append(entry)
     return sweep
 
 
@@ -633,7 +726,9 @@ def evaluate_related_case(
     expected: set[str],
     max_files_per_commit: int = 40,
     k: int = 5,
+    hybrid_weights: list[float] | None = None,
 ) -> dict[str, Any]:
+    hybrid_weights = hybrid_weights or []
     index = workspace_json(
         bin_path,
         root,
@@ -675,6 +770,22 @@ def evaluate_related_case(
         "hybrid",
         "--json",
     )
+    weighted_related = {
+        hybrid_weight_method("workspace_related_hybrid", weight): workspace_json(
+            bin_path,
+            root,
+            "related",
+            target,
+            "--by",
+            "cochange",
+            "--rank",
+            "hybrid",
+            "--hybrid-direct-weight",
+            cli_weight(weight),
+            "--json",
+        )
+        for weight in hybrid_weights
+    }
 
     append(root / target, "local evaluation change\n")
     direct_impact = workspace_json(
@@ -709,7 +820,56 @@ def evaluate_related_case(
         "hybrid",
         "--json",
     )
+    weighted_impact = {
+        hybrid_weight_method("workspace_impact_hybrid", weight): workspace_json(
+            bin_path,
+            root,
+            "impact",
+            "--diff",
+            "--by",
+            "cochange",
+            "--rank",
+            "hybrid",
+            "--hybrid-direct-weight",
+            cli_weight(weight),
+            "--json",
+        )
+        for weight in hybrid_weights
+    }
     git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
+    methods = {
+        "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
+        "workspace_related_direct": ranking_metrics(
+            paths(direct, "data", "related"), expected, k
+        ),
+        "workspace_related_pagerank": ranking_metrics(
+            paths(pagerank, "data", "related"), expected, k
+        ),
+        "workspace_related_hybrid": ranking_metrics(
+            paths(hybrid, "data", "related"), expected, k
+        ),
+        "workspace_impact_direct": ranking_metrics(
+            paths(direct_impact, "data", "impacted"), expected, k
+        ),
+        "workspace_impact_pagerank": ranking_metrics(
+            paths(impact, "data", "impacted"), expected, k
+        ),
+        "workspace_impact_hybrid": ranking_metrics(
+            paths(hybrid_impact, "data", "impacted"), expected, k
+        ),
+    }
+    methods.update(
+        {
+            method: ranking_metrics(paths(result, "data", "related"), expected, k)
+            for method, result in weighted_related.items()
+        }
+    )
+    methods.update(
+        {
+            method: ranking_metrics(paths(result, "data", "impacted"), expected, k)
+            for method, result in weighted_impact.items()
+        }
+    )
 
     return {
         "name": name,
@@ -721,27 +881,7 @@ def evaluate_related_case(
             "ignored_large_commits": index["data"]["ignored_large_commits"],
             "edge_count": index["data"]["edge_count"],
         },
-        "methods": {
-            "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
-            "workspace_related_direct": ranking_metrics(
-                paths(direct, "data", "related"), expected, k
-            ),
-            "workspace_related_pagerank": ranking_metrics(
-                paths(pagerank, "data", "related"), expected, k
-            ),
-            "workspace_related_hybrid": ranking_metrics(
-                paths(hybrid, "data", "related"), expected, k
-            ),
-            "workspace_impact_direct": ranking_metrics(
-                paths(direct_impact, "data", "impacted"), expected, k
-            ),
-            "workspace_impact_pagerank": ranking_metrics(
-                paths(impact, "data", "impacted"), expected, k
-            ),
-            "workspace_impact_hybrid": ranking_metrics(
-                paths(hybrid_impact, "data", "impacted"), expected, k
-            ),
-        },
+        "methods": methods,
     }
 
 
@@ -754,7 +894,9 @@ def evaluate_impact_case(
     expected: set[str],
     max_files_per_commit: int = 40,
     k: int = 5,
+    hybrid_weights: list[float] | None = None,
 ) -> dict[str, Any]:
+    hybrid_weights = hybrid_weights or []
     index = workspace_json(
         bin_path,
         root,
@@ -799,7 +941,41 @@ def evaluate_impact_case(
         "hybrid",
         "--json",
     )
+    weighted_impact = {
+        hybrid_weight_method("workspace_impact_hybrid", weight): workspace_json(
+            bin_path,
+            root,
+            "impact",
+            "--diff",
+            "--by",
+            "cochange",
+            "--rank",
+            "hybrid",
+            "--hybrid-direct-weight",
+            cli_weight(weight),
+            "--json",
+        )
+        for weight in hybrid_weights
+    }
     git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
+    methods = {
+        "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
+        "workspace_impact_direct": ranking_metrics(
+            paths(direct, "data", "impacted"), expected, k
+        ),
+        "workspace_impact_pagerank": ranking_metrics(
+            paths(pagerank, "data", "impacted"), expected, k
+        ),
+        "workspace_impact_hybrid": ranking_metrics(
+            paths(hybrid, "data", "impacted"), expected, k
+        ),
+    }
+    methods.update(
+        {
+            method: ranking_metrics(paths(result, "data", "impacted"), expected, k)
+            for method, result in weighted_impact.items()
+        }
+    )
 
     return {
         "name": name,
@@ -811,22 +987,15 @@ def evaluate_impact_case(
             "ignored_large_commits": index["data"]["ignored_large_commits"],
             "edge_count": index["data"]["edge_count"],
         },
-        "methods": {
-            "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
-            "workspace_impact_direct": ranking_metrics(
-                paths(direct, "data", "impacted"), expected, k
-            ),
-            "workspace_impact_pagerank": ranking_metrics(
-                paths(pagerank, "data", "impacted"), expected, k
-            ),
-            "workspace_impact_hybrid": ranking_metrics(
-                paths(hybrid, "data", "impacted"), expected, k
-            ),
-        },
+        "methods": methods,
     }
 
 
-def measure_retrieval_suite(bin_path: Path, k: int) -> dict[str, Any]:
+def measure_retrieval_suite(
+    bin_path: Path,
+    k: int,
+    hybrid_weights: list[float],
+) -> dict[str, Any]:
     scenarios: list[dict[str, Any]] = []
     pairs = RELATED_COMPARISON_PAIRS + IMPACT_COMPARISON_PAIRS
 
@@ -839,6 +1008,7 @@ def measure_retrieval_suite(bin_path: Path, k: int) -> dict[str, Any]:
                 target="src/auth.rs",
                 expected={"src/session.rs", "src/cookie.rs", "tests/cookie_test.rs"},
                 k=k,
+                hybrid_weights=hybrid_weights,
             )
         )
 
@@ -852,6 +1022,7 @@ def measure_retrieval_suite(bin_path: Path, k: int) -> dict[str, Any]:
                 expected={"tests/core_test.rs"},
                 max_files_per_commit=8,
                 k=k,
+                hybrid_weights=hybrid_weights,
             )
         )
 
@@ -864,6 +1035,7 @@ def measure_retrieval_suite(bin_path: Path, k: int) -> dict[str, Any]:
                 seed_files=["src/api.rs", "src/worker.rs"],
                 expected={"src/shared.rs", "tests/shared_test.rs"},
                 k=k,
+                hybrid_weights=hybrid_weights,
             )
         )
 
@@ -876,22 +1048,29 @@ def measure_retrieval_suite(bin_path: Path, k: int) -> dict[str, Any]:
                 target="src/core.rs",
                 expected={"src/adapter.rs", "tests/adapter_test.rs"},
                 k=k,
+                hybrid_weights=hybrid_weights,
             )
         )
 
+    base_scenarios = selected_metric_scenarios(scenarios, RETRIEVAL_BASE_METHODS)
     return {
         "metric": "retrieval_suite",
         "k": k,
         "scenario_count": len(scenarios),
         "scenarios": scenarios,
-        "aggregate": aggregate_metric_sets(scenarios, k),
+        "aggregate": aggregate_metric_sets(base_scenarios, k),
         "cutoff_sweep": cutoff_sweep_metric_sets(
-            scenarios,
+            base_scenarios,
             default_cutoffs(k),
             pairs,
         ),
-        "paired_deltas": paired_delta_metric_sets(
+        "hybrid_weight_sweep": hybrid_weight_sweep_metric_sets(
             scenarios,
+            k,
+            hybrid_weights,
+        ),
+        "paired_deltas": paired_delta_metric_sets(
+            base_scenarios,
             k,
             pairs,
         ),
@@ -969,6 +1148,7 @@ def measure_repo_holdout(
     max_candidate_commits: int,
     max_files_per_commit: int,
     k: int,
+    hybrid_weights: list[float],
 ) -> dict[str, Any]:
     repo = repo.resolve()
     end_commit = git_text(
@@ -1075,6 +1255,46 @@ def measure_repo_holdout(
                     "hybrid",
                     "--json",
                 )
+                weighted_hybrid = {
+                    hybrid_weight_method(
+                        "workspace_related_hybrid",
+                        weight,
+                    ): workspace_json(
+                        bin_path,
+                        clone,
+                        "related",
+                        seed,
+                        "--by",
+                        "cochange",
+                        "--rank",
+                        "hybrid",
+                        "--hybrid-direct-weight",
+                        cli_weight(weight),
+                        "--json",
+                    )
+                    for weight in hybrid_weights
+                }
+                methods = {
+                    "workspace_related_direct": ranking_metrics(
+                        paths(direct, "data", "related"), expected, k
+                    ),
+                    "workspace_related_pagerank": ranking_metrics(
+                        paths(pagerank, "data", "related"), expected, k
+                    ),
+                    "workspace_related_hybrid": ranking_metrics(
+                        paths(hybrid, "data", "related"), expected, k
+                    ),
+                }
+                methods.update(
+                    {
+                        method: ranking_metrics(
+                            paths(result, "data", "related"),
+                            expected,
+                            k,
+                        )
+                        for method, result in weighted_hybrid.items()
+                    }
+                )
                 cases.append(
                     {
                         "repo": str(repo),
@@ -1089,23 +1309,14 @@ def measure_repo_holdout(
                             ],
                             "edge_count": index["data"]["edge_count"],
                         },
-                        "methods": {
-                            "workspace_related_direct": ranking_metrics(
-                                paths(direct, "data", "related"), expected, k
-                            ),
-                            "workspace_related_pagerank": ranking_metrics(
-                                paths(pagerank, "data", "related"), expected, k
-                            ),
-                            "workspace_related_hybrid": ranking_metrics(
-                                paths(hybrid, "data", "related"), expected, k
-                            ),
-                        },
+                        "methods": methods,
                     }
                 )
 
             if heldout_commits >= max_heldout_commits:
                 break
 
+    base_cases = selected_metric_scenarios(cases, REPO_HOLDOUT_BASE_METHODS)
     return {
         "metric": "repo_temporal_holdout",
         "repo": str(repo),
@@ -1117,25 +1328,36 @@ def measure_repo_holdout(
         "case_count": len(cases),
         "skipped": skipped,
         "cases": cases,
-        "aggregate": aggregate_metric_sets(cases, k) if cases else {},
+        "aggregate": aggregate_metric_sets(base_cases, k) if base_cases else {},
         "cutoff_sweep": cutoff_sweep_metric_sets(
-            cases,
+            base_cases,
             default_cutoffs(k),
             RELATED_COMPARISON_PAIRS,
+        )
+        if base_cases
+        else [],
+        "hybrid_weight_sweep": hybrid_weight_sweep_metric_sets(
+            cases,
+            k,
+            hybrid_weights,
         )
         if cases
         else [],
         "paired_deltas": paired_delta_metric_sets(
-            cases,
+            base_cases,
             k,
             RELATED_COMPARISON_PAIRS,
         )
-        if cases
+        if base_cases
         else {},
     }
 
 
-def aggregate_repo_holdouts(holdouts: list[dict[str, Any]], k: int) -> dict[str, Any]:
+def aggregate_repo_holdouts(
+    holdouts: list[dict[str, Any]],
+    k: int,
+    hybrid_weights: list[float],
+) -> dict[str, Any]:
     cases = [
         case
         for holdout in holdouts
@@ -1146,6 +1368,7 @@ def aggregate_repo_holdouts(holdouts: list[dict[str, Any]], k: int) -> dict[str,
         for key, value in holdout["skipped"].items():
             skipped[key] = skipped.get(key, 0) + value
 
+    base_cases = selected_metric_scenarios(cases, REPO_HOLDOUT_BASE_METHODS)
     return {
         "metric": "repo_temporal_holdout_aggregate",
         "repo_count": len(holdouts),
@@ -1161,20 +1384,27 @@ def aggregate_repo_holdouts(holdouts: list[dict[str, Any]], k: int) -> dict[str,
         ),
         "case_count": len(cases),
         "skipped": skipped,
-        "aggregate": aggregate_metric_sets(cases, k) if cases else {},
+        "aggregate": aggregate_metric_sets(base_cases, k) if base_cases else {},
         "cutoff_sweep": cutoff_sweep_metric_sets(
-            cases,
+            base_cases,
             default_cutoffs(k),
             RELATED_COMPARISON_PAIRS,
+        )
+        if base_cases
+        else [],
+        "hybrid_weight_sweep": hybrid_weight_sweep_metric_sets(
+            cases,
+            k,
+            hybrid_weights,
         )
         if cases
         else [],
         "paired_deltas": paired_delta_metric_sets(
-            cases,
+            base_cases,
             k,
             RELATED_COMPARISON_PAIRS,
         )
-        if cases
+        if base_cases
         else {},
     }
 
@@ -1198,21 +1428,53 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-candidate-commits", type=int, default=40)
     parser.add_argument("--max-files-per-commit", type=int, default=40)
     parser.add_argument("--k", type=int, default=5)
+    parser.add_argument(
+        "--hybrid-direct-weight-sweep",
+        default="",
+        help="comma-separated hybrid direct weights to evaluate in addition to defaults",
+    )
     args = parser.parse_args()
     if args.k < 1:
         parser.error("--k must be at least 1")
     if args.repo_holdout_ref and len(args.repo_holdout_ref) != len(args.repo_holdout):
         parser.error("--repo-holdout-ref must be repeated once per --repo-holdout")
+    args.hybrid_direct_weight_sweep = parse_hybrid_weight_sweep(
+        args.hybrid_direct_weight_sweep,
+        parser,
+    )
     return args
+
+
+def parse_hybrid_weight_sweep(
+    value: str,
+    parser: argparse.ArgumentParser,
+) -> list[float]:
+    if not value:
+        return []
+    weights = []
+    for raw_weight in value.split(","):
+        raw_weight = raw_weight.strip()
+        if not raw_weight:
+            parser.error("--hybrid-direct-weight-sweep contains an empty weight")
+        try:
+            weight = float(raw_weight)
+        except ValueError:
+            parser.error(f"invalid hybrid direct weight: {raw_weight!r}")
+        if not math.isfinite(weight) or not 0.0 <= weight <= 1.0:
+            parser.error("--hybrid-direct-weight-sweep values must be between 0.0 and 1.0")
+        if weight not in weights:
+            weights.append(weight)
+    return weights
 
 
 def main() -> None:
     args = parse_args()
     bin_path = workspace_bin()
+    hybrid_weights = args.hybrid_direct_weight_sweep
     measurements = [
         measure_observation(bin_path),
         measure_related_and_impact(bin_path),
-        measure_retrieval_suite(bin_path, args.k),
+        measure_retrieval_suite(bin_path, args.k, hybrid_weights),
         measure_transaction(bin_path),
     ]
     if args.repo_holdout:
@@ -1226,12 +1488,15 @@ def main() -> None:
                 max_candidate_commits=args.max_candidate_commits,
                 max_files_per_commit=args.max_files_per_commit,
                 k=args.k,
+                hybrid_weights=hybrid_weights,
             )
             for repo, end_ref in zip(args.repo_holdout, repo_holdout_refs)
         ]
         measurements.extend(repo_holdouts)
         if len(repo_holdouts) > 1:
-            measurements.append(aggregate_repo_holdouts(repo_holdouts, args.k))
+            measurements.append(
+                aggregate_repo_holdouts(repo_holdouts, args.k, hybrid_weights)
+            )
 
     report = {
         "workspace_bin": str(bin_path),

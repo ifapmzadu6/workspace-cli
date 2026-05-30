@@ -51,6 +51,12 @@ python3 tools/measure_effect.py \
 
 Use `--k` to change the primary ranking cutoff. The report includes a
 `cutoff_sweep` for the default cutoffs at or below `k`, plus `k` itself.
+Use `--hybrid-direct-weight-sweep` to evaluate additional hybrid direct weights
+without changing the CLI defaults:
+
+```sh
+python3 tools/measure_effect.py --hybrid-direct-weight-sweep 0,0.05,0.5,1
+```
 
 This checks out each held-out commit's parent in a temporary clone, builds the
 co-change index from only the older history, and measures whether
@@ -124,6 +130,7 @@ cutoff, which defaults to 5:
 - paired mean deltas, win/tie/loss counts, and paired sign-flip randomization
   p-values
 - a default cutoff sweep at @1, @3, and @5
+- an optional hybrid direct-weight sweep for ablation
 
 The suite compares `git diff --name-only`, direct co-change ranking,
 personalized PageRank over the saved co-change index, hybrid ranking that
@@ -266,6 +273,18 @@ cross_repo pagerank average_precision@3: 0.442
 cross_repo hybrid average_precision@3: 0.608
 cross_repo hybrid - direct average_precision@3: +0.062 (0.024, 0.110), wins/ties/losses 8/16/0, p_greater=0.0027
 cross_repo hybrid - pagerank average_precision@3: +0.167 (0.042, 0.312), wins/ties/losses 5/19/0, p_greater=0.0303
+```
+
+A representative cross-repo hybrid direct-weight sweep over the same held-out
+cases:
+
+```text
+cross_repo hybrid direct_weight=0.00 average_precision@5: 0.613
+cross_repo hybrid direct_weight=0.05 average_precision@5: 0.644
+cross_repo hybrid direct_weight=0.50 average_precision@5: 0.748
+cross_repo hybrid direct_weight=1.00 average_precision@5: 0.689
+cross_repo hybrid direct_weight=0.50 - direct average_precision@5: +0.059 (0.028, 0.093), p_greater=0.0010
+cross_repo hybrid direct_weight=0.50 - pagerank average_precision@5: +0.135 (0.042, 0.240), p_greater=0.0335
 ```
 
 Interpretation: the CLI is not just running; it measurably improves observation

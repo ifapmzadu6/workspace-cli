@@ -236,6 +236,59 @@ def render_cutoff_table(
     )
 
 
+def render_hybrid_weight_sweep_table(
+    measurement: dict[str, Any],
+    title: str,
+    group: str,
+    direct_method: str,
+    pagerank_method: str,
+) -> str:
+    rows = []
+    k = measurement["k"]
+    for entry in measurement.get("hybrid_weight_sweep", []):
+        if group not in entry:
+            continue
+        group_data = entry[group]
+        method = group_data["method"]
+        aggregate = group_data["aggregate"][method]
+        deltas = group_data.get("paired_deltas", {})
+        direct_comparison = f"{method}_minus_{direct_method}"
+        pagerank_comparison = f"{method}_minus_{pagerank_method}"
+        ap_metric = f"average_precision_at_{k}"
+        row = [
+            fmt_number(entry["hybrid_direct_weight"], 3),
+            fmt_mean_ci(aggregate, ap_metric),
+            fmt_mean_ci(aggregate, f"ndcg_at_{k}"),
+        ]
+        for comparison in [direct_comparison, pagerank_comparison]:
+            if comparison in deltas:
+                row.append(fmt_delta_ci(deltas[comparison], ap_metric))
+                row.append(
+                    fmt_number(deltas[comparison][f"p_greater_delta_{ap_metric}"], 4)
+                )
+            else:
+                row.extend(["", ""])
+        rows.append(row)
+
+    return "\n".join(
+        [
+            f"## {title} Hybrid Weight Sweep @{k}",
+            markdown_table(
+                [
+                    "direct weight",
+                    f"AP@{k}",
+                    f"nDCG@{k}",
+                    "delta AP vs direct",
+                    "p>",
+                    "delta AP vs PageRank",
+                    "p>",
+                ],
+                rows,
+            ),
+        ]
+    )
+
+
 def render_measurement(
     measurement: dict[str, Any],
     title: str,
@@ -282,6 +335,24 @@ def render_report(report: dict[str, Any]) -> str:
                 ],
             )
         )
+        sections.append(
+            render_hybrid_weight_sweep_table(
+                retrieval,
+                "Retrieval Suite Related",
+                "related",
+                "workspace_related_direct",
+                "workspace_related_pagerank",
+            )
+        )
+        sections.append(
+            render_hybrid_weight_sweep_table(
+                retrieval,
+                "Retrieval Suite Impact",
+                "impact",
+                "workspace_impact_direct",
+                "workspace_impact_pagerank",
+            )
+        )
 
     holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
     if holdout is not None:
@@ -297,6 +368,15 @@ def render_report(report: dict[str, Any]) -> str:
                         RELATED_COMPARISONS[:2],
                     )
                 ],
+            )
+        )
+        sections.append(
+            render_hybrid_weight_sweep_table(
+                holdout,
+                "Cross-Repo Temporal Holdout",
+                "related",
+                "workspace_related_direct",
+                "workspace_related_pagerank",
             )
         )
 
