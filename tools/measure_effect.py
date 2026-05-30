@@ -347,6 +347,17 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
             "pagerank",
             "--json",
         )
+        hybrid = workspace_json(
+            bin_path,
+            root,
+            "related",
+            "src/auth.rs",
+            "--by",
+            "cochange",
+            "--rank",
+            "hybrid",
+            "--json",
+        )
 
         append(root / "src/auth.rs", "local auth change\n")
         impact = workspace_json(
@@ -358,6 +369,17 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
             "cochange",
             "--rank",
             "pagerank",
+            "--json",
+        )
+        hybrid_impact = workspace_json(
+            bin_path,
+            root,
+            "impact",
+            "--diff",
+            "--by",
+            "cochange",
+            "--rank",
+            "hybrid",
             "--json",
         )
         git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
@@ -372,8 +394,14 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
             "workspace_related_pagerank": precision_recall(
                 paths(pagerank, "data", "related"), expected, 3
             ),
+            "workspace_related_hybrid": precision_recall(
+                paths(hybrid, "data", "related"), expected, 3
+            ),
             "workspace_impact_pagerank": precision_recall(
                 paths(impact, "data", "impacted"), expected, 3
+            ),
+            "workspace_impact_hybrid": precision_recall(
+                paths(hybrid_impact, "data", "impacted"), expected, 3
             ),
         }
 
@@ -418,6 +446,17 @@ def evaluate_related_case(
         "pagerank",
         "--json",
     )
+    hybrid = workspace_json(
+        bin_path,
+        root,
+        "related",
+        target,
+        "--by",
+        "cochange",
+        "--rank",
+        "hybrid",
+        "--json",
+    )
 
     append(root / target, "local evaluation change\n")
     impact = workspace_json(
@@ -429,6 +468,17 @@ def evaluate_related_case(
         "cochange",
         "--rank",
         "pagerank",
+        "--json",
+    )
+    hybrid_impact = workspace_json(
+        bin_path,
+        root,
+        "impact",
+        "--diff",
+        "--by",
+        "cochange",
+        "--rank",
+        "hybrid",
         "--json",
     )
     git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
@@ -451,8 +501,14 @@ def evaluate_related_case(
             "workspace_related_pagerank": ranking_metrics(
                 paths(pagerank, "data", "related"), expected, k
             ),
+            "workspace_related_hybrid": ranking_metrics(
+                paths(hybrid, "data", "related"), expected, k
+            ),
             "workspace_impact_pagerank": ranking_metrics(
                 paths(impact, "data", "impacted"), expected, k
+            ),
+            "workspace_impact_hybrid": ranking_metrics(
+                paths(hybrid_impact, "data", "impacted"), expected, k
             ),
         },
     }
@@ -501,6 +557,17 @@ def evaluate_impact_case(
         "pagerank",
         "--json",
     )
+    hybrid = workspace_json(
+        bin_path,
+        root,
+        "impact",
+        "--diff",
+        "--by",
+        "cochange",
+        "--rank",
+        "hybrid",
+        "--json",
+    )
     git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
 
     return {
@@ -520,6 +587,9 @@ def evaluate_impact_case(
             ),
             "workspace_impact_pagerank": ranking_metrics(
                 paths(pagerank, "data", "impacted"), expected, k
+            ),
+            "workspace_impact_hybrid": ranking_metrics(
+                paths(hybrid, "data", "impacted"), expected, k
             ),
         },
     }
@@ -745,6 +815,17 @@ def measure_repo_holdout(
                     "pagerank",
                     "--json",
                 )
+                hybrid = workspace_json(
+                    bin_path,
+                    clone,
+                    "related",
+                    seed,
+                    "--by",
+                    "cochange",
+                    "--rank",
+                    "hybrid",
+                    "--json",
+                )
                 cases.append(
                     {
                         "heldout_commit": commit["hash"][:12],
@@ -764,6 +845,9 @@ def measure_repo_holdout(
                             ),
                             "workspace_related_pagerank": ranking_metrics(
                                 paths(pagerank, "data", "related"), expected, k
+                            ),
+                            "workspace_related_hybrid": ranking_metrics(
+                                paths(hybrid, "data", "related"), expected, k
                             ),
                         },
                     }

@@ -144,6 +144,7 @@ workspace index cochange
 workspace index cochange --max-commits 2000 --max-files-per-commit 30 --json
 workspace related src/config.rs --by cochange --use-index
 workspace related src/config.rs --by cochange --rank pagerank
+workspace related src/config.rs --by cochange --rank hybrid
 ```
 
 `workspace index status` reports whether the saved index exists and whether it
@@ -151,9 +152,12 @@ is fresh for the current Git `HEAD`. `workspace index cochange --json` returns a
 bounded summary of the saved index; the full edge list is persisted under
 `.workspace/index/cochange.json` for later related/impact queries.
 
-`--use-index` and `--rank pagerank` use the saved co-change graph to propagate
-from seed files through the graph. This can surface files that were not directly
-changed with the seed file, but are connected through related history.
+`--use-index`, `--rank pagerank`, and `--rank hybrid` use the saved co-change
+graph to propagate from seed files through the graph. This can surface files
+that were not directly changed with the seed file, but are connected through
+related history. `hybrid` combines PageRank reachability with a direct
+co-change boost, preserving indirect discovery while improving temporal
+holdout ranking quality.
 
 `workspace impact --diff --by cochange` uses the current Git diff as seed files
 and returns nearby files from history. This helps decide what to read next and
@@ -169,6 +173,7 @@ workspace impact --diff --by cochange --json
 workspace impact --diff --max-commits 500 --max-results 30
 workspace impact --diff --by cochange --use-index
 workspace impact --diff --by cochange --rank pagerank
+workspace impact --diff --by cochange --rank hybrid
 ```
 
 ## Background

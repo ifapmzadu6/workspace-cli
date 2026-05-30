@@ -617,6 +617,21 @@ fn index_related_impact_and_status_cover_cochange_flow() {
     assert!(related_paths.contains(&"src/b.rs".to_string()));
     assert!(related_paths.contains(&"src/c.rs".to_string()));
 
+    let hybrid_related = run_workspace(
+        root,
+        &[
+            "related", "src/a.rs", "--by", "cochange", "--rank", "hybrid", "--json",
+        ],
+    );
+    let hybrid_related_paths = paths_at(&hybrid_related, &["data", "related"]);
+    assert_eq!(
+        hybrid_related["data"]["relationship_source"],
+        "cochange-index"
+    );
+    assert_eq!(hybrid_related["data"]["ranking"], "hybrid");
+    assert!(hybrid_related_paths.contains(&"src/b.rs".to_string()));
+    assert!(hybrid_related_paths.contains(&"src/c.rs".to_string()));
+
     append_file(root, "src/a.rs", "local change\n");
     let impact = run_workspace(
         root,
@@ -628,6 +643,21 @@ fn index_related_impact_and_status_cover_cochange_flow() {
     assert_eq!(impact["data"]["seed_files"][0], "src/a.rs");
     assert!(impacted_paths.contains(&"src/b.rs".to_string()));
     assert!(impacted_paths.contains(&"tests/b_test.rs".to_string()));
+
+    let hybrid_impact = run_workspace(
+        root,
+        &[
+            "impact", "--diff", "--by", "cochange", "--rank", "hybrid", "--json",
+        ],
+    );
+    let hybrid_impacted_paths = paths_at(&hybrid_impact, &["data", "impacted"]);
+    assert_eq!(
+        hybrid_impact["data"]["relationship_source"],
+        "cochange-index"
+    );
+    assert_eq!(hybrid_impact["data"]["ranking"], "hybrid");
+    assert!(hybrid_impacted_paths.contains(&"src/b.rs".to_string()));
+    assert!(hybrid_impacted_paths.contains(&"tests/b_test.rs".to_string()));
 }
 
 #[test]

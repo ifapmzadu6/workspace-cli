@@ -68,7 +68,9 @@ The measurement compares:
 - `git diff --name-only`
 - `workspace related --use-index`
 - `workspace related --rank pagerank`
+- `workspace related --rank hybrid`
 - `workspace impact --diff --rank pagerank`
+- `workspace impact --diff --rank hybrid`
 
 ### Retrieval Suite
 
@@ -89,8 +91,10 @@ For each scenario the script reports:
 - nDCG@5
 
 The suite compares `git diff --name-only`, direct co-change ranking,
-personalized PageRank over the saved co-change index, and the impact-specific
-PageRank ranking that lightly prioritizes tests over documentation noise.
+personalized PageRank over the saved co-change index, hybrid ranking that
+combines direct co-change evidence with PageRank reachability, and the
+impact-specific PageRank ranking that lightly prioritizes tests over
+documentation noise.
 
 ### Temporal Holdout
 
@@ -124,15 +128,29 @@ map_fact_recall: 1.000
 git_diff_only recall@3: 0.000
 workspace_related_direct recall@3: 0.333
 workspace_related_pagerank recall@3: 1.000
+workspace_related_hybrid recall@3: 1.000
 workspace_impact_pagerank recall@3: 1.000
+workspace_impact_hybrid recall@3: 1.000
 retrieval_suite git_diff_only mean_recall@5: 0.000
 retrieval_suite direct_cochange mean_recall@5: 0.500-0.611
 retrieval_suite related_pagerank mean_recall@5: 1.000
 retrieval_suite related_pagerank mean_average_precision@5: 0.900
 retrieval_suite related_pagerank mean_ndcg@5: 0.950
+retrieval_suite related_hybrid mean_recall@5: 1.000
+retrieval_suite related_hybrid mean_average_precision@5: 0.900
+retrieval_suite related_hybrid mean_ndcg@5: 0.950
 retrieval_suite impact_pagerank mean_recall@5: 1.000
 retrieval_suite impact_pagerank mean_average_precision@5: 1.000
 retrieval_suite impact_pagerank mean_ndcg@5: 1.000
+retrieval_suite impact_hybrid mean_recall@5: 1.000
+retrieval_suite impact_hybrid mean_average_precision@5: 1.000
+retrieval_suite impact_hybrid mean_ndcg@5: 1.000
+repo_holdout direct mean_recall@5: 0.857
+repo_holdout direct mean_average_precision@5: 0.548
+repo_holdout pagerank mean_recall@5: 1.000
+repo_holdout pagerank mean_average_precision@5: 0.426
+repo_holdout hybrid mean_recall@5: 1.000
+repo_holdout hybrid mean_average_precision@5: 0.583
 transaction_audit_signal_recall: 1.000
 ```
 

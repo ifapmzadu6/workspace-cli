@@ -83,6 +83,11 @@ const IMPACT_SOURCE_DIFF: &str = "diff";
 const RELATED_METHOD_COCHANGE: &str = "cochange";
 const RANK_DIRECT: &str = "direct";
 const RANK_PAGERANK: &str = "pagerank";
+const RANK_HYBRID: &str = "hybrid";
+const RELATED_HYBRID_PAGERANK_SCORE_WEIGHT: f64 = 0.5;
+const RELATED_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.5;
+const IMPACT_HYBRID_PAGERANK_SCORE_WEIGHT: f64 = 0.95;
+const IMPACT_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.05;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const RELATIONSHIP_SOURCE_COCHANGE_INDEX: &str = "cochange-index";
@@ -319,6 +324,7 @@ impl RelatedMethod {
 enum RankingMethod {
     Direct,
     Pagerank,
+    Hybrid,
 }
 
 impl RankingMethod {
@@ -326,6 +332,7 @@ impl RankingMethod {
         match self {
             Self::Direct => RANK_DIRECT,
             Self::Pagerank => RANK_PAGERANK,
+            Self::Hybrid => RANK_HYBRID,
         }
     }
 }
@@ -3483,6 +3490,7 @@ fn related_by_cochange(
             RankingMethod::Pagerank => {
                 rank_cochanges_pagerank_from_index(&index, target, max_results)
             }
+            RankingMethod::Hybrid => rank_cochanges_hybrid_from_index(&index, target, max_results),
         };
         return Ok(cochange_related_data(
             RelatedDataMetadata::cochange(target, rank, RELATIONSHIP_SOURCE_COCHANGE_INDEX, true),
@@ -3881,6 +3889,9 @@ fn impact_by_cochange(
             }
             RankingMethod::Pagerank => {
                 rank_cochange_impact_pagerank_from_index(&index, &seed_files, max_results)
+            }
+            RankingMethod::Hybrid => {
+                rank_cochange_impact_hybrid_from_index(&index, &seed_files, max_results)
             }
         };
         return Ok(cochange_impact_data(
@@ -4408,6 +4419,41 @@ fn rank_cochanges_pagerank_from_index(
     }
 }
 
+fn rank_cochanges_hybrid_from_index(
+    index: &CochangeIndex,
+    target: &str,
+    max_results: usize,
+) -> CochangeRanking {
+    let target = normalize_repo_path(target);
+    let seeds = BTreeSet::from([target.clone()]);
+    let mut hits = personalized_pagerank(index, &seeds, 40, 0.85);
+    let edge_lookup = cochange_edge_lookup(index);
+    let max_direct_weight = max_related_direct_edge_weight(index, &target);
+    for hit in &mut hits {
+        let direct_score = find_cochange_edge(&edge_lookup, &target, &hit.path)
+            .map(|edge| normalized_direct_score(edge.weighted_cochanges, max_direct_weight))
+            .unwrap_or_default();
+        hit.score = related_hybrid_rank_score(hit.score, direct_score);
+    }
+    normalize_pagerank_hit_scores(&mut hits);
+
+    let mut related = hits
+        .into_iter()
+        .map(|hit| {
+            let direct_edge = find_cochange_edge(&edge_lookup, &target, &hit.path);
+            related_file_from_pagerank_hit(hit, direct_edge)
+        })
+        .collect::<Vec<_>>();
+
+    sort_and_truncate(&mut related, max_results, compare_related_by_score);
+
+    CochangeRanking {
+        related,
+        commits_matched: indexed_file_commit_count(index, &target),
+        ignored_large_commits: 0,
+    }
+}
+
 fn rank_cochange_impact(
     commits: &[GitCommitFiles],
     seed_files: &[String],
@@ -4563,6 +4609,38 @@ fn rank_cochange_impact_pagerank_from_index(
     }
 }
 
+fn rank_cochange_impact_hybrid_from_index(
+    index: &CochangeIndex,
+    seed_files: &[String],
+    max_results: usize,
+) -> ImpactRanking {
+    let seed_files = normalized_seed_file_set(seed_files);
+    let mut hits = personalized_pagerank(index, &seed_files, 40, 0.85);
+    let edge_lookup = cochange_edge_lookup(index);
+    let max_direct_weight = max_impact_direct_edge_weight(index, &seed_files);
+    for hit in &mut hits {
+        let direct_score = normalized_direct_score(
+            impact_direct_edge_weight(&edge_lookup, &seed_files, &hit.path),
+            max_direct_weight,
+        );
+        hit.score = impact_hybrid_rank_score(hit.score, direct_score);
+    }
+    apply_impact_pagerank_path_prior(&mut hits);
+    let mut impacted = hits
+        .into_iter()
+        .map(|hit| impact_file_from_pagerank_hit(hit, &seed_files, &edge_lookup))
+        .collect::<Vec<_>>();
+
+    sort_and_truncate(&mut impacted, max_results, compare_impact_by_score);
+    let commits_matched = indexed_seed_commit_count(index, &seed_files);
+
+    ImpactRanking {
+        impacted,
+        commits_matched,
+        ignored_large_commits: 0,
+    }
+}
+
 fn apply_impact_pagerank_path_prior(hits: &mut [PageRankHit]) {
     for hit in hits.iter_mut() {
         hit.score *= impact_path_score_multiplier(&hit.path);
@@ -4589,6 +4667,61 @@ fn normalize_pagerank_hit_scores(hits: &mut [PageRankHit]) {
     for hit in hits {
         hit.score /= max_score;
     }
+}
+
+fn related_hybrid_rank_score(pagerank_score: f64, direct_score: f64) -> f64 {
+    (RELATED_HYBRID_PAGERANK_SCORE_WEIGHT * pagerank_score)
+        + (RELATED_HYBRID_DIRECT_SCORE_WEIGHT * direct_score)
+}
+
+fn impact_hybrid_rank_score(pagerank_score: f64, direct_score: f64) -> f64 {
+    (IMPACT_HYBRID_PAGERANK_SCORE_WEIGHT * pagerank_score)
+        + (IMPACT_HYBRID_DIRECT_SCORE_WEIGHT * direct_score)
+}
+
+fn normalized_direct_score(weight: f64, max_weight: f64) -> f64 {
+    if max_weight > 0.0 {
+        weight / max_weight
+    } else {
+        0.0
+    }
+}
+
+fn max_related_direct_edge_weight(index: &CochangeIndex, target: &str) -> f64 {
+    max_rank_weight(
+        index
+            .edges
+            .iter()
+            .filter(|edge| edge.a == target || edge.b == target)
+            .map(|edge| edge.weighted_cochanges),
+    )
+}
+
+fn max_impact_direct_edge_weight(index: &CochangeIndex, seed_files: &BTreeSet<String>) -> f64 {
+    let mut direct_weights = BTreeMap::<String, f64>::new();
+    for edge in &index.edges {
+        let candidate = match (seed_files.contains(&edge.a), seed_files.contains(&edge.b)) {
+            (true, false) => Some(edge.b.clone()),
+            (false, true) => Some(edge.a.clone()),
+            _ => None,
+        };
+        if let Some(candidate) = candidate {
+            *direct_weights.entry(candidate).or_default() += edge.weighted_cochanges;
+        }
+    }
+    max_rank_weight(direct_weights.into_values())
+}
+
+fn impact_direct_edge_weight(
+    edge_lookup: &BTreeMap<(String, String), &CochangeEdge>,
+    seed_files: &BTreeSet<String>,
+    path: &str,
+) -> f64 {
+    seed_files
+        .iter()
+        .filter_map(|seed| find_cochange_edge(edge_lookup, seed, path))
+        .map(|edge| edge.weighted_cochanges)
+        .sum()
 }
 
 fn personalized_pagerank(
@@ -4869,7 +5002,7 @@ fn max_cochanged_commits(commits: impl IntoIterator<Item = usize>) -> usize {
 }
 
 fn uses_cochange_index(use_index: bool, rank: RankingMethod) -> bool {
-    use_index || rank == RankingMethod::Pagerank
+    use_index || matches!(rank, RankingMethod::Pagerank | RankingMethod::Hybrid)
 }
 
 fn normalize_repo_path(path: &str) -> String {
@@ -7786,7 +7919,10 @@ rename to new name.txt
     #[test]
     fn relationship_label_constants_match_json_contract() {
         assert_eq!(RELATED_METHOD_COCHANGE, "cochange");
-        assert_eq!([RANK_DIRECT, RANK_PAGERANK], ["direct", "pagerank"]);
+        assert_eq!(
+            [RANK_DIRECT, RANK_PAGERANK, RANK_HYBRID],
+            ["direct", "pagerank", "hybrid"]
+        );
         assert_eq!(
             [
                 RELATIONSHIP_SOURCE_COCHANGE_INDEX,
@@ -7798,6 +7934,7 @@ rename to new name.txt
         assert_eq!(RelatedMethod::Cochange.as_str(), RELATED_METHOD_COCHANGE);
         assert_eq!(RankingMethod::Direct.as_str(), RANK_DIRECT);
         assert_eq!(RankingMethod::Pagerank.as_str(), RANK_PAGERANK);
+        assert_eq!(RankingMethod::Hybrid.as_str(), RANK_HYBRID);
         assert_eq!(
             relationship_source(true),
             RELATIONSHIP_SOURCE_COCHANGE_INDEX
@@ -7813,6 +7950,10 @@ rename to new name.txt
         );
         assert_eq!(
             relationship_source_for_options(false, RankingMethod::Pagerank),
+            RELATIONSHIP_SOURCE_COCHANGE_INDEX
+        );
+        assert_eq!(
+            relationship_source_for_options(false, RankingMethod::Hybrid),
             RELATIONSHIP_SOURCE_COCHANGE_INDEX
         );
         assert_eq!(
@@ -11041,6 +11182,34 @@ src/b.rs
     }
 
     #[test]
+    fn hybrid_related_preserves_indirect_hits_and_boosts_direct_edges() {
+        let commits = vec![
+            GitCommitFiles {
+                hash: "aaaaaaaaaaaa".to_string(),
+                files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+            },
+            GitCommitFiles {
+                hash: "bbbbbbbbbbbb".to_string(),
+                files: vec!["src/b.rs".to_string(), "src/c.rs".to_string()],
+            },
+        ];
+        let index = cochange_index_from_commits(&commits, 100, 10, None);
+
+        let ranking = rank_cochanges_hybrid_from_index(&index, "src/a.rs", 10);
+
+        assert_eq!(ranking.related[0].path, "src/b.rs");
+        assert!(ranking.related.iter().any(|file| file.path == "src/c.rs"));
+        assert_eq!(ranking.related[0].cochanged_commits, 1);
+        let indirect = ranking
+            .related
+            .iter()
+            .find(|file| file.path == "src/c.rs")
+            .unwrap();
+        assert_eq!(indirect.cochanged_commits, 0);
+        assert!(ranking.related[0].score > indirect.score);
+    }
+
+    #[test]
     fn pagerank_impact_reaches_indirect_files() {
         let commits = vec![
             GitCommitFiles {
@@ -11066,6 +11235,33 @@ src/b.rs
             .unwrap();
         assert_eq!(indirect.cochanged_commits, 0);
         assert_eq!(indirect.seed_files, vec!["src/a.rs"]);
+    }
+
+    #[test]
+    fn hybrid_impact_preserves_indirect_hits_and_direct_edge_evidence() {
+        let commits = vec![
+            GitCommitFiles {
+                hash: "aaaaaaaaaaaa".to_string(),
+                files: vec!["src/a.rs".to_string(), "src/b.rs".to_string()],
+            },
+            GitCommitFiles {
+                hash: "bbbbbbbbbbbb".to_string(),
+                files: vec!["src/b.rs".to_string(), "tests/b_test.rs".to_string()],
+            },
+        ];
+        let index = cochange_index_from_commits(&commits, 100, 10, None);
+        let seeds = vec!["src/a.rs".to_string()];
+
+        let ranking = rank_cochange_impact_hybrid_from_index(&index, &seeds, 10);
+
+        assert_eq!(ranking.impacted[0].path, "src/b.rs");
+        assert!(
+            ranking
+                .impacted
+                .iter()
+                .any(|file| file.path == "tests/b_test.rs")
+        );
+        assert_eq!(ranking.impacted[0].cochanged_commits, 1);
     }
 
     #[test]
