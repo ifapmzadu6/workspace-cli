@@ -109,7 +109,8 @@ distributions, history-only oracle ceilings, and case-level win/loss
 diagnostics for paper-style reproducibility checks. It also reports
 oracle-normalized AP, oracle gaps, and leave-one-repo-out hybrid weight
 selection when sweep weights are provided. The fixed-ref cross-repo holdout set
-used for paper-style reproduction is captured in `tools/effect_paper_holdouts.json`.
+used for paper-style reproduction, including the dense hybrid weight sweep grid,
+is captured in `tools/effect_paper_holdouts.json`.
 Effect reports include reproducibility metadata with the workspace commit,
 dirty state, resampling counts, exact sign-flip p-value method, holdout
 manifest hash, and pinned repository refs.

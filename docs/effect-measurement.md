@@ -60,7 +60,7 @@ Use `--hybrid-direct-weight-sweep` to evaluate additional hybrid direct weights
 without changing the CLI defaults:
 
 ```sh
-python3 tools/measure_effect.py --hybrid-direct-weight-sweep 0,0.05,0.5,1
+python3 tools/measure_effect.py --hybrid-direct-weight-sweep 0,0.05,0.1,0.25,0.5,0.75,1
 ```
 
 The fixed-ref cross-repository setup used for the paper-style results is stored
@@ -523,6 +523,30 @@ expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.
 expanded predictable cross_repo hybrid - direct average_precision@5: +0.094 (0.039, 0.151), wins/ties/losses 23/17/8, p_greater=0.0008, holm_p_greater=0.0016
 expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.117 (0.057, 0.183), wins/ties/losses 12/36/0, p_greater=0.0002, holm_p_greater=0.0007
 ```
+
+The expanded manifest also runs a denser hybrid direct-weight sweep:
+
+```text
+expanded cross_repo hybrid direct_weight=0.00 average_precision@5: 0.536
+expanded cross_repo hybrid direct_weight=0.05 average_precision@5: 0.558
+expanded cross_repo hybrid direct_weight=0.10 average_precision@5: 0.570
+expanded cross_repo hybrid direct_weight=0.25 average_precision@5: 0.613
+expanded cross_repo hybrid direct_weight=0.50 average_precision@5: 0.640
+expanded cross_repo hybrid direct_weight=0.75 average_precision@5: 0.641
+expanded cross_repo hybrid direct_weight=1.00 average_precision@5: 0.564
+expanded cross_repo hybrid direct_weight=0.75 - direct average_precision@5: +0.077 (0.029, 0.124), p_greater=0.0008, holm_p_greater=0.0008
+expanded cross_repo hybrid direct_weight=0.75 - pagerank average_precision@5: +0.105 (0.046, 0.169), p_greater=0.0003, holm_p_greater=0.0005
+expanded predictable cross_repo hybrid direct_weight=0.50 average_precision@5: 0.719
+expanded predictable cross_repo hybrid direct_weight=0.75 average_precision@5: 0.720
+```
+
+Leave-one-repo-out selection over that dense grid chooses 0.75 for
+`workspace-cli` and `related-cli`, and 0.50 for `llm-json-extract`, but its
+aggregate AP@5 is 0.638 versus 0.640 for the fixed 0.50 default. On the
+predictable-only slice it chooses 0.75 only for `workspace-cli`, and its
+aggregate AP@5 is 0.716 versus 0.719 for the fixed 0.50 default. Because 0.75
+only improves the direct sweep point estimate by 0.001 AP while not improving
+cross-repo LORO generalization, the CLI default remains 0.50.
 
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and
