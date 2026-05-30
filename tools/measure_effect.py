@@ -917,18 +917,26 @@ def measure_repo_holdout(
     bin_path: Path,
     repo: Path,
     *,
+    end_ref: str,
     max_heldout_commits: int,
     max_candidate_commits: int,
     max_files_per_commit: int,
     k: int,
 ) -> dict[str, Any]:
     repo = repo.resolve()
+    end_commit = git_text(
+        repo,
+        "rev-parse",
+        "--verify",
+        f"{end_ref}^{{commit}}",
+    ).strip()
     log_output = git_text(
         repo,
         "log",
         "--format=commit:%H",
         "--name-only",
         f"--max-count={max_candidate_commits}",
+        end_commit,
         "--",
     )
     commits = parse_git_name_only_commits(log_output)
@@ -1054,6 +1062,8 @@ def measure_repo_holdout(
     return {
         "metric": "repo_temporal_holdout",
         "repo": str(repo),
+        "end_ref": end_ref,
+        "end_commit": end_commit[:12],
         "k": k,
         "candidate_commit_count": len(commits),
         "heldout_commit_count": heldout_commits,
@@ -1086,6 +1096,8 @@ def aggregate_repo_holdouts(holdouts: list[dict[str, Any]], k: int) -> dict[str,
         "metric": "repo_temporal_holdout_aggregate",
         "repo_count": len(holdouts),
         "repos": [holdout["repo"] for holdout in holdouts],
+        "end_refs": [holdout["end_ref"] for holdout in holdouts],
+        "end_commits": [holdout["end_commit"] for holdout in holdouts],
         "k": k,
         "candidate_commit_count": sum(
             holdout["candidate_commit_count"] for holdout in holdouts
@@ -1115,11 +1127,20 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="optionally add temporal holdout metrics for a real git repository; repeat for multiple repos",
     )
+    parser.add_argument(
+        "--repo-holdout-ref",
+        action="append",
+        default=[],
+        help="git revision that ends the corresponding --repo-holdout history; repeat once per repo",
+    )
     parser.add_argument("--max-heldout-commits", type=int, default=5)
     parser.add_argument("--max-candidate-commits", type=int, default=40)
     parser.add_argument("--max-files-per-commit", type=int, default=40)
     parser.add_argument("--k", type=int, default=5)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.repo_holdout_ref and len(args.repo_holdout_ref) != len(args.repo_holdout):
+        parser.error("--repo-holdout-ref must be repeated once per --repo-holdout")
+    return args
 
 
 def main() -> None:
@@ -1132,16 +1153,18 @@ def main() -> None:
         measure_transaction(bin_path),
     ]
     if args.repo_holdout:
+        repo_holdout_refs = args.repo_holdout_ref or ["HEAD"] * len(args.repo_holdout)
         repo_holdouts = [
             measure_repo_holdout(
                 bin_path,
                 repo,
+                end_ref=end_ref,
                 max_heldout_commits=args.max_heldout_commits,
                 max_candidate_commits=args.max_candidate_commits,
                 max_files_per_commit=args.max_files_per_commit,
                 k=args.k,
             )
-            for repo in args.repo_holdout
+            for repo, end_ref in zip(args.repo_holdout, repo_holdout_refs)
         ]
         measurements.extend(repo_holdouts)
         if len(repo_holdouts) > 1:

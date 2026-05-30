@@ -32,6 +32,16 @@ aggregate:
 python3 tools/measure_effect.py --repo-holdout . --repo-holdout ../other-repo
 ```
 
+Pass `--repo-holdout-ref` once per repository to pin the end of each holdout
+history. This makes representative measurements reproducible even as the
+repositories receive later commits:
+
+```sh
+python3 tools/measure_effect.py \
+  --repo-holdout . \
+  --repo-holdout-ref HEAD
+```
+
 This checks out each held-out commit's parent in a temporary clone, builds the
 co-change index from only the older history, and measures whether
 `workspace related` predicts the files that changed together in the held-out
@@ -135,8 +145,9 @@ reverse a change:
 ## Current Result
 
 Run `python3 tools/measure_effect.py` to refresh fixture numbers, and add
-`--repo-holdout .` to refresh the repo holdout numbers. A representative result
-for the current MVP is:
+`--repo-holdout . --repo-holdout-ref 104bbc9155b2ab7df8159f6cb1efe26cd8e95a48`
+to reproduce the repo holdout numbers below. A representative result for the
+current MVP is:
 
 ```text
 map_fact_recall: 1.000
@@ -197,8 +208,11 @@ A three-repository temporal holdout run can be reproduced with:
 ```sh
 python3 tools/measure_effect.py \
   --repo-holdout . \
+  --repo-holdout-ref 104bbc9155b2ab7df8159f6cb1efe26cd8e95a48 \
   --repo-holdout ../related-cli \
+  --repo-holdout-ref 5cf1f671993ff93b908dd23e46819a10408042c2 \
   --repo-holdout ../llm-json-extract \
+  --repo-holdout-ref 9631a65ab4797fb9260d90fc68db9526811a3be6 \
   --max-heldout-commits 3 \
   --max-candidate-commits 20
 ```
