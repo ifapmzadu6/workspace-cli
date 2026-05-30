@@ -18,6 +18,18 @@ python3 tools/measure_effect.py
 The script creates temporary git repositories, runs the real `workspace`
 binary, and reports JSON metrics.
 
+To add an optional temporal holdout measurement on a real repository, pass a
+repository path:
+
+```sh
+python3 tools/measure_effect.py --repo-holdout . --max-heldout-commits 5
+```
+
+This checks out each held-out commit's parent in a temporary clone, builds the
+co-change index from only the older history, and measures whether
+`workspace related` predicts the files that changed together in the held-out
+commit.
+
 ## Metrics
 
 ### Map Fact Recall
@@ -79,6 +91,15 @@ For each scenario the script reports:
 The suite compares `git diff --name-only`, direct co-change ranking,
 personalized PageRank over the saved co-change index, and the impact-specific
 PageRank ranking that lightly prioritizes tests over documentation noise.
+
+### Temporal Holdout
+
+Optionally measures prediction against real repository history. For each
+eligible held-out commit, the seed is one file from that commit and the expected
+set is the other files changed in the same commit. The training history is the
+commit's parent and earlier ancestors only. This keeps future co-change edges
+out of the index and makes the metric closer to a realistic prospective
+prediction task.
 
 ### Transaction Audit Signal Recall
 

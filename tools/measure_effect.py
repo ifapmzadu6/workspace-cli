@@ -8,6 +8,7 @@ current git diff or direct co-change only.
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import os
@@ -54,6 +55,10 @@ def append(path: Path, content: str) -> None:
 
 def git(cwd: Path, *args: str) -> None:
     run(["git", *args], cwd)
+
+
+def git_text(cwd: Path, *args: str, check: bool = True) -> str:
+    return run(["git", *args], cwd, check=check).stdout
 
 
 def commit_all(cwd: Path, message: str) -> None:
@@ -147,6 +152,42 @@ def paths(value: dict[str, Any], *segments: str) -> list[str]:
     for segment in segments:
         cursor = cursor[segment]
     return [item["path"] for item in cursor]
+
+
+def observable_repo_path(path: str) -> str | None:
+    normalized = path.strip().lstrip("./").replace("\\", "/").rstrip("/")
+    if (
+        not normalized
+        or normalized.startswith("/")
+        or normalized == ".workspace"
+        or normalized.startswith(".workspace/")
+        or normalized.startswith(".git/")
+    ):
+        return None
+    segments = normalized.split("/")
+    if any(not segment or segment in {".", ".."} for segment in segments):
+        return None
+    return normalized
+
+
+def parse_git_name_only_commits(output: str) -> list[dict[str, Any]]:
+    commits: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line.startswith("commit:"):
+            if current is not None:
+                commits.append(current)
+            current = {"hash": line.removeprefix("commit:"), "files": []}
+            continue
+        if current is None:
+            continue
+        path = observable_repo_path(line)
+        if path is not None and path not in current["files"]:
+            current["files"].append(path)
+    if current is not None:
+        commits.append(current)
+    return commits
 
 
 def make_history_fixture() -> tempfile.TemporaryDirectory[str]:
@@ -608,16 +649,180 @@ def measure_transaction(bin_path: Path) -> dict[str, Any]:
         }
 
 
+def measure_repo_holdout(
+    bin_path: Path,
+    repo: Path,
+    *,
+    max_heldout_commits: int,
+    max_candidate_commits: int,
+    max_files_per_commit: int,
+    k: int,
+) -> dict[str, Any]:
+    repo = repo.resolve()
+    log_output = git_text(
+        repo,
+        "log",
+        "--format=commit:%H",
+        "--name-only",
+        f"--max-count={max_candidate_commits}",
+        "--",
+    )
+    commits = parse_git_name_only_commits(log_output)
+    cases: list[dict[str, Any]] = []
+    skipped = {
+        "root_commit": 0,
+        "too_few_files": 0,
+        "too_many_files": 0,
+        "new_seed_file": 0,
+    }
+
+    with tempfile.TemporaryDirectory() as clone_name:
+        clone = Path(clone_name) / "repo"
+        run(["git", "clone", "--quiet", str(repo), str(clone)], repo)
+        git(clone, "config", "advice.detachedHead", "false")
+
+        heldout_commits = 0
+        for commit in commits:
+            files = commit["files"]
+            if len(files) < 2:
+                skipped["too_few_files"] += 1
+                continue
+            if len(files) > max_files_per_commit:
+                skipped["too_many_files"] += 1
+                continue
+
+            parent_result = run(
+                ["git", "rev-parse", f"{commit['hash']}^"],
+                repo,
+                check=False,
+            )
+            if parent_result.returncode != 0:
+                skipped["root_commit"] += 1
+                continue
+            parent = parent_result.stdout.strip()
+
+            git(clone, "checkout", "--quiet", parent)
+            index = workspace_json(
+                bin_path,
+                clone,
+                "index",
+                "cochange",
+                "--max-files-per-commit",
+                str(max_files_per_commit),
+                "--json",
+            )
+
+            heldout_commits += 1
+            for seed in files:
+                exists = run(
+                    ["git", "cat-file", "-e", f"{parent}:{seed}"],
+                    repo,
+                    check=False,
+                ).returncode == 0
+                if not exists:
+                    skipped["new_seed_file"] += 1
+                    continue
+
+                expected = set(files) - {seed}
+                direct = workspace_json(
+                    bin_path,
+                    clone,
+                    "related",
+                    seed,
+                    "--by",
+                    "cochange",
+                    "--use-index",
+                    "--json",
+                )
+                pagerank = workspace_json(
+                    bin_path,
+                    clone,
+                    "related",
+                    seed,
+                    "--by",
+                    "cochange",
+                    "--rank",
+                    "pagerank",
+                    "--json",
+                )
+                cases.append(
+                    {
+                        "heldout_commit": commit["hash"][:12],
+                        "parent": parent[:12],
+                        "seed": seed,
+                        "expected": sorted(expected),
+                        "index": {
+                            "commits_indexed": index["data"]["commits_indexed"],
+                            "ignored_large_commits": index["data"][
+                                "ignored_large_commits"
+                            ],
+                            "edge_count": index["data"]["edge_count"],
+                        },
+                        "methods": {
+                            "workspace_related_direct": ranking_metrics(
+                                paths(direct, "data", "related"), expected, k
+                            ),
+                            "workspace_related_pagerank": ranking_metrics(
+                                paths(pagerank, "data", "related"), expected, k
+                            ),
+                        },
+                    }
+                )
+
+            if heldout_commits >= max_heldout_commits:
+                break
+
+    return {
+        "metric": "repo_temporal_holdout",
+        "repo": str(repo),
+        "k": k,
+        "candidate_commit_count": len(commits),
+        "heldout_commit_count": heldout_commits,
+        "case_count": len(cases),
+        "skipped": skipped,
+        "cases": cases,
+        "aggregate": aggregate_metric_sets(cases, k) if cases else {},
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--repo-holdout",
+        type=Path,
+        help="optionally add temporal holdout metrics for a real git repository",
+    )
+    parser.add_argument("--max-heldout-commits", type=int, default=5)
+    parser.add_argument("--max-candidate-commits", type=int, default=40)
+    parser.add_argument("--max-files-per-commit", type=int, default=40)
+    parser.add_argument("--k", type=int, default=5)
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     bin_path = workspace_bin()
+    measurements = [
+        measure_observation(bin_path),
+        measure_related_and_impact(bin_path),
+        measure_retrieval_suite(bin_path),
+        measure_transaction(bin_path),
+    ]
+    if args.repo_holdout is not None:
+        measurements.append(
+            measure_repo_holdout(
+                bin_path,
+                args.repo_holdout,
+                max_heldout_commits=args.max_heldout_commits,
+                max_candidate_commits=args.max_candidate_commits,
+                max_files_per_commit=args.max_files_per_commit,
+                k=args.k,
+            )
+        )
+
     report = {
         "workspace_bin": str(bin_path),
-        "measurements": [
-            measure_observation(bin_path),
-            measure_related_and_impact(bin_path),
-            measure_retrieval_suite(bin_path),
-            measure_transaction(bin_path),
-        ],
+        "measurements": measurements,
     }
     print(json.dumps(report, indent=2, sort_keys=True))
 
