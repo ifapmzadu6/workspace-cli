@@ -132,11 +132,14 @@ cutoff, which defaults to 5:
 - a default cutoff sweep at @1, @3, and @5
 - an optional hybrid direct-weight sweep for ablation
 
-The suite compares `git diff --name-only`, direct co-change ranking,
-personalized PageRank over the saved co-change index, hybrid ranking that
-combines direct co-change evidence with PageRank reachability, and the
-impact-specific PageRank ranking that lightly prioritizes tests over
-documentation noise.
+The suite compares `git diff --name-only`, a seed-agnostic recent-activity
+baseline, direct co-change ranking, personalized PageRank over the saved
+co-change index, hybrid ranking that combines direct co-change evidence with
+PageRank reachability, and the impact-specific PageRank ranking that lightly
+prioritizes tests over documentation noise.
+The recent-activity baseline ranks tracked files by their latest prior Git
+activity while excluding the seed files, so it controls for generally hot files
+without using any seed-specific relationship signal.
 
 ### Temporal Holdout
 
@@ -180,6 +183,9 @@ workspace_impact_direct recall@3: 0.333
 workspace_impact_pagerank recall@3: 1.000
 workspace_impact_hybrid recall@3: 1.000
 retrieval_suite git_diff_only mean_recall@5: 0.000
+retrieval_suite recent_activity mean_recall@5: 0.750
+retrieval_suite recent_activity mean_average_precision@5: 0.451
+retrieval_suite recent_activity mean_ndcg@5: 0.530
 retrieval_suite related_direct mean_recall@5: 0.611
 retrieval_suite related_pagerank mean_recall@5: 1.000
 retrieval_suite related_pagerank mean_average_precision@5: 0.900
@@ -196,15 +202,18 @@ retrieval_suite impact_pagerank mean_ndcg@5: 1.000
 retrieval_suite impact_hybrid mean_recall@5: 1.000
 retrieval_suite impact_hybrid mean_average_precision@5: 1.000
 retrieval_suite impact_hybrid mean_ndcg@5: 1.000
-repo_holdout direct mean_recall@5: 0.821
-repo_holdout direct mean_average_precision@5: 0.752
-repo_holdout direct mean_ndcg@5: 0.817
+repo_holdout recent_activity mean_recall@5: 1.000
+repo_holdout recent_activity mean_average_precision@5: 0.799
+repo_holdout recent_activity mean_ndcg@5: 0.856
+repo_holdout direct mean_recall@5: 0.885
+repo_holdout direct mean_average_precision@5: 0.874
+repo_holdout direct mean_ndcg@5: 0.913
 repo_holdout pagerank mean_recall@5: 1.000
-repo_holdout pagerank mean_average_precision@5: 0.631
-repo_holdout pagerank mean_ndcg@5: 0.726
+repo_holdout pagerank mean_average_precision@5: 0.641
+repo_holdout pagerank mean_ndcg@5: 0.730
 repo_holdout hybrid mean_recall@5: 1.000
-repo_holdout hybrid mean_average_precision@5: 0.887
-repo_holdout hybrid mean_ndcg@5: 0.921
+repo_holdout hybrid mean_average_precision@5: 0.962
+repo_holdout hybrid mean_ndcg@5: 0.972
 transaction_audit_signal_recall: 1.000
 ```
 
@@ -218,10 +227,14 @@ retrieval_suite related_hybrid - direct average_precision@5: +0.414 (0.000, 0.66
 retrieval_suite related_hybrid - direct ndcg@5: +0.372 (0.000, 0.586)
 retrieval_suite related_hybrid - pagerank average_precision@5: +0.000 (0.000, 0.000)
 retrieval_suite related_hybrid - pagerank ndcg@5: +0.000 (0.000, 0.000)
+retrieval_suite related_hybrid - recent_activity average_precision@5: +0.632 (0.375, 1.000)
+retrieval_suite related_hybrid - recent_activity ndcg@5: +0.577 (0.349, 1.000)
 retrieval_suite impact_hybrid - direct average_precision@5: +0.510 (0.167, 0.781)
 retrieval_suite impact_hybrid - direct ndcg@5: +0.413 (0.097, 0.649)
 retrieval_suite impact_hybrid - pagerank average_precision@5: +0.000 (0.000, 0.000)
 retrieval_suite impact_hybrid - pagerank ndcg@5: +0.000 (0.000, 0.000)
+retrieval_suite impact_hybrid - recent_activity average_precision@5: +0.549 (0.131, 0.881)
+retrieval_suite impact_hybrid - recent_activity ndcg@5: +0.470 (0.125, 0.846)
 ```
 
 A three-repository temporal holdout run can be reproduced with:
@@ -242,6 +255,9 @@ Representative aggregate over 9 held-out commits and 24 seed cases. Parentheses
 show deterministic bootstrap 95% confidence intervals for the mean:
 
 ```text
+cross_repo recent_activity recall@5: 0.646 (0.493, 0.778)
+cross_repo recent_activity average_precision@5: 0.455 (0.322, 0.587)
+cross_repo recent_activity ndcg@5: 0.541 (0.410, 0.662)
 cross_repo direct recall@5: 0.806 (0.667, 0.931)
 cross_repo direct average_precision@5: 0.689 (0.547, 0.826)
 cross_repo direct ndcg@5: 0.741 (0.600, 0.864)
@@ -255,6 +271,8 @@ cross_repo hybrid - direct average_precision@5: +0.059 (0.025, 0.097), wins/ties
 cross_repo hybrid - direct ndcg@5: +0.053 (0.023, 0.082), wins/ties/losses 10/14/0, p_greater=0.0008
 cross_repo hybrid - pagerank average_precision@5: +0.135 (0.031, 0.250), wins/ties/losses 5/19/0, p_greater=0.0318
 cross_repo hybrid - pagerank ndcg@5: +0.102 (0.031, 0.181), wins/ties/losses 5/19/0, p_greater=0.0311
+cross_repo hybrid - recent_activity average_precision@5: +0.293 (0.182, 0.395), wins/ties/losses 17/6/1, p_greater=0.0002
+cross_repo hybrid - recent_activity ndcg@5: +0.252 (0.141, 0.358), wins/ties/losses 17/6/1, p_greater=0.0005
 cross_repo pagerank - direct average_precision@5: -0.076 (-0.205, 0.035), wins/ties/losses 10/9/5, p_greater=0.8742
 cross_repo pagerank - direct ndcg@5: -0.049 (-0.153, 0.039), wins/ties/losses 10/9/5, p_greater=0.8239
 ```
@@ -262,20 +280,22 @@ cross_repo pagerank - direct ndcg@5: -0.049 (-0.153, 0.039), wins/ties/losses 10
 Per-repository means show where the aggregate gain comes from:
 
 ```text
-workspace-cli cases: 6, direct AP@5: 1.000, pagerank AP@5: 0.458, hybrid AP@5: 1.000
-related-cli cases: 7, direct AP@5: 0.302, pagerank AP@5: 0.437, hybrid AP@5: 0.437
-llm-json-extract cases: 11, direct AP@5: 0.765, pagerank AP@5: 0.809, hybrid AP@5: 0.809
+workspace-cli cases: 6, recent AP@5: 0.792, direct AP@5: 1.000, pagerank AP@5: 0.458, hybrid AP@5: 1.000
+related-cli cases: 7, recent AP@5: 0.135, direct AP@5: 0.302, pagerank AP@5: 0.437, hybrid AP@5: 0.437
+llm-json-extract cases: 11, recent AP@5: 0.475, direct AP@5: 0.765, pagerank AP@5: 0.809, hybrid AP@5: 0.809
 ```
 
 The report also includes `repo_macro_average`, which treats each repository as
 one unit instead of weighting by seed-case count:
 
 ```text
+repo_macro recent_activity average_precision@5: 0.467 (0.135, 0.792)
 repo_macro direct average_precision@5: 0.689 (0.302, 1.000)
 repo_macro pagerank average_precision@5: 0.568 (0.437, 0.809)
 repo_macro hybrid average_precision@5: 0.749 (0.437, 1.000)
 repo_macro hybrid - direct average_precision@5: +0.059 (0.000, 0.135), wins/ties/losses 2/1/0
 repo_macro hybrid - pagerank average_precision@5: +0.181 (0.000, 0.542), wins/ties/losses 1/2/0
+repo_macro hybrid - recent_activity average_precision@5: +0.281 (0.208, 0.334), wins/ties/losses 3/0/0
 ```
 
 The report also includes a `cutoff_sweep` array for the same held-out cases.
@@ -283,11 +303,13 @@ Representative cross-repo average precision by cutoff:
 
 ```text
 cross_repo direct average_precision@1: 0.340
+cross_repo recent_activity average_precision@1: 0.208
 cross_repo pagerank average_precision@1: 0.205
 cross_repo hybrid average_precision@1: 0.413
 cross_repo hybrid - direct average_precision@1: +0.073 (0.024, 0.122), wins/ties/losses 6/18/0, p_greater=0.0170
 cross_repo hybrid - pagerank average_precision@1: +0.208 (0.042, 0.375), wins/ties/losses 5/19/0, p_greater=0.0314
 cross_repo direct average_precision@3: 0.546
+cross_repo recent_activity average_precision@3: 0.335
 cross_repo pagerank average_precision@3: 0.442
 cross_repo hybrid average_precision@3: 0.608
 cross_repo hybrid - direct average_precision@3: +0.062 (0.024, 0.110), wins/ties/losses 8/16/0, p_greater=0.0027

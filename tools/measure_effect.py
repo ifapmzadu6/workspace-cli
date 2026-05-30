@@ -24,18 +24,22 @@ ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_SAMPLES = 1000
 SIGN_FLIP_SAMPLES = 10000
 DEFAULT_CUTOFF_SWEEP = [1, 3, 5]
+RECENT_ACTIVITY_MAX_COMMITS = 500
 RELATED_COMPARISON_PAIRS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "workspace_related_pagerank"),
+    ("workspace_related_hybrid", "baseline_recent_activity"),
     ("workspace_related_pagerank", "workspace_related_direct"),
 ]
 IMPACT_COMPARISON_PAIRS = [
     ("workspace_impact_hybrid", "workspace_impact_direct"),
     ("workspace_impact_hybrid", "workspace_impact_pagerank"),
+    ("workspace_impact_hybrid", "baseline_recent_activity"),
     ("workspace_impact_pagerank", "workspace_impact_direct"),
 ]
 RETRIEVAL_BASE_METHODS = [
     "baseline_git_diff_only",
+    "baseline_recent_activity",
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
@@ -44,6 +48,7 @@ RETRIEVAL_BASE_METHODS = [
     "workspace_impact_hybrid",
 ]
 REPO_HOLDOUT_BASE_METHODS = [
+    "baseline_recent_activity",
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
@@ -603,6 +608,40 @@ def parse_git_name_only_commits(output: str) -> list[dict[str, Any]]:
     return commits
 
 
+def tracked_repo_paths(root: Path) -> set[str]:
+    return {
+        path
+        for path in git_text(root, "ls-files").splitlines()
+        if observable_repo_path(path) is not None
+    }
+
+
+def recent_activity_paths(
+    root: Path,
+    exclude: set[str],
+    *,
+    max_commits: int = RECENT_ACTIVITY_MAX_COMMITS,
+) -> list[str]:
+    tracked_paths = tracked_repo_paths(root)
+    output = git_text(
+        root,
+        "log",
+        "--format=commit:%H",
+        "--name-only",
+        f"--max-count={max_commits}",
+        "--",
+    )
+    ranked: list[str] = []
+    seen: set[str] = set()
+    for commit in parse_git_name_only_commits(output):
+        for path in commit["files"]:
+            if path in exclude or path in seen or path not in tracked_paths:
+                continue
+            ranked.append(path)
+            seen.add(path)
+    return ranked
+
+
 def make_history_fixture() -> tempfile.TemporaryDirectory[str]:
     temp = tempfile.TemporaryDirectory()
     root = Path(temp.name)
@@ -738,6 +777,7 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
         root = Path(name)
         workspace_json(bin_path, root, "index", "cochange", "--json")
         expected = {"src/session.rs", "src/cookie.rs", "tests/cookie_test.rs"}
+        recent_activity = recent_activity_paths(root, {"src/auth.rs"})
 
         direct = workspace_json(
             bin_path,
@@ -811,6 +851,9 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
             "metric": "related_and_impact_recall_at_3",
             "expected_impacted_files": sorted(expected),
             "baseline_git_diff_only": precision_recall(git_diff, expected, 3),
+            "baseline_recent_activity": precision_recall(
+                recent_activity, expected, 3
+            ),
             "workspace_related_direct": precision_recall(
                 paths(direct, "data", "related"), expected, 3
             ),
@@ -853,6 +896,7 @@ def evaluate_related_case(
         str(max_files_per_commit),
         "--json",
     )
+    recent_activity = recent_activity_paths(root, {target})
     direct = workspace_json(
         bin_path,
         root,
@@ -954,6 +998,11 @@ def evaluate_related_case(
     git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
     methods = {
         "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
+        "baseline_recent_activity": ranking_metrics(
+            recent_activity,
+            expected,
+            k,
+        ),
         "workspace_related_direct": ranking_metrics(
             paths(direct, "data", "related"), expected, k
         ),
@@ -1021,6 +1070,7 @@ def evaluate_impact_case(
         str(max_files_per_commit),
         "--json",
     )
+    recent_activity = recent_activity_paths(root, set(seed_files))
     for seed in seed_files:
         append(root / seed, "local evaluation change\n")
 
@@ -1075,6 +1125,11 @@ def evaluate_impact_case(
     git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
     methods = {
         "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
+        "baseline_recent_activity": ranking_metrics(
+            recent_activity,
+            expected,
+            k,
+        ),
         "workspace_impact_direct": ranking_metrics(
             paths(direct, "data", "impacted"), expected, k
         ),
@@ -1338,6 +1393,7 @@ def measure_repo_holdout(
                     continue
 
                 expected = set(files) - {seed}
+                recent_activity = recent_activity_paths(clone, {seed})
                 direct = workspace_json(
                     bin_path,
                     clone,
@@ -1390,6 +1446,9 @@ def measure_repo_holdout(
                     for weight in hybrid_weights
                 }
                 methods = {
+                    "baseline_recent_activity": ranking_metrics(
+                        recent_activity, expected, k
+                    ),
                     "workspace_related_direct": ranking_metrics(
                         paths(direct, "data", "related"), expected, k
                     ),

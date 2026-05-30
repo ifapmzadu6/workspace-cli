@@ -95,8 +95,9 @@ real `workspace` binary inside temporary workspaces. The tests cover
 Effect measurement is documented in
 [docs/effect-measurement.md](docs/effect-measurement.md) and implemented by
 `tools/measure_effect.py`. It measures observation coverage, related-file
-discovery across multiple history topologies, and audit/rollback evidence
-instead of only checking that commands run.
+discovery across multiple history topologies, seed-agnostic recent-activity
+baselines, and audit/rollback evidence instead of only checking that commands
+run.
 
 ### History-Based Related-File Observation
 

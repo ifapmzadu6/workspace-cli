@@ -12,6 +12,7 @@ from typing import Any
 
 METHOD_LABELS = {
     "baseline_git_diff_only": "git diff",
+    "baseline_recent_activity": "recent activity",
     "workspace_related_direct": "related direct",
     "workspace_related_pagerank": "related PageRank",
     "workspace_related_hybrid": "related hybrid",
@@ -21,6 +22,7 @@ METHOD_LABELS = {
 }
 METHOD_ORDER = [
     "baseline_git_diff_only",
+    "baseline_recent_activity",
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
@@ -29,11 +31,13 @@ METHOD_ORDER = [
     "workspace_impact_hybrid",
 ]
 RELATED_METHODS = [
+    "baseline_recent_activity",
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
 ]
 IMPACT_METHODS = [
+    "baseline_recent_activity",
     "workspace_impact_direct",
     "workspace_impact_pagerank",
     "workspace_impact_hybrid",
@@ -41,11 +45,13 @@ IMPACT_METHODS = [
 RELATED_COMPARISONS = [
     "workspace_related_hybrid_minus_workspace_related_direct",
     "workspace_related_hybrid_minus_workspace_related_pagerank",
+    "workspace_related_hybrid_minus_baseline_recent_activity",
     "workspace_related_pagerank_minus_workspace_related_direct",
 ]
 IMPACT_COMPARISONS = [
     "workspace_impact_hybrid_minus_workspace_impact_direct",
     "workspace_impact_hybrid_minus_workspace_impact_pagerank",
+    "workspace_impact_hybrid_minus_baseline_recent_activity",
     "workspace_impact_pagerank_minus_workspace_impact_direct",
 ]
 
@@ -320,14 +326,19 @@ def render_repo_holdout_table(report: dict[str, Any]) -> str:
         ndcg_metric = f"ndcg_at_{k}"
         hybrid_direct = "workspace_related_hybrid_minus_workspace_related_direct"
         hybrid_pagerank = "workspace_related_hybrid_minus_workspace_related_pagerank"
+        hybrid_recent = "workspace_related_hybrid_minus_baseline_recent_activity"
         rows.append(
             [
                 repo_label(holdout["repo"]),
                 str(holdout["case_count"]),
+                fmt_mean(aggregate["baseline_recent_activity"], ap_metric),
                 fmt_mean(aggregate["workspace_related_direct"], ap_metric),
                 fmt_mean(aggregate["workspace_related_pagerank"], ap_metric),
                 fmt_mean(aggregate["workspace_related_hybrid"], ap_metric),
                 fmt_mean(aggregate["workspace_related_hybrid"], ndcg_metric),
+                fmt_delta(deltas[hybrid_recent], ap_metric)
+                if hybrid_recent in deltas
+                else "",
                 fmt_delta(deltas[hybrid_direct], ap_metric)
                 if hybrid_direct in deltas
                 else "",
@@ -346,10 +357,12 @@ def render_repo_holdout_table(report: dict[str, Any]) -> str:
                 [
                     "repo",
                     "cases",
+                    "recent AP",
                     "direct AP",
                     "PageRank AP",
                     "hybrid AP",
                     "hybrid nDCG",
+                    "hybrid-recent delta AP",
                     "hybrid-direct delta AP",
                     "hybrid-PageRank delta AP",
                 ],
