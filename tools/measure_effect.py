@@ -25,29 +25,34 @@ BOOTSTRAP_SAMPLES = 1000
 SIGN_FLIP_SAMPLES = 10000
 DEFAULT_CUTOFF_SWEEP = [1, 3, 5]
 RECENT_ACTIVITY_MAX_COMMITS = 500
+GLOBAL_PAGERANK_ITERATIONS = 50
 RELATED_HYBRID_DEFAULT_DIRECT_WEIGHT = 0.5
 RELATED_HYBRID_LORO_METHOD = "workspace_related_hybrid_loro"
 RELATED_COMPARISON_PAIRS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "workspace_related_pagerank"),
     ("workspace_related_hybrid", "baseline_recent_activity"),
+    ("workspace_related_hybrid", "baseline_global_pagerank"),
     ("workspace_related_pagerank", "workspace_related_direct"),
 ]
 RELATED_LORO_COMPARISON_PAIRS = [
     (RELATED_HYBRID_LORO_METHOD, "workspace_related_direct"),
     (RELATED_HYBRID_LORO_METHOD, "workspace_related_pagerank"),
     (RELATED_HYBRID_LORO_METHOD, "baseline_recent_activity"),
+    (RELATED_HYBRID_LORO_METHOD, "baseline_global_pagerank"),
     (RELATED_HYBRID_LORO_METHOD, "workspace_related_hybrid"),
 ]
 IMPACT_COMPARISON_PAIRS = [
     ("workspace_impact_hybrid", "workspace_impact_direct"),
     ("workspace_impact_hybrid", "workspace_impact_pagerank"),
     ("workspace_impact_hybrid", "baseline_recent_activity"),
+    ("workspace_impact_hybrid", "baseline_global_pagerank"),
     ("workspace_impact_pagerank", "workspace_impact_direct"),
 ]
 RETRIEVAL_BASE_METHODS = [
     "baseline_git_diff_only",
     "baseline_recent_activity",
+    "baseline_global_pagerank",
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
@@ -57,6 +62,7 @@ RETRIEVAL_BASE_METHODS = [
 ]
 REPO_HOLDOUT_BASE_METHODS = [
     "baseline_recent_activity",
+    "baseline_global_pagerank",
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
@@ -936,6 +942,73 @@ def recent_activity_paths(
     return ranked
 
 
+def cochange_index(root: Path) -> dict[str, Any]:
+    return json.loads((root / ".workspace/index/cochange.json").read_text())
+
+
+def global_pagerank_paths(
+    root: Path,
+    exclude: set[str],
+    *,
+    iterations: int = GLOBAL_PAGERANK_ITERATIONS,
+    damping: float = 0.85,
+) -> list[str]:
+    index = cochange_index(root)
+    nodes = set(index["file_commit_counts"].keys())
+    graph: dict[str, list[tuple[str, float]]] = {node: [] for node in nodes}
+    for edge in index["edges"]:
+        weight = max(float(edge["weighted_cochanges"]), 0.0)
+        if weight == 0.0:
+            continue
+        a = edge["a"]
+        b = edge["b"]
+        nodes.add(a)
+        nodes.add(b)
+        graph.setdefault(a, []).append((b, weight))
+        graph.setdefault(b, []).append((a, weight))
+
+    if not nodes:
+        return []
+
+    node_list = sorted(nodes)
+    graph = {
+        node: sorted(graph.get(node, []), key=lambda item: item[0])
+        for node in node_list
+    }
+    node_count = len(nodes)
+    uniform = 1.0 / node_count
+    rank = {node: uniform for node in node_list}
+    outbound_weights = {
+        node: sum(weight for _, weight in graph.get(node, []))
+        for node in node_list
+    }
+    for _ in range(iterations):
+        next_rank = {node: (1.0 - damping) * uniform for node in node_list}
+        dangling_rank = 0.0
+        for node in node_list:
+            neighbors = graph.get(node, [])
+            total_weight = outbound_weights.get(node, 0.0)
+            if not neighbors or total_weight == 0.0:
+                dangling_rank += rank[node]
+                continue
+            for neighbor, weight in neighbors:
+                next_rank[neighbor] += damping * rank[node] * (weight / total_weight)
+        if dangling_rank:
+            dangling_share = damping * dangling_rank * uniform
+            for node in node_list:
+                next_rank[node] += dangling_share
+        rank = next_rank
+
+    return [
+        path
+        for path, _ in sorted(
+            rank.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+        if path not in exclude
+    ]
+
+
 def make_history_fixture() -> tempfile.TemporaryDirectory[str]:
     temp = tempfile.TemporaryDirectory()
     root = Path(temp.name)
@@ -1072,6 +1145,7 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
         workspace_json(bin_path, root, "index", "cochange", "--json")
         expected = {"src/session.rs", "src/cookie.rs", "tests/cookie_test.rs"}
         recent_activity = recent_activity_paths(root, {"src/auth.rs"})
+        global_pagerank = global_pagerank_paths(root, {"src/auth.rs"})
 
         direct = workspace_json(
             bin_path,
@@ -1148,6 +1222,9 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
             "baseline_recent_activity": precision_recall(
                 recent_activity, expected, 3
             ),
+            "baseline_global_pagerank": precision_recall(
+                global_pagerank, expected, 3
+            ),
             "workspace_related_direct": precision_recall(
                 paths(direct, "data", "related"), expected, 3
             ),
@@ -1191,6 +1268,7 @@ def evaluate_related_case(
         "--json",
     )
     recent_activity = recent_activity_paths(root, {target})
+    global_pagerank = global_pagerank_paths(root, {target})
     direct = workspace_json(
         bin_path,
         root,
@@ -1297,6 +1375,11 @@ def evaluate_related_case(
             expected,
             k,
         ),
+        "baseline_global_pagerank": ranking_metrics(
+            global_pagerank,
+            expected,
+            k,
+        ),
         "workspace_related_direct": ranking_metrics(
             paths(direct, "data", "related"), expected, k
         ),
@@ -1365,6 +1448,7 @@ def evaluate_impact_case(
         "--json",
     )
     recent_activity = recent_activity_paths(root, set(seed_files))
+    global_pagerank = global_pagerank_paths(root, set(seed_files))
     for seed in seed_files:
         append(root / seed, "local evaluation change\n")
 
@@ -1421,6 +1505,11 @@ def evaluate_impact_case(
         "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
         "baseline_recent_activity": ranking_metrics(
             recent_activity,
+            expected,
+            k,
+        ),
+        "baseline_global_pagerank": ranking_metrics(
+            global_pagerank,
             expected,
             k,
         ),
@@ -1696,6 +1785,7 @@ def measure_repo_holdout(
                 expected = set(files) - {seed}
                 predictable_expected = expected & parent_paths
                 recent_activity = recent_activity_paths(clone, {seed})
+                global_pagerank = global_pagerank_paths(clone, {seed})
                 direct = workspace_json(
                     bin_path,
                     clone,
@@ -1750,6 +1840,9 @@ def measure_repo_holdout(
                 methods = {
                     "baseline_recent_activity": ranking_metrics(
                         recent_activity, expected, k
+                    ),
+                    "baseline_global_pagerank": ranking_metrics(
+                        global_pagerank, expected, k
                     ),
                     "workspace_related_direct": ranking_metrics(
                         paths(direct, "data", "related"), expected, k
