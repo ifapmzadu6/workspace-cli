@@ -13,6 +13,7 @@ from typing import Any
 METHOD_LABELS = {
     "baseline_git_diff_only": "git diff",
     "baseline_path_locality": "path locality",
+    "baseline_lexical_similarity": "lexical similarity",
     "baseline_recent_activity": "recent activity",
     "baseline_global_pagerank": "global PageRank",
     "history_oracle_ceiling": "history oracle ceiling",
@@ -27,6 +28,7 @@ METHOD_LABELS = {
 METHOD_ORDER = [
     "baseline_git_diff_only",
     "baseline_path_locality",
+    "baseline_lexical_similarity",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "history_oracle_ceiling",
@@ -40,6 +42,7 @@ METHOD_ORDER = [
 ]
 RELATED_METHODS = [
     "baseline_path_locality",
+    "baseline_lexical_similarity",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "workspace_related_direct",
@@ -48,6 +51,7 @@ RELATED_METHODS = [
 ]
 HOLDOUT_RELATED_METHODS = [
     "baseline_path_locality",
+    "baseline_lexical_similarity",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "history_oracle_ceiling",
@@ -57,6 +61,7 @@ HOLDOUT_RELATED_METHODS = [
 ]
 IMPACT_METHODS = [
     "baseline_path_locality",
+    "baseline_lexical_similarity",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "workspace_impact_direct",
@@ -67,6 +72,7 @@ RELATED_COMPARISONS = [
     "workspace_related_hybrid_minus_workspace_related_direct",
     "workspace_related_hybrid_minus_workspace_related_pagerank",
     "workspace_related_hybrid_minus_baseline_path_locality",
+    "workspace_related_hybrid_minus_baseline_lexical_similarity",
     "workspace_related_hybrid_minus_baseline_recent_activity",
     "workspace_related_hybrid_minus_baseline_global_pagerank",
     "workspace_related_pagerank_minus_workspace_related_direct",
@@ -75,6 +81,7 @@ RELATED_LORO_COMPARISONS = [
     "workspace_related_hybrid_loro_minus_workspace_related_direct",
     "workspace_related_hybrid_loro_minus_workspace_related_pagerank",
     "workspace_related_hybrid_loro_minus_baseline_path_locality",
+    "workspace_related_hybrid_loro_minus_baseline_lexical_similarity",
     "workspace_related_hybrid_loro_minus_baseline_recent_activity",
     "workspace_related_hybrid_loro_minus_baseline_global_pagerank",
     "workspace_related_hybrid_loro_minus_workspace_related_hybrid",
@@ -83,6 +90,7 @@ IMPACT_COMPARISONS = [
     "workspace_impact_hybrid_minus_workspace_impact_direct",
     "workspace_impact_hybrid_minus_workspace_impact_pagerank",
     "workspace_impact_hybrid_minus_baseline_path_locality",
+    "workspace_impact_hybrid_minus_baseline_lexical_similarity",
     "workspace_impact_hybrid_minus_baseline_recent_activity",
     "workspace_impact_hybrid_minus_baseline_global_pagerank",
     "workspace_impact_pagerank_minus_workspace_impact_direct",
@@ -90,6 +98,7 @@ IMPACT_COMPARISONS = [
 CASE_DELTA_COMPARISONS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "baseline_path_locality"),
+    ("workspace_related_hybrid", "baseline_lexical_similarity"),
     ("workspace_related_hybrid", "baseline_recent_activity"),
     ("workspace_related_hybrid", "baseline_global_pagerank"),
 ]

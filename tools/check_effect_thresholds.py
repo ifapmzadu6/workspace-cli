@@ -103,10 +103,26 @@ def check_report(report: dict[str, Any], *, require_holdout: bool = False) -> li
     require_delta(
         failures,
         aggregate,
+        left="workspace_related_hybrid",
+        right="baseline_lexical_similarity",
+        metric="mean_average_precision_at_5",
+        minimum=0.25,
+    )
+    require_delta(
+        failures,
+        aggregate,
         left="workspace_impact_hybrid",
         right="workspace_impact_direct",
         metric="mean_average_precision_at_5",
         minimum=0.40,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_impact_hybrid",
+        right="baseline_lexical_similarity",
+        metric="mean_average_precision_at_5",
+        minimum=0.35,
     )
 
     repo_holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
@@ -141,6 +157,7 @@ def check_repo_holdout_thresholds(
     aggregate = holdout.get("aggregate", {})
     min_hybrid_ap = 0.70 if predictable else 0.63
     min_direct_delta = 0.08 if predictable else 0.05
+    min_lexical_delta = 0.35 if predictable else 0.30
     min_pagerank_delta = 0.09 if predictable else 0.08
     min_oracle_normalized = 0.75
     min_loro_ap = 0.70 if predictable else 0.62
@@ -166,6 +183,14 @@ def check_repo_holdout_thresholds(
         right="workspace_related_direct",
         metric="mean_average_precision_at_5",
         minimum=min_direct_delta,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid",
+        right="baseline_lexical_similarity",
+        metric="mean_average_precision_at_5",
+        minimum=min_lexical_delta,
     )
     require_delta(
         failures,
@@ -198,6 +223,7 @@ def check_repo_holdout_thresholds(
         holdout,
         min_ap=min_loro_ap,
         min_direct_delta=min_direct_delta,
+        min_lexical_delta=min_lexical_delta,
         label=label,
     )
 
@@ -350,6 +376,7 @@ def require_loro_thresholds(
     *,
     min_ap: float,
     min_direct_delta: float,
+    min_lexical_delta: float,
     label: str,
 ) -> None:
     loro = holdout.get("leave_one_repo_out_weight_selection")
@@ -380,6 +407,14 @@ def require_loro_thresholds(
         right="workspace_related_direct",
         metric="mean_average_precision_at_5",
         minimum=min_direct_delta,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid_loro",
+        right="baseline_lexical_similarity",
+        metric="mean_average_precision_at_5",
+        minimum=min_lexical_delta,
     )
 
 

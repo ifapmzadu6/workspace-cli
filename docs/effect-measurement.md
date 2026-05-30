@@ -157,15 +157,20 @@ cutoff, which defaults to 5:
 - an optional leave-one-repo-out direct-weight selection check when multiple
   temporal holdout repositories and sweep weights are provided
 
-The suite compares `git diff --name-only`, a seed-specific path-locality
-baseline, a seed-agnostic recent-activity baseline, seed-agnostic global
-PageRank over the co-change graph, direct co-change ranking, personalized
-PageRank over the saved co-change index, hybrid ranking that combines direct
-co-change evidence with PageRank reachability, and the impact-specific PageRank
-ranking that lightly prioritizes tests over documentation noise.
+The suite compares `git diff --name-only`, seed-specific path-locality and
+lexical-similarity baselines, a seed-agnostic recent-activity baseline,
+seed-agnostic global PageRank over the co-change graph, direct co-change
+ranking, personalized PageRank over the saved co-change index, hybrid ranking
+that combines direct co-change evidence with PageRank reachability, and the
+impact-specific PageRank ranking that lightly prioritizes tests over
+documentation noise.
 The path-locality baseline ranks tracked files by shared parent directories and
 file extensions with the seed files, so it controls for a cheap static
 seed-specific signal without using history.
+The lexical-similarity baseline ranks tracked files by token overlap in file
+and directory names after dropping common structural tokens such as source,
+test, documentation, and file-extension markers. It controls for cheap static
+name matching without using history.
 The recent-activity baseline ranks tracked files by their latest prior Git
 activity while excluding the seed files, so it controls for generally hot files
 without using any seed-specific relationship signal.
@@ -225,6 +230,9 @@ retrieval_suite git_diff_only mean_recall@5: 0.000
 retrieval_suite path_locality mean_recall@5: 1.000
 retrieval_suite path_locality mean_average_precision@5: 0.668
 retrieval_suite path_locality mean_ndcg@5: 0.782
+retrieval_suite lexical_similarity mean_recall@5: 0.708
+retrieval_suite lexical_similarity mean_average_precision@5: 0.400
+retrieval_suite lexical_similarity mean_ndcg@5: 0.502
 retrieval_suite recent_activity mean_recall@5: 0.750
 retrieval_suite recent_activity mean_average_precision@5: 0.451
 retrieval_suite recent_activity mean_ndcg@5: 0.530
@@ -277,6 +285,8 @@ retrieval_suite related_hybrid - pagerank average_precision@5: +0.000 (0.000, 0.
 retrieval_suite related_hybrid - pagerank ndcg@5: +0.000 (0.000, 0.000)
 retrieval_suite related_hybrid - path_locality average_precision@5: +0.204 (-0.133, 0.500)
 retrieval_suite related_hybrid - path_locality ndcg@5: +0.138 (-0.070, 0.369)
+retrieval_suite related_hybrid - lexical_similarity average_precision@5: +0.506 (0.000, 0.917)
+retrieval_suite related_hybrid - lexical_similarity ndcg@5: +0.470 (0.000, 0.798)
 retrieval_suite related_hybrid - recent_activity average_precision@5: +0.632 (0.375, 1.000)
 retrieval_suite related_hybrid - recent_activity ndcg@5: +0.577 (0.349, 1.000)
 retrieval_suite related_hybrid - global_pagerank average_precision@5: +0.317 (-0.050, 0.667)
@@ -287,6 +297,8 @@ retrieval_suite impact_hybrid - pagerank average_precision@5: +0.000 (0.000, 0.0
 retrieval_suite impact_hybrid - pagerank ndcg@5: +0.000 (0.000, 0.000)
 retrieval_suite impact_hybrid - path_locality average_precision@5: +0.332 (0.206, 0.479)
 retrieval_suite impact_hybrid - path_locality ndcg@5: +0.218 (0.097, 0.338)
+retrieval_suite impact_hybrid - lexical_similarity average_precision@5: +0.600 (0.225, 0.909)
+retrieval_suite impact_hybrid - lexical_similarity ndcg@5: +0.498 (0.191, 0.780)
 retrieval_suite impact_hybrid - recent_activity average_precision@5: +0.549 (0.131, 0.881)
 retrieval_suite impact_hybrid - recent_activity ndcg@5: +0.470 (0.125, 0.846)
 retrieval_suite impact_hybrid - global_pagerank average_precision@5: +0.375 (0.250, 0.563)
@@ -518,17 +530,21 @@ expanded cross_repo pagerank average_precision@5: 0.536 (0.443, 0.626)
 expanded cross_repo recent_activity average_precision@5: 0.450 (0.357, 0.543)
 expanded cross_repo global_pagerank average_precision@5: 0.471 (0.385, 0.562)
 expanded cross_repo path_locality average_precision@5: 0.100 (0.069, 0.135)
+expanded cross_repo lexical_similarity average_precision@5: 0.240 (0.151, 0.343)
 expanded cross_repo history_oracle_ceiling average_precision@5: 0.811 (0.733, 0.878)
 expanded cross_repo hybrid oracle-normalized average_precision@5: 0.789, oracle gap: 0.171
 expanded cross_repo hybrid - direct average_precision@5: +0.076 (0.028, 0.127), wins/ties/losses 23/19/8, p_greater=0.0019, holm_p_greater=0.0039
 expanded cross_repo hybrid - pagerank average_precision@5: +0.104 (0.046, 0.169), wins/ties/losses 12/38/0, p_greater=0.0002, holm_p_greater=0.0007
+expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.400 (0.297, 0.503), wins/ties/losses 39/10/1, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded cross_repo hybrid - recent_activity average_precision@5: +0.190 (0.125, 0.263), wins/ties/losses 36/11/3, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded cross_repo hybrid - global_pagerank average_precision@5: +0.169 (0.092, 0.250), wins/ties/losses 19/28/3, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded predictable cross_repo hybrid average_precision@5: 0.719 (0.626, 0.818)
+expanded predictable cross_repo lexical_similarity average_precision@5: 0.264 (0.164, 0.376)
 expanded predictable cross_repo history_oracle_ceiling average_precision@5: 0.908 (0.852, 0.963)
 expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.792, oracle gap: 0.189
 expanded predictable cross_repo hybrid - direct average_precision@5: +0.094 (0.039, 0.151), wins/ties/losses 23/17/8, p_greater=0.0008, holm_p_greater=0.0016
 expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.117 (0.057, 0.183), wins/ties/losses 12/36/0, p_greater=0.0002, holm_p_greater=0.0007
+expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.456 (0.336, 0.558), wins/ties/losses 39/8/1, p_greater=<0.0001, holm_p_greater=<0.0001
 ```
 
 The expanded manifest also runs a denser hybrid direct-weight sweep:

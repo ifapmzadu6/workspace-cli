@@ -14,6 +14,7 @@ import json
 import math
 import os
 import random
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -35,6 +36,7 @@ RELATED_COMPARISON_PAIRS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "workspace_related_pagerank"),
     ("workspace_related_hybrid", "baseline_path_locality"),
+    ("workspace_related_hybrid", "baseline_lexical_similarity"),
     ("workspace_related_hybrid", "baseline_recent_activity"),
     ("workspace_related_hybrid", "baseline_global_pagerank"),
     ("workspace_related_pagerank", "workspace_related_direct"),
@@ -43,6 +45,7 @@ RELATED_LORO_COMPARISON_PAIRS = [
     (RELATED_HYBRID_LORO_METHOD, "workspace_related_direct"),
     (RELATED_HYBRID_LORO_METHOD, "workspace_related_pagerank"),
     (RELATED_HYBRID_LORO_METHOD, "baseline_path_locality"),
+    (RELATED_HYBRID_LORO_METHOD, "baseline_lexical_similarity"),
     (RELATED_HYBRID_LORO_METHOD, "baseline_recent_activity"),
     (RELATED_HYBRID_LORO_METHOD, "baseline_global_pagerank"),
     (RELATED_HYBRID_LORO_METHOD, "workspace_related_hybrid"),
@@ -51,6 +54,7 @@ IMPACT_COMPARISON_PAIRS = [
     ("workspace_impact_hybrid", "workspace_impact_direct"),
     ("workspace_impact_hybrid", "workspace_impact_pagerank"),
     ("workspace_impact_hybrid", "baseline_path_locality"),
+    ("workspace_impact_hybrid", "baseline_lexical_similarity"),
     ("workspace_impact_hybrid", "baseline_recent_activity"),
     ("workspace_impact_hybrid", "baseline_global_pagerank"),
     ("workspace_impact_pagerank", "workspace_impact_direct"),
@@ -58,6 +62,7 @@ IMPACT_COMPARISON_PAIRS = [
 RETRIEVAL_BASE_METHODS = [
     "baseline_git_diff_only",
     "baseline_path_locality",
+    "baseline_lexical_similarity",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "workspace_related_direct",
@@ -69,6 +74,7 @@ RETRIEVAL_BASE_METHODS = [
 ]
 REPO_HOLDOUT_BASE_METHODS = [
     "baseline_path_locality",
+    "baseline_lexical_similarity",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     HISTORY_ORACLE_METHOD,
@@ -1068,6 +1074,63 @@ def path_locality_paths(root: Path, seeds: set[str]) -> list[str]:
     ]
 
 
+PATH_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+PATH_TOKEN_STOPWORDS = {
+    "src",
+    "test",
+    "tests",
+    "doc",
+    "docs",
+    "lib",
+    "rs",
+    "py",
+    "js",
+    "ts",
+    "tsx",
+    "md",
+    "json",
+    "toml",
+    "yaml",
+    "yml",
+}
+
+
+def path_tokens(path: str) -> set[str]:
+    camel_split = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", path)
+    return {
+        token.lower()
+        for token in PATH_TOKEN_RE.findall(camel_split)
+        if token and token.lower() not in PATH_TOKEN_STOPWORDS
+    }
+
+
+def lexical_similarity_score(candidate: str, seed: str) -> float:
+    candidate_tokens = path_tokens(candidate)
+    seed_tokens = path_tokens(seed)
+    if not candidate_tokens or not seed_tokens:
+        return 0.0
+    overlap = len(candidate_tokens & seed_tokens)
+    return overlap / math.sqrt(len(candidate_tokens) * len(seed_tokens))
+
+
+def lexical_similarity_paths(root: Path, seeds: set[str]) -> list[str]:
+    tracked_paths = sorted(tracked_repo_paths(root))
+    normalized_seeds = {path for path in seeds if path}
+    ranked = []
+    for path in tracked_paths:
+        if path in normalized_seeds:
+            continue
+        score = max(
+            (lexical_similarity_score(path, seed) for seed in normalized_seeds),
+            default=0.0,
+        )
+        ranked.append((score, path))
+    return [
+        path
+        for _, path in sorted(ranked, key=lambda item: (-item[0], item[1]))
+    ]
+
+
 def recent_activity_paths(
     root: Path,
     exclude: set[str],
@@ -1297,6 +1360,7 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
         workspace_json(bin_path, root, "index", "cochange", "--json")
         expected = {"src/session.rs", "src/cookie.rs", "tests/cookie_test.rs"}
         path_locality = path_locality_paths(root, {"src/auth.rs"})
+        lexical_similarity = lexical_similarity_paths(root, {"src/auth.rs"})
         recent_activity = recent_activity_paths(root, {"src/auth.rs"})
         global_pagerank = global_pagerank_paths(root, {"src/auth.rs"})
 
@@ -1375,6 +1439,9 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
             "baseline_path_locality": precision_recall(
                 path_locality, expected, 3
             ),
+            "baseline_lexical_similarity": precision_recall(
+                lexical_similarity, expected, 3
+            ),
             "baseline_recent_activity": precision_recall(
                 recent_activity, expected, 3
             ),
@@ -1424,6 +1491,7 @@ def evaluate_related_case(
         "--json",
     )
     path_locality = path_locality_paths(root, {target})
+    lexical_similarity = lexical_similarity_paths(root, {target})
     recent_activity = recent_activity_paths(root, {target})
     global_pagerank = global_pagerank_paths(root, {target})
     direct = workspace_json(
@@ -1532,6 +1600,11 @@ def evaluate_related_case(
             expected,
             k,
         ),
+        "baseline_lexical_similarity": ranking_metrics(
+            lexical_similarity,
+            expected,
+            k,
+        ),
         "baseline_recent_activity": ranking_metrics(
             recent_activity,
             expected,
@@ -1611,6 +1684,7 @@ def evaluate_impact_case(
     )
     seed_set = set(seed_files)
     path_locality = path_locality_paths(root, seed_set)
+    lexical_similarity = lexical_similarity_paths(root, seed_set)
     recent_activity = recent_activity_paths(root, seed_set)
     global_pagerank = global_pagerank_paths(root, seed_set)
     for seed in seed_files:
@@ -1669,6 +1743,11 @@ def evaluate_impact_case(
         "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
         "baseline_path_locality": ranking_metrics(
             path_locality,
+            expected,
+            k,
+        ),
+        "baseline_lexical_similarity": ranking_metrics(
+            lexical_similarity,
             expected,
             k,
         ),
@@ -1954,6 +2033,7 @@ def measure_repo_holdout(
                 expected = set(files) - {seed}
                 predictable_expected = expected & parent_paths
                 path_locality = path_locality_paths(clone, {seed})
+                lexical_similarity = lexical_similarity_paths(clone, {seed})
                 recent_activity = recent_activity_paths(clone, {seed})
                 global_pagerank = global_pagerank_paths(clone, {seed})
                 direct = workspace_json(
@@ -2013,6 +2093,9 @@ def measure_repo_holdout(
                     ),
                     "baseline_path_locality": ranking_metrics(
                         path_locality, expected, k
+                    ),
+                    "baseline_lexical_similarity": ranking_metrics(
+                        lexical_similarity, expected, k
                     ),
                     "baseline_recent_activity": ranking_metrics(
                         recent_activity, expected, k

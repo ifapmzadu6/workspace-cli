@@ -120,6 +120,32 @@ class HoldoutOracleTests(unittest.TestCase):
         self.assertEqual(oracle["mean_average_precision_at_5"], 1.0)
 
 
+class StaticBaselineTests(unittest.TestCase):
+    def test_path_tokens_split_names_and_ignore_structural_tokens(self) -> None:
+        self.assertEqual(
+            measure_effect.path_tokens("src/authCookie_test.rs"),
+            {"auth", "cookie"},
+        )
+
+    def test_lexical_similarity_ranks_name_overlap_without_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            measure_effect.git(root, "init", "-q")
+            for path in [
+                "src/auth.rs",
+                "src/session.rs",
+                "tests/auth_test.rs",
+                "docs/auth.md",
+            ]:
+                measure_effect.write(root / path, f"{path}\n")
+            measure_effect.git(root, "add", ".")
+
+            ranked = measure_effect.lexical_similarity_paths(root, {"src/auth.rs"})
+
+        self.assertNotIn("src/auth.rs", ranked)
+        self.assertEqual(ranked[:2], ["docs/auth.md", "tests/auth_test.rs"])
+
+
 class SummaryFormattingTests(unittest.TestCase):
     def test_small_p_values_render_without_rounding_to_zero(self) -> None:
         self.assertEqual(
@@ -188,13 +214,16 @@ class EffectThresholdTests(unittest.TestCase):
             )
         return entries
 
-    def loro_selection(self, ap: float, direct_ap: float) -> dict:
+    def loro_selection(self, ap: float, direct_ap: float, lexical_ap: float) -> dict:
         return {
             "candidate_weights": check_effect_thresholds.EXPECTED_HYBRID_WEIGHT_SWEEP,
             "selections": [{}, {}, {}],
             "aggregate": {
                 "workspace_related_direct": {
                     "mean_average_precision_at_5": direct_ap,
+                },
+                "baseline_lexical_similarity": {
+                    "mean_average_precision_at_5": lexical_ap,
                 },
                 "workspace_related_hybrid_loro": {
                     "mean_average_precision_at_5": ap,
@@ -211,6 +240,9 @@ class EffectThresholdTests(unittest.TestCase):
                     "workspace_related_direct": {
                         "mean_average_precision_at_5": 0.62,
                     },
+                    "baseline_lexical_similarity": {
+                        "mean_average_precision_at_5": 0.20,
+                    },
                     "workspace_related_pagerank": {
                         "mean_average_precision_at_5": 0.60,
                     },
@@ -225,6 +257,7 @@ class EffectThresholdTests(unittest.TestCase):
                 "leave_one_repo_out_weight_selection": self.loro_selection(
                     0.71,
                     0.62,
+                    0.20,
                 ),
             }
         return {
@@ -235,6 +268,9 @@ class EffectThresholdTests(unittest.TestCase):
             "aggregate": {
                 "workspace_related_direct": {
                     "mean_average_precision_at_5": 0.56,
+                },
+                "baseline_lexical_similarity": {
+                    "mean_average_precision_at_5": 0.20,
                 },
                 "workspace_related_pagerank": {
                     "mean_average_precision_at_5": 0.53,
@@ -247,7 +283,11 @@ class EffectThresholdTests(unittest.TestCase):
                 },
             },
             "hybrid_weight_sweep": self.weight_sweep(0.64),
-            "leave_one_repo_out_weight_selection": self.loro_selection(0.63, 0.56),
+            "leave_one_repo_out_weight_selection": self.loro_selection(
+                0.63,
+                0.56,
+                0.20,
+            ),
             "predictable_only": self.repo_holdout(predictable=True),
         }
 
@@ -271,6 +311,9 @@ class EffectThresholdTests(unittest.TestCase):
                     "aggregate": {
                         "workspace_related_direct": {
                             "mean_average_precision_at_5": 0.50,
+                        },
+                        "baseline_lexical_similarity": {
+                            "mean_average_precision_at_5": 0.40,
                         },
                         "workspace_related_hybrid": {
                             "mean_recall_at_5": 1.0,
@@ -317,6 +360,17 @@ class EffectThresholdTests(unittest.TestCase):
                 "workspace_related_hybrid.mean_average_precision_at_5" in item
                 for item in failures
             ),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_when_lexical_baseline_catches_hybrid(self) -> None:
+        report = self.passing_report()
+        report["measurements"][-1]["aggregate"]["baseline_lexical_similarity"][
+            "mean_average_precision_at_5"
+        ] = 0.40
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any("baseline_lexical_similarity" in item for item in failures),
             failures,
         )
 
