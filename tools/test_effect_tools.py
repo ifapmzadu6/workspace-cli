@@ -337,6 +337,48 @@ class EffectThresholdTests(unittest.TestCase):
             "paired_deltas": self.paired_deltas("workspace_related_hybrid_loro"),
         }
 
+    def repo_macro_average(self, *, predictable: bool) -> dict:
+        if predictable:
+            hybrid_ap = 0.76
+            direct_ap = 0.66
+            pagerank_ap = 0.61
+            content_ap = 0.42
+            recent_ap = 0.52
+            global_ap = 0.53
+        else:
+            hybrid_ap = 0.69
+            direct_ap = 0.62
+            pagerank_ap = 0.56
+            content_ap = 0.38
+            recent_ap = 0.50
+            global_ap = 0.51
+        return {
+            "repo_count": 3,
+            "aggregate": {
+                "workspace_related_direct": {
+                    "mean_average_precision_at_5": direct_ap,
+                },
+                "workspace_related_pagerank": {
+                    "mean_average_precision_at_5": pagerank_ap,
+                },
+                "baseline_lexical_similarity": {
+                    "mean_average_precision_at_5": 0.25,
+                },
+                "baseline_content_similarity": {
+                    "mean_average_precision_at_5": content_ap,
+                },
+                "baseline_recent_activity": {
+                    "mean_average_precision_at_5": recent_ap,
+                },
+                "baseline_global_pagerank": {
+                    "mean_average_precision_at_5": global_ap,
+                },
+                "workspace_related_hybrid": {
+                    "mean_average_precision_at_5": hybrid_ap,
+                },
+            },
+        }
+
     def repo_holdout(self, *, predictable: bool) -> dict:
         if predictable:
             return {
@@ -379,6 +421,7 @@ class EffectThresholdTests(unittest.TestCase):
                     global_ap=0.50,
                 ),
                 "paired_deltas": self.paired_deltas("workspace_related_hybrid"),
+                "repo_macro_average": self.repo_macro_average(predictable=True),
             }
         return {
             "metric": "repo_temporal_holdout_aggregate",
@@ -422,6 +465,7 @@ class EffectThresholdTests(unittest.TestCase):
                 global_ap=0.42,
             ),
             "paired_deltas": self.paired_deltas("workspace_related_hybrid"),
+            "repo_macro_average": self.repo_macro_average(predictable=False),
             "predictable_only": self.repo_holdout(predictable=True),
         }
 
@@ -544,6 +588,17 @@ class EffectThresholdTests(unittest.TestCase):
                 "p_greater_holm_delta_average_precision_at_5" in item
                 for item in failures
             ),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_when_repo_macro_average_degrades(self) -> None:
+        report = self.passing_report()
+        report["measurements"][-1]["repo_macro_average"]["aggregate"][
+            "workspace_related_hybrid"
+        ]["mean_average_precision_at_5"] = 0.50
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any("repo_macro_average" in item for item in failures),
             failures,
         )
 

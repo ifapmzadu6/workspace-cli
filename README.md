@@ -93,7 +93,8 @@ report from `tools/measure_effect.py` and fails if the fixture effect drops
 below the expected floor. For paper-style temporal holdout reports, add
 `--require-holdout` to also enforce the dense cross-repo holdout thresholds,
 including minimum AP deltas against static, activity, centrality, direct, and
-PageRank baselines plus Holm-adjusted paired sign-flip p-value ceilings.
+PageRank baselines, repo-macro checks that prevent one repository from
+dominating the aggregate, plus Holm-adjusted paired sign-flip p-value ceilings.
 `tools/run_effect_artifacts.py --paper` runs measurement, threshold checking,
 and Markdown rendering into one reproducible artifact directory:
 
@@ -119,7 +120,8 @@ distributions, history-only oracle ceilings, and case-level win/loss
 diagnostics for paper-style reproducibility checks. It also reports
 oracle-normalized AP, oracle gaps, and leave-one-repo-out hybrid weight
 selection when sweep weights are provided. Paper holdout threshold checks gate
-both the effect sizes and the corrected paired significance of the key deltas.
+case-weighted and repo-macro effect sizes plus the corrected paired
+significance of the key deltas.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`.

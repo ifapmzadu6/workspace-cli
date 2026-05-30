@@ -193,6 +193,9 @@ def check_repo_holdout_thresholds(
     min_pagerank_delta = 0.11 if predictable else 0.10
     min_oracle_normalized = 0.75
     min_loro_ap = 0.71 if predictable else 0.63
+    min_macro_hybrid_ap = 0.75 if predictable else 0.68
+    min_macro_direct_delta = 0.08 if predictable else 0.06
+    min_macro_pagerank_delta = 0.12 if predictable else 0.10
     ap_metric = "mean_average_precision_at_5"
     delta_metric = "average_precision_at_5"
 
@@ -281,6 +284,22 @@ def check_repo_holdout_thresholds(
         maximum=MAX_HOLDOUT_HOLM_P,
         label=label,
     )
+    repo_macro = holdout.get("repo_macro_average")
+    if not isinstance(repo_macro, dict):
+        failures.append(f"{label} missing repo_macro_average")
+    else:
+        check_repo_macro_thresholds(
+            failures,
+            repo_macro,
+            min_ap=min_macro_hybrid_ap,
+            min_direct_delta=min_macro_direct_delta,
+            min_pagerank_delta=min_macro_pagerank_delta,
+            min_lexical_delta=min_lexical_delta,
+            min_content_delta=min_content_delta,
+            min_recent_delta=min_recent_delta,
+            min_global_delta=min_global_delta,
+            label=f"{label}.repo_macro_average",
+        )
 
     require_weight_sweep(failures, holdout, EXPECTED_HYBRID_WEIGHT_SWEEP, label)
     require_weight_ap(
@@ -318,20 +337,103 @@ def require_count(
         failures.append(f"{label}.{key} < {minimum}: {value}")
 
 
+def check_repo_macro_thresholds(
+    failures: list[str],
+    macro: dict[str, Any],
+    *,
+    min_ap: float,
+    min_direct_delta: float,
+    min_pagerank_delta: float,
+    min_lexical_delta: float,
+    min_content_delta: float,
+    min_recent_delta: float,
+    min_global_delta: float,
+    label: str,
+) -> None:
+    require_count(failures, macro, "repo_count", 3, label)
+    aggregate = macro.get("aggregate", {})
+    metric = "mean_average_precision_at_5"
+    require_mean(
+        failures,
+        aggregate,
+        "workspace_related_hybrid",
+        metric,
+        min_ap,
+        label=label,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid",
+        right="workspace_related_direct",
+        metric=metric,
+        minimum=min_direct_delta,
+        label=label,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid",
+        right="workspace_related_pagerank",
+        metric=metric,
+        minimum=min_pagerank_delta,
+        label=label,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid",
+        right="baseline_lexical_similarity",
+        metric=metric,
+        minimum=min_lexical_delta,
+        label=label,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid",
+        right="baseline_content_similarity",
+        metric=metric,
+        minimum=min_content_delta,
+        label=label,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid",
+        right="baseline_recent_activity",
+        metric=metric,
+        minimum=min_recent_delta,
+        label=label,
+    )
+    require_delta(
+        failures,
+        aggregate,
+        left="workspace_related_hybrid",
+        right="baseline_global_pagerank",
+        metric=metric,
+        minimum=min_global_delta,
+        label=label,
+    )
+
+
 def require_mean(
     failures: list[str],
     aggregate: dict[str, Any],
     method: str,
     metric: str,
     minimum: float,
+    *,
+    label: str | None = None,
 ) -> None:
+    prefix = f"{label}." if label else ""
     summary = aggregate.get(method)
     if summary is None:
-        failures.append(f"missing aggregate method: {method}")
+        failures.append(f"missing aggregate method: {prefix}{method}")
         return
     value = float(summary.get(metric, 0.0))
     if value < minimum:
-        failures.append(f"{method}.{metric} < {minimum}: {value}")
+        failures.append(f"{prefix}{method}.{metric} < {minimum}: {value}")
 
 
 def require_delta(
@@ -342,15 +444,19 @@ def require_delta(
     right: str,
     metric: str,
     minimum: float,
+    label: str | None = None,
 ) -> None:
+    prefix = f"{label}." if label else ""
     left_summary = aggregate.get(left)
     right_summary = aggregate.get(right)
     if left_summary is None or right_summary is None:
-        failures.append(f"missing aggregate delta inputs: {left} - {right}")
+        failures.append(f"missing aggregate delta inputs: {prefix}{left} - {right}")
         return
     delta = float(left_summary.get(metric, 0.0)) - float(right_summary.get(metric, 0.0))
     if delta + FLOAT_TOLERANCE < minimum:
-        failures.append(f"{left}.{metric} - {right}.{metric} < {minimum}: {delta}")
+        failures.append(
+            f"{prefix}{left}.{metric} - {right}.{metric} < {minimum}: {delta}"
+        )
 
 
 def require_oracle_normalized(
