@@ -162,6 +162,91 @@ class SummaryFormattingTests(unittest.TestCase):
 
 
 class EffectThresholdTests(unittest.TestCase):
+    def weight_sweep(self, ap: float) -> list[dict]:
+        entries = []
+        for weight in check_effect_thresholds.EXPECTED_HYBRID_WEIGHT_SWEEP:
+            method = check_effect_thresholds.hybrid_weight_method(
+                "workspace_related_hybrid",
+                weight,
+            )
+            entries.append(
+                {
+                    "hybrid_direct_weight": weight,
+                    "related": {
+                        "method": method,
+                        "aggregate": {
+                            method: {
+                                "mean_average_precision_at_5": ap,
+                            },
+                        },
+                    },
+                }
+            )
+        return entries
+
+    def loro_selection(self, ap: float, direct_ap: float) -> dict:
+        return {
+            "candidate_weights": check_effect_thresholds.EXPECTED_HYBRID_WEIGHT_SWEEP,
+            "selections": [{}, {}, {}],
+            "aggregate": {
+                "workspace_related_direct": {
+                    "mean_average_precision_at_5": direct_ap,
+                },
+                "workspace_related_hybrid_loro": {
+                    "mean_average_precision_at_5": ap,
+                },
+            },
+        }
+
+    def repo_holdout(self, *, predictable: bool) -> dict:
+        if predictable:
+            return {
+                "case_count": 48,
+                "target_count": 190,
+                "aggregate": {
+                    "workspace_related_direct": {
+                        "mean_average_precision_at_5": 0.62,
+                    },
+                    "workspace_related_pagerank": {
+                        "mean_average_precision_at_5": 0.60,
+                    },
+                    "workspace_related_hybrid": {
+                        "mean_average_precision_at_5": 0.72,
+                    },
+                    "history_oracle_ceiling": {
+                        "mean_average_precision_at_5": 0.90,
+                    },
+                },
+                "hybrid_weight_sweep": self.weight_sweep(0.72),
+                "leave_one_repo_out_weight_selection": self.loro_selection(
+                    0.71,
+                    0.62,
+                ),
+            }
+        return {
+            "metric": "repo_temporal_holdout_aggregate",
+            "repo_count": 3,
+            "case_count": 50,
+            "target_count": 207,
+            "aggregate": {
+                "workspace_related_direct": {
+                    "mean_average_precision_at_5": 0.56,
+                },
+                "workspace_related_pagerank": {
+                    "mean_average_precision_at_5": 0.53,
+                },
+                "workspace_related_hybrid": {
+                    "mean_average_precision_at_5": 0.64,
+                },
+                "history_oracle_ceiling": {
+                    "mean_average_precision_at_5": 0.81,
+                },
+            },
+            "hybrid_weight_sweep": self.weight_sweep(0.64),
+            "leave_one_repo_out_weight_selection": self.loro_selection(0.63, 0.56),
+            "predictable_only": self.repo_holdout(predictable=True),
+        }
+
     def passing_report(self) -> dict:
         return {
             "metadata": {
@@ -196,6 +281,7 @@ class EffectThresholdTests(unittest.TestCase):
                         },
                     },
                 },
+                self.repo_holdout(predictable=False),
             ],
         }
 
@@ -214,6 +300,35 @@ class EffectThresholdTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "workspace_related_hybrid.mean_average_precision_at_5" in item
+                for item in failures
+            ),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_when_dense_holdout_sweep_is_missing(self) -> None:
+        report = self.passing_report()
+        holdout = report["measurements"][-1]
+        holdout["hybrid_weight_sweep"] = [
+            entry
+            for entry in holdout["hybrid_weight_sweep"]
+            if entry["hybrid_direct_weight"] != 0.75
+        ]
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any("hybrid_weight_sweep missing weights" in item for item in failures),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_for_degraded_holdout_loro(self) -> None:
+        report = self.passing_report()
+        holdout = report["measurements"][-1]
+        holdout["leave_one_repo_out_weight_selection"]["aggregate"][
+            "workspace_related_hybrid_loro"
+        ]["mean_average_precision_at_5"] = 0.50
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any(
+                "workspace_related_hybrid_loro.mean_average_precision_at_5" in item
                 for item in failures
             ),
             failures,
