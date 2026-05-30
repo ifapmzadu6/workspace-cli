@@ -604,6 +604,9 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                         "workspace_related_direct": {
                             "mean_average_precision_at_5": 0.564,
                         },
+                        "history_oracle_ceiling": {
+                            "mean_average_precision_at_5": 0.7,
+                        },
                     },
                     "paired_deltas": {
                         "workspace_related_hybrid_minus_workspace_related_direct": {
@@ -659,6 +662,9 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                         "workspace_related_direct": {
                             "mean_average_precision_at_5": 0.5,
                         },
+                        "history_oracle_ceiling": {
+                            "mean_average_precision_at_5": 1.0,
+                        },
                     },
                     "paired_deltas": {},
                     "hybrid_weight_sweep": [],
@@ -697,6 +703,24 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                 "average_precision_at_5"
             ]["mean"],
             0.651,
+        )
+        self.assertEqual(
+            holdout["oracle_normalized"]["workspace_related_hybrid"][
+                "oracle_normalized_average_precision_at_5"
+            ],
+            0.93,
+        )
+        self.assertEqual(
+            holdout["oracle_normalized"]["workspace_related_hybrid"][
+                "oracle_gap_average_precision_at_5"
+            ],
+            0.049,
+        )
+        self.assertEqual(
+            holdout["per_repo"][0]["oracle_normalized"]["workspace_related_hybrid"][
+                "oracle_normalized_average_precision_at_5"
+            ],
+            0.75,
         )
         self.assertEqual(
             holdout["key_deltas"][

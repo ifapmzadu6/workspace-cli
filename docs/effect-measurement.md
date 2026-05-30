@@ -52,8 +52,9 @@ manifest path/hash, pinned holdout repositories, and holdout remote URLs. The
 Markdown summary
 renders the same metadata before the metric tables, while
 `result_summary.json` extracts the headline metrics, full weight sweep, best
-weight result, per-repository holdout results, and leakage audit into a compact
-machine-readable form. The run manifest records the exact generation commands,
+weight result, per-repository holdout results, oracle-normalized AP gaps, and
+leakage audit into a compact machine-readable form. The run manifest records the
+exact generation commands,
 verifier command, and SHA-256 checksums for each generated artifact. The
 verifier checks required files, JSON parseability, a passing threshold log,
 manifest hash consistency, recomputed threshold gates, and result-summary

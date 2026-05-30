@@ -116,6 +116,41 @@ def delta_metrics(
     return result
 
 
+def oracle_normalized_metrics(
+    measurement: dict[str, Any],
+    methods: list[str],
+) -> dict[str, Any]:
+    k = measurement.get("k", 5)
+    metric = f"average_precision_at_{k}"
+    aggregate = measurement.get("aggregate", {})
+    if not isinstance(aggregate, dict):
+        return {}
+    oracle = aggregate.get("history_oracle_ceiling", {})
+    if not isinstance(oracle, dict):
+        return {}
+    oracle_mean = oracle.get(f"mean_{metric}")
+    if oracle_mean is None or float(oracle_mean) <= 0.0:
+        return {}
+
+    result = {}
+    for method in methods:
+        summary = aggregate.get(method)
+        if not isinstance(summary, dict):
+            continue
+        method_mean = summary.get(f"mean_{metric}")
+        if method_mean is None:
+            continue
+        result[method] = {
+            metric: rounded(method_mean),
+            f"oracle_{metric}": rounded(oracle_mean),
+            f"oracle_normalized_{metric}": rounded(
+                float(method_mean) / float(oracle_mean)
+            ),
+            f"oracle_gap_{metric}": rounded(float(oracle_mean) - float(method_mean)),
+        }
+    return result
+
+
 def best_weight_sweep(measurement: dict[str, Any], group: str) -> dict[str, Any]:
     k = measurement.get("k", 5)
     metric = f"mean_average_precision_at_{k}"
@@ -284,6 +319,17 @@ def headline_holdout_summary(holdout: dict[str, Any]) -> dict[str, Any]:
                 "workspace_related_hybrid_minus_baseline_global_pagerank",
             ]
         },
+        "oracle_normalized": oracle_normalized_metrics(
+            holdout,
+            [
+                "workspace_related_hybrid",
+                "workspace_related_direct",
+                "workspace_related_pagerank",
+                "baseline_content_similarity",
+                "baseline_recent_activity",
+                "baseline_global_pagerank",
+            ],
+        ),
         "best_weight_sweep": best_weight_sweep(holdout, "related"),
         "weight_sweep": weight_sweep_summary(
             holdout,
