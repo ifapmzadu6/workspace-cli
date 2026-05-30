@@ -130,7 +130,8 @@ summary of the headline metrics, weight sweep result, and leakage audit.
 generated artifact. `tools/verify_effect_artifacts.py` checks that the artifact
 directory has all required files, parseable JSON outputs, a passing threshold
 log, SHA-256 hashes that match the run manifest, a recomputed threshold pass,
-and a result summary that matches `effect.json`.
+and a result summary that matches `effect.json`. The manifest also records the
+verifier command for artifact consumers.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`.

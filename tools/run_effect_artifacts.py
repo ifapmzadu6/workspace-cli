@@ -69,6 +69,11 @@ def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
         str(TOOLS_DIR / "extract_effect_summary.py"),
         str(json_path),
     ]
+    verify_command = [
+        sys.executable,
+        str(TOOLS_DIR / "verify_effect_artifacts.py"),
+        str(output_dir),
+    ]
 
     return {
         "output_dir": output_dir,
@@ -81,6 +86,7 @@ def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
         "threshold_command": threshold_command,
         "summary_command": summary_command,
         "result_summary_command": result_summary_command,
+        "verify_command": verify_command,
         "manifest": manifest,
         "require_holdout_thresholds": manifest is not None,
     }
@@ -141,6 +147,7 @@ def write_run_manifest(plan: dict[str, Any]) -> None:
             "check_thresholds": plan["threshold_command"],
             "summarize": plan["summary_command"],
             "extract_result_summary": plan["result_summary_command"],
+            "verify_artifacts": plan["verify_command"],
         },
     }
     plan["run_manifest_path"].write_text(

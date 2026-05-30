@@ -879,6 +879,10 @@ class EffectArtifactRunnerTests(unittest.TestCase):
                 plan["result_summary_command"],
             )
             self.assertEqual(
+                run_manifest["commands"]["verify_artifacts"],
+                plan["verify_command"],
+            )
+            self.assertEqual(
                 run_manifest["result_summary"],
                 str(plan["result_summary_path"]),
             )
