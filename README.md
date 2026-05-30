@@ -101,6 +101,7 @@ directory:
 
 ```sh
 python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
+python3 tools/verify_effect_artifacts.py target/effect-paper
 ```
 
 In addition to unit tests, the repository has integration tests that run the
@@ -126,7 +127,9 @@ significance of the key deltas.
 The artifact runner also writes `result_summary.json`, a compact machine-readable
 summary of the headline metrics, weight sweep result, and leakage audit.
 `run_manifest.json` records the exact commands and SHA-256 checksums for each
-generated artifact.
+generated artifact. `tools/verify_effect_artifacts.py` checks that the artifact
+directory has all required files, parseable JSON outputs, a passing threshold
+log, and SHA-256 hashes that match the run manifest.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`.

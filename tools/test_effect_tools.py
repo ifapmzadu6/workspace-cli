@@ -29,6 +29,7 @@ summarize_effect = load_tool("summarize_effect")
 check_effect_thresholds = load_tool("check_effect_thresholds")
 run_effect_artifacts = load_tool("run_effect_artifacts")
 extract_effect_summary = load_tool("extract_effect_summary")
+verify_effect_artifacts = load_tool("verify_effect_artifacts")
 
 
 class ExactSignFlipTests(unittest.TestCase):
@@ -897,6 +898,85 @@ class EffectArtifactRunnerTests(unittest.TestCase):
                 run_effect_artifacts.file_sha256(plan["threshold_path"]),
             )
             self.assertFalse(run_manifest["require_holdout_thresholds"])
+
+
+class EffectArtifactVerifierTests(unittest.TestCase):
+    def write_artifact_set(self, output_dir: Path) -> None:
+        output_dir.mkdir()
+        artifacts = {
+            "effect.json": json.dumps({"measurements": []}) + "\n",
+            "effect.md": "# Effect Report\n",
+            "result_summary.json": (
+                json.dumps({"schema_version": 1, "repo_temporal_holdout": {}})
+                + "\n"
+            ),
+            "thresholds.txt": "effect threshold check passed\n",
+        }
+        for filename, content in artifacts.items():
+            (output_dir / filename).write_text(content, encoding="utf-8")
+
+        run_manifest = {
+            "commands": {
+                "measure": ["python3", "tools/measure_effect.py"],
+                "check_thresholds": ["python3", "tools/check_effect_thresholds.py"],
+                "summarize": ["python3", "tools/summarize_effect.py"],
+                "extract_result_summary": [
+                    "python3",
+                    "tools/extract_effect_summary.py",
+                ],
+            },
+            "require_holdout_thresholds": True,
+            "sha256": {
+                key: verify_effect_artifacts.file_sha256(output_dir / filename)
+                for key, filename in verify_effect_artifacts.ARTIFACT_FILES.items()
+            },
+        }
+        (output_dir / "run_manifest.json").write_text(
+            json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def test_artifact_verifier_accepts_complete_artifact_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+
+            self.assertEqual(
+                verify_effect_artifacts.verify_artifact_directory(output_dir),
+                [],
+            )
+
+    def test_artifact_verifier_rejects_checksum_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            (output_dir / "effect.md").write_text(
+                "# Modified Report\n",
+                encoding="utf-8",
+            )
+
+            failures = verify_effect_artifacts.verify_artifact_directory(output_dir)
+
+        self.assertTrue(
+            any("effect.md sha256 mismatch" in failure for failure in failures),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_missing_threshold_pass_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            (output_dir / "thresholds.txt").write_text(
+                "effect threshold check failed\n",
+                encoding="utf-8",
+            )
+
+            failures = verify_effect_artifacts.verify_artifact_directory(output_dir)
+
+        self.assertTrue(
+            any("thresholds.txt does not contain" in failure for failure in failures),
+            failures,
+        )
 
 
 if __name__ == "__main__":
