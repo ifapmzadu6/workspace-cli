@@ -22,6 +22,16 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_SAMPLES = 1000
+RELATED_COMPARISON_PAIRS = [
+    ("workspace_related_hybrid", "workspace_related_direct"),
+    ("workspace_related_hybrid", "workspace_related_pagerank"),
+    ("workspace_related_pagerank", "workspace_related_direct"),
+]
+IMPACT_COMPARISON_PAIRS = [
+    ("workspace_impact_hybrid", "workspace_impact_direct"),
+    ("workspace_impact_hybrid", "workspace_impact_pagerank"),
+    ("workspace_impact_pagerank", "workspace_impact_direct"),
+]
 
 
 def run(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -150,6 +160,44 @@ def aggregate_metric_sets(scenarios: list[dict[str, Any]], k: int) -> dict[str, 
         method_summary["scenario_count"] = len(values)
         aggregate[method] = method_summary
     return aggregate
+
+
+def paired_delta_metric_sets(
+    scenarios: list[dict[str, Any]],
+    k: int,
+    pairs: list[tuple[str, str]],
+) -> dict[str, Any]:
+    metric_names = [
+        f"precision_at_{k}",
+        f"recall_at_{k}",
+        f"average_precision_at_{k}",
+        "mrr",
+        f"ndcg_at_{k}",
+    ]
+    deltas: dict[str, Any] = {}
+    for left, right in pairs:
+        common = [
+            scenario
+            for scenario in scenarios
+            if left in scenario["methods"] and right in scenario["methods"]
+        ]
+        if not common:
+            continue
+
+        comparison_name = f"{left}_minus_{right}"
+        comparison: dict[str, Any] = {"scenario_count": len(common)}
+        for metric_name in metric_names:
+            values = [
+                scenario["methods"][left][metric_name]
+                - scenario["methods"][right][metric_name]
+                for scenario in common
+            ]
+            comparison[f"mean_delta_{metric_name}"] = round(mean(values), 3)
+            low, high = bootstrap_mean_ci(values, comparison_name, metric_name)
+            comparison[f"ci95_low_delta_{metric_name}"] = round(low, 3)
+            comparison[f"ci95_high_delta_{metric_name}"] = round(high, 3)
+        deltas[comparison_name] = comparison
+    return deltas
 
 
 def mean(values: list[float]) -> float:
@@ -407,6 +455,16 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
         )
 
         append(root / "src/auth.rs", "local auth change\n")
+        direct_impact = workspace_json(
+            bin_path,
+            root,
+            "impact",
+            "--diff",
+            "--by",
+            "cochange",
+            "--use-index",
+            "--json",
+        )
         impact = workspace_json(
             bin_path,
             root,
@@ -443,6 +501,9 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
             ),
             "workspace_related_hybrid": precision_recall(
                 paths(hybrid, "data", "related"), expected, 3
+            ),
+            "workspace_impact_direct": precision_recall(
+                paths(direct_impact, "data", "impacted"), expected, 3
             ),
             "workspace_impact_pagerank": precision_recall(
                 paths(impact, "data", "impacted"), expected, 3
@@ -506,6 +567,16 @@ def evaluate_related_case(
     )
 
     append(root / target, "local evaluation change\n")
+    direct_impact = workspace_json(
+        bin_path,
+        root,
+        "impact",
+        "--diff",
+        "--by",
+        "cochange",
+        "--use-index",
+        "--json",
+    )
     impact = workspace_json(
         bin_path,
         root,
@@ -550,6 +621,9 @@ def evaluate_related_case(
             ),
             "workspace_related_hybrid": ranking_metrics(
                 paths(hybrid, "data", "related"), expected, k
+            ),
+            "workspace_impact_direct": ranking_metrics(
+                paths(direct_impact, "data", "impacted"), expected, k
             ),
             "workspace_impact_pagerank": ranking_metrics(
                 paths(impact, "data", "impacted"), expected, k
@@ -701,6 +775,11 @@ def measure_retrieval_suite(bin_path: Path) -> dict[str, Any]:
         "scenario_count": len(scenarios),
         "scenarios": scenarios,
         "aggregate": aggregate_metric_sets(scenarios, k),
+        "paired_deltas": paired_delta_metric_sets(
+            scenarios,
+            k,
+            RELATED_COMPARISON_PAIRS + IMPACT_COMPARISON_PAIRS,
+        ),
     }
 
 
@@ -914,6 +993,13 @@ def measure_repo_holdout(
         "skipped": skipped,
         "cases": cases,
         "aggregate": aggregate_metric_sets(cases, k) if cases else {},
+        "paired_deltas": paired_delta_metric_sets(
+            cases,
+            k,
+            RELATED_COMPARISON_PAIRS,
+        )
+        if cases
+        else {},
     }
 
 
@@ -942,6 +1028,13 @@ def aggregate_repo_holdouts(holdouts: list[dict[str, Any]], k: int) -> dict[str,
         "case_count": len(cases),
         "skipped": skipped,
         "aggregate": aggregate_metric_sets(cases, k) if cases else {},
+        "paired_deltas": paired_delta_metric_sets(
+            cases,
+            k,
+            RELATED_COMPARISON_PAIRS,
+        )
+        if cases
+        else {},
     }
 
 

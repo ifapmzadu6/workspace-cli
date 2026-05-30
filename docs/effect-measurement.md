@@ -76,6 +76,7 @@ The measurement compares:
 - `workspace related --use-index`
 - `workspace related --rank pagerank`
 - `workspace related --rank hybrid`
+- `workspace impact --diff --use-index`
 - `workspace impact --diff --rank pagerank`
 - `workspace impact --diff --rank hybrid`
 
@@ -97,6 +98,7 @@ For each scenario the script reports:
 - mean reciprocal rank
 - nDCG@5
 - deterministic bootstrap 95% confidence intervals for aggregate means
+- paired mean deltas with deterministic bootstrap 95% confidence intervals
 
 The suite compares `git diff --name-only`, direct co-change ranking,
 personalized PageRank over the saved co-change index, hybrid ranking that
@@ -131,8 +133,9 @@ reverse a change:
 
 ## Current Result
 
-Run `python3 tools/measure_effect.py` to refresh these numbers. A representative
-result for the current MVP is:
+Run `python3 tools/measure_effect.py` to refresh fixture numbers, and add
+`--repo-holdout .` to refresh the repo holdout numbers. A representative result
+for the current MVP is:
 
 ```text
 map_fact_recall: 1.000
@@ -140,29 +143,50 @@ git_diff_only recall@3: 0.000
 workspace_related_direct recall@3: 0.333
 workspace_related_pagerank recall@3: 1.000
 workspace_related_hybrid recall@3: 1.000
+workspace_impact_direct recall@3: 0.333
 workspace_impact_pagerank recall@3: 1.000
 workspace_impact_hybrid recall@3: 1.000
 retrieval_suite git_diff_only mean_recall@5: 0.000
-retrieval_suite direct_cochange mean_recall@5: 0.500-0.611
+retrieval_suite related_direct mean_recall@5: 0.611
 retrieval_suite related_pagerank mean_recall@5: 1.000
 retrieval_suite related_pagerank mean_average_precision@5: 0.900
 retrieval_suite related_pagerank mean_ndcg@5: 0.950
 retrieval_suite related_hybrid mean_recall@5: 1.000
 retrieval_suite related_hybrid mean_average_precision@5: 0.900
 retrieval_suite related_hybrid mean_ndcg@5: 0.950
+retrieval_suite impact_direct mean_recall@5: 0.583
+retrieval_suite impact_direct mean_average_precision@5: 0.489
+retrieval_suite impact_direct mean_ndcg@5: 0.587
 retrieval_suite impact_pagerank mean_recall@5: 1.000
 retrieval_suite impact_pagerank mean_average_precision@5: 1.000
 retrieval_suite impact_pagerank mean_ndcg@5: 1.000
 retrieval_suite impact_hybrid mean_recall@5: 1.000
 retrieval_suite impact_hybrid mean_average_precision@5: 1.000
 retrieval_suite impact_hybrid mean_ndcg@5: 1.000
-repo_holdout direct mean_recall@5: 0.857
-repo_holdout direct mean_average_precision@5: 0.548
+repo_holdout direct mean_recall@5: 0.821
+repo_holdout direct mean_average_precision@5: 0.752
+repo_holdout direct mean_ndcg@5: 0.817
 repo_holdout pagerank mean_recall@5: 1.000
-repo_holdout pagerank mean_average_precision@5: 0.426
+repo_holdout pagerank mean_average_precision@5: 0.631
+repo_holdout pagerank mean_ndcg@5: 0.726
 repo_holdout hybrid mean_recall@5: 1.000
-repo_holdout hybrid mean_average_precision@5: 0.583
+repo_holdout hybrid mean_average_precision@5: 0.887
+repo_holdout hybrid mean_ndcg@5: 0.921
 transaction_audit_signal_recall: 1.000
+```
+
+Representative paired deltas over the retrieval suite. Parentheses show
+deterministic bootstrap 95% confidence intervals for the mean paired delta:
+
+```text
+retrieval_suite related_hybrid - direct average_precision@5: +0.414 (0.000, 0.667)
+retrieval_suite related_hybrid - direct ndcg@5: +0.372 (0.000, 0.586)
+retrieval_suite related_hybrid - pagerank average_precision@5: +0.000 (0.000, 0.000)
+retrieval_suite related_hybrid - pagerank ndcg@5: +0.000 (0.000, 0.000)
+retrieval_suite impact_hybrid - direct average_precision@5: +0.510 (0.167, 0.781)
+retrieval_suite impact_hybrid - direct ndcg@5: +0.413 (0.097, 0.649)
+retrieval_suite impact_hybrid - pagerank average_precision@5: +0.000 (0.000, 0.000)
+retrieval_suite impact_hybrid - pagerank ndcg@5: +0.000 (0.000, 0.000)
 ```
 
 A three-repository temporal holdout run can be reproduced with:
@@ -180,15 +204,21 @@ Representative aggregate over 9 held-out commits and 27 seed cases. Parentheses
 show deterministic bootstrap 95% confidence intervals for the mean:
 
 ```text
-cross_repo direct recall@5: 0.772 (0.648, 0.883)
-cross_repo direct average_precision@5: 0.663 (0.531, 0.789)
-cross_repo direct ndcg@5: 0.728 (0.612, 0.836)
+cross_repo direct recall@5: 0.772 (0.648, 0.877)
+cross_repo direct average_precision@5: 0.663 (0.540, 0.786)
+cross_repo direct ndcg@5: 0.728 (0.612, 0.837)
 cross_repo pagerank recall@5: 0.827 (0.691, 0.938)
-cross_repo pagerank average_precision@5: 0.637 (0.501, 0.775)
-cross_repo pagerank ndcg@5: 0.709 (0.579, 0.826)
+cross_repo pagerank average_precision@5: 0.643 (0.513, 0.773)
+cross_repo pagerank ndcg@5: 0.714 (0.584, 0.833)
 cross_repo hybrid recall@5: 0.827 (0.704, 0.938)
-cross_repo hybrid average_precision@5: 0.757 (0.633, 0.880)
-cross_repo hybrid ndcg@5: 0.803 (0.676, 0.907)
+cross_repo hybrid average_precision@5: 0.776 (0.650, 0.895)
+cross_repo hybrid ndcg@5: 0.817 (0.693, 0.917)
+cross_repo hybrid - direct average_precision@5: +0.113 (0.059, 0.174)
+cross_repo hybrid - direct ndcg@5: +0.089 (0.047, 0.135)
+cross_repo hybrid - pagerank average_precision@5: +0.133 (0.047, 0.234)
+cross_repo hybrid - pagerank ndcg@5: +0.103 (0.031, 0.179)
+cross_repo pagerank - direct average_precision@5: -0.020 (-0.147, 0.099)
+cross_repo pagerank - direct ndcg@5: -0.014 (-0.112, 0.069)
 ```
 
 Interpretation: the CLI is not just running; it measurably improves observation
