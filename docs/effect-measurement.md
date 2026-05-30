@@ -464,6 +464,41 @@ LORO predictable hybrid - recent_activity average_precision@5: +0.368 (0.218, 0.
 LORO predictable hybrid - global_pagerank average_precision@5: +0.347 (0.211, 0.497), wins/ties/losses 11/11/0, p_greater=0.0009
 ```
 
+A larger fixed-ref stress run increases the temporal holdout window to 50
+candidate commits and up to 5 held-out commits per repository:
+
+```sh
+python3 tools/measure_effect.py \
+  --repo-holdout . \
+  --repo-holdout-ref 104bbc9155b2ab7df8159f6cb1efe26cd8e95a48 \
+  --repo-holdout ../related-cli \
+  --repo-holdout-ref 5cf1f671993ff93b908dd23e46819a10408042c2 \
+  --repo-holdout ../llm-json-extract \
+  --repo-holdout-ref 9631a65ab4797fb9260d90fc68db9526811a3be6 \
+  --max-heldout-commits 5 \
+  --max-candidate-commits 50 \
+  --hybrid-direct-weight-sweep 0,0.05,0.5,1
+```
+
+That expanded run contains 15 held-out commits, 50 seed cases, and 207 target
+file labels. It preserves the main result with tighter aggregate evidence:
+
+```text
+expanded cross_repo hybrid average_precision@5: 0.640 (0.543, 0.734)
+expanded cross_repo direct average_precision@5: 0.564 (0.468, 0.655)
+expanded cross_repo pagerank average_precision@5: 0.536 (0.443, 0.626)
+expanded cross_repo recent_activity average_precision@5: 0.450 (0.357, 0.543)
+expanded cross_repo global_pagerank average_precision@5: 0.471 (0.385, 0.562)
+expanded cross_repo path_locality average_precision@5: 0.100 (0.069, 0.135)
+expanded cross_repo hybrid - direct average_precision@5: +0.076 (0.028, 0.127), wins/ties/losses 23/19/8, p_greater=0.0019
+expanded cross_repo hybrid - pagerank average_precision@5: +0.104 (0.046, 0.169), wins/ties/losses 12/38/0, p_greater=0.0006
+expanded cross_repo hybrid - recent_activity average_precision@5: +0.190 (0.125, 0.263), wins/ties/losses 36/11/3, p_greater=0.0001
+expanded cross_repo hybrid - global_pagerank average_precision@5: +0.169 (0.092, 0.250), wins/ties/losses 19/28/3, p_greater=0.0001
+expanded predictable cross_repo hybrid average_precision@5: 0.719 (0.626, 0.818)
+expanded predictable cross_repo hybrid - direct average_precision@5: +0.094 (0.039, 0.151), wins/ties/losses 23/17/8, p_greater=0.0006
+expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.117 (0.057, 0.183), wins/ties/losses 12/36/0, p_greater=0.0005
+```
+
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and
 multi-seed fixtures, while preserving auditable change/rollback evidence.
