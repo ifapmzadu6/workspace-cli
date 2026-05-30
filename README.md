@@ -151,8 +151,8 @@ verifier command for artifact consumers.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`. `tools/prepare_effect_holdouts.py`
-can clone or refresh those repositories from their recorded remotes and write a
-local manifest for the artifact runner.
+can clone or refresh those repositories from their recorded public HTTPS remotes
+and write a local manifest for the artifact runner.
 Effect reports include reproducibility metadata with the workspace commit,
 dirty state, resampling counts, exact sign-flip p-value method, holdout
 manifest hash, pinned repository refs and remote URLs, and a temporal leakage

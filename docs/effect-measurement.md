@@ -101,8 +101,8 @@ python3 tools/measure_effect.py --hybrid-direct-weight-sweep 0,0.05,0.1,0.25,0.5
 
 The fixed-ref cross-repository setup used for the paper-style results is stored
 in `tools/effect_paper_holdouts.json`. Its entries pin each repository ref and
-may include `remote_url` so artifact metadata records how to fetch the source
-history:
+include public HTTPS `remote_url` values so artifact metadata records how to
+fetch the source history:
 
 ```sh
 python3 tools/measure_effect.py \

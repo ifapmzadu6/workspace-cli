@@ -2,17 +2,17 @@
   "repo_holdouts": [
     {
       "repo": ".",
-      "remote_url": "git@github.com:ifapmzadu6/workspace-cli.git",
+      "remote_url": "https://github.com/ifapmzadu6/workspace-cli.git",
       "ref": "104bbc9155b2ab7df8159f6cb1efe26cd8e95a48"
     },
     {
       "repo": "../related-cli",
-      "remote_url": "git@github.com:ifapmzadu6/related-cli.git",
+      "remote_url": "https://github.com/ifapmzadu6/related-cli.git",
       "ref": "5cf1f671993ff93b908dd23e46819a10408042c2"
     },
     {
       "repo": "../llm-json-extract",
-      "remote_url": "git@github.com:ifapmzadu6/llm-json-extract.git",
+      "remote_url": "https://github.com/ifapmzadu6/llm-json-extract.git",
       "ref": "9631a65ab4797fb9260d90fc68db9526811a3be6"
     }
   ],
