@@ -202,6 +202,43 @@ class HoldoutOracleTests(unittest.TestCase):
             "https://example.test/repo.git",
         )
 
+    def test_repo_holdout_manifest_preserves_prepared_source_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manifest = Path(tmp_dir) / "holdouts.local.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "prepared_from": {
+                            "manifest": "tools/effect_paper_holdouts.json",
+                            "manifest_sha256": "a" * 64,
+                        },
+                        "repo_holdouts": [
+                            {
+                                "repo": ".",
+                                "ref": "abcdef",
+                                "remote_url": "https://example.test/repo.git",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                repo_holdout_manifest=manifest,
+                repo_holdout=[],
+                repo_holdout_ref=[],
+            )
+
+            measure_effect.apply_repo_holdout_manifest(args, argparse.ArgumentParser())
+
+        self.assertEqual(
+            args.repo_holdout_manifest_prepared_from,
+            {
+                "manifest": "tools/effect_paper_holdouts.json",
+                "manifest_sha256": "a" * 64,
+            },
+        )
+
 
 class HoldoutPreparationTests(unittest.TestCase):
     def test_safe_repo_dir_name_uses_remote_basename(self) -> None:
@@ -257,6 +294,15 @@ class HoldoutPreparationTests(unittest.TestCase):
             )
 
             local_manifest = json.loads(output_manifest.read_text(encoding="utf-8"))
+            self.assertEqual(
+                local_manifest["prepared_from"],
+                {
+                    "manifest": str(manifest),
+                    "manifest_sha256": prepare_effect_holdouts.file_sha256(
+                        manifest
+                    ),
+                },
+            )
             repos = local_manifest["repo_holdouts"]
             self.assertEqual(repos[0]["repo"], str(root / "repos" / "workspace-cli"))
             self.assertEqual(repos[1]["repo"], str(root / "repos" / "workspace-cli-2"))
@@ -452,6 +498,23 @@ class SummaryFormattingTests(unittest.TestCase):
 
         self.assertIn("../example@abcdef1234", table)
         self.assertIn("https://example.test/repo.git", table)
+
+    def test_metadata_table_includes_holdout_source_manifest(self) -> None:
+        table = summarize_effect.render_metadata_table(
+            {
+                "metadata": {
+                    "workspace_bin": "target/debug/workspace",
+                    "repo_holdout_manifest": "target/effect-repos/holdouts.local.json",
+                    "repo_holdout_manifest_sha256": "b" * 64,
+                    "repo_holdout_source_manifest": "tools/effect_paper_holdouts.json",
+                    "repo_holdout_source_manifest_sha256": "c" * 64,
+                }
+            }
+        )
+
+        self.assertIn("target/effect-repos/holdouts.local.json", table)
+        self.assertIn("tools/effect_paper_holdouts.json", table)
+        self.assertIn("cccccccccccccccc", table)
 
     def test_oracle_normalized_table_reports_gap(self) -> None:
         table = summarize_effect.render_oracle_normalized_table(

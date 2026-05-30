@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -35,6 +36,14 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(manifest, dict):
         raise ManifestError("holdout manifest must be a JSON object")
     return manifest
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as input_file:
+        for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def manifest_entries(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -167,8 +176,14 @@ def local_manifest_payload(
     manifest: dict[str, Any],
     entries: list[dict[str, Any]],
     local_repos: list[Path],
+    source_manifest: Path,
+    source_manifest_hash_path: Path,
 ) -> dict[str, Any]:
     payload = dict(manifest)
+    payload["prepared_from"] = {
+        "manifest": str(source_manifest),
+        "manifest_sha256": file_sha256(source_manifest_hash_path),
+    }
     local_entries = []
     for index, (entry, local_repo) in enumerate(
         zip(entries, local_repos),
@@ -190,6 +205,7 @@ def prepare_holdouts(
     *,
     runner: Runner = subprocess.run,
 ) -> dict[str, Any]:
+    source_manifest = manifest_path
     manifest_path = resolve_user_path(manifest_path)
     repo_root = resolve_user_path(repo_root)
     output_manifest = resolve_user_path(output_manifest)
@@ -205,7 +221,13 @@ def prepare_holdouts(
             runner=runner,
         )
 
-    payload = local_manifest_payload(manifest, entries, local_repos)
+    payload = local_manifest_payload(
+        manifest,
+        entries,
+        local_repos,
+        source_manifest,
+        manifest_path,
+    )
     output_manifest.parent.mkdir(parents=True, exist_ok=True)
     output_manifest.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",

@@ -309,6 +309,20 @@ def render_metadata_table(report: dict[str, Any]) -> str:
                 str(metadata["repo_holdout_manifest_sha256"])[:16],
             ]
         )
+    if metadata.get("repo_holdout_source_manifest"):
+        rows.append(
+            [
+                "source manifest",
+                str(metadata["repo_holdout_source_manifest"]),
+            ]
+        )
+    if metadata.get("repo_holdout_source_manifest_sha256"):
+        rows.append(
+            [
+                "source manifest sha256",
+                str(metadata["repo_holdout_source_manifest_sha256"])[:16],
+            ]
+        )
     return "\n".join(
         [
             "## Reproducibility Metadata",

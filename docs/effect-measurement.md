@@ -53,8 +53,8 @@ python3 tools/verify_effect_artifacts.py target/effect-paper
 
 The JSON report includes reproducibility metadata: the workspace commit, dirty
 state, primary cutoff, resampling counts, sign-flip p-value method, holdout
-manifest path/hash, pinned holdout repositories, and holdout remote URLs. The
-Markdown summary
+manifest path/hash, source manifest hash for prepared local manifests, pinned
+holdout repositories, and holdout remote URLs. The Markdown summary
 renders the same metadata before the metric tables, while
 `result_summary.json` extracts the headline metrics, full weight sweep, best
 weight result, per-repository holdout results, oracle-normalized AP gaps, and
@@ -116,8 +116,9 @@ python3 tools/measure_effect.py \
 
 For a clean machine, `tools/prepare_effect_holdouts.py` clones or refreshes the
 recorded remotes into a chosen directory, verifies that each pinned ref resolves
-to a commit, and writes a local manifest that can be passed to
-`--repo-holdout-manifest` or `tools/run_effect_artifacts.py --manifest`.
+to a commit, and writes a local manifest that records the source manifest path
+and hash before being passed to `--repo-holdout-manifest` or
+`tools/run_effect_artifacts.py --manifest`.
 
 This checks out each held-out commit's parent in a temporary clone, builds the
 co-change index from only the older history, and measures whether

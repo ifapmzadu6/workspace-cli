@@ -2567,6 +2567,29 @@ def apply_repo_holdout_manifest(
     args.repo_holdout = repos
     args.repo_holdout_ref = refs
     args.repo_holdout_manifest_records = manifest_records
+    prepared_from = manifest.get("prepared_from")
+    if prepared_from is not None:
+        if not isinstance(prepared_from, dict):
+            parser.error("--repo-holdout-manifest prepared_from must be an object")
+        source_manifest = prepared_from.get("manifest")
+        source_manifest_sha256 = prepared_from.get("manifest_sha256")
+        if not isinstance(source_manifest, str) or not source_manifest:
+            parser.error(
+                "--repo-holdout-manifest prepared_from.manifest "
+                "must be a non-empty string"
+            )
+        if (
+            not isinstance(source_manifest_sha256, str)
+            or not source_manifest_sha256
+        ):
+            parser.error(
+                "--repo-holdout-manifest prepared_from.manifest_sha256 "
+                "must be a non-empty string"
+            )
+        args.repo_holdout_manifest_prepared_from = {
+            "manifest": source_manifest,
+            "manifest_sha256": source_manifest_sha256,
+        }
 
     for field in [
         "max_heldout_commits",
@@ -2683,6 +2706,12 @@ def measurement_metadata(
         metadata["repo_holdout_manifest_sha256"] = file_sha256(
             args.repo_holdout_manifest
         )
+        prepared_from = getattr(args, "repo_holdout_manifest_prepared_from", None)
+        if prepared_from:
+            metadata["repo_holdout_source_manifest"] = prepared_from["manifest"]
+            metadata["repo_holdout_source_manifest_sha256"] = prepared_from[
+                "manifest_sha256"
+            ]
     return metadata
 
 
