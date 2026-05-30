@@ -379,10 +379,13 @@ def render_cutoff_table(
                 metric = f"average_precision_at_{k}"
                 row.append(fmt_delta_ci(deltas[comparison], metric))
                 row.append(
-                    fmt_number(deltas[comparison][f"p_greater_delta_{metric}"], 4)
+                    fmt_p_value(deltas[comparison], f"p_greater_delta_{metric}")
+                )
+                row.append(
+                    fmt_p_value(deltas[comparison], f"p_greater_holm_delta_{metric}")
                 )
             else:
-                row.extend(["", ""])
+                row.extend(["", "", ""])
         rows.append(row)
 
     headers = ["k"]
@@ -390,6 +393,7 @@ def render_cutoff_table(
     for comparison in comparisons:
         headers.append(f"{label_comparison(comparison)} delta AP")
         headers.append("p>")
+        headers.append("Holm p>")
     return "\n".join(
         [
             f"## {title} Cutoff Sweep",
@@ -426,10 +430,13 @@ def render_hybrid_weight_sweep_table(
             if comparison in deltas:
                 row.append(fmt_delta_ci(deltas[comparison], ap_metric))
                 row.append(
-                    fmt_number(deltas[comparison][f"p_greater_delta_{ap_metric}"], 4)
+                    fmt_p_value(deltas[comparison], f"p_greater_delta_{ap_metric}")
+                )
+                row.append(
+                    fmt_p_value(deltas[comparison], f"p_greater_holm_delta_{ap_metric}")
                 )
             else:
-                row.extend(["", ""])
+                row.extend(["", "", ""])
         rows.append(row)
 
     if not rows:
@@ -444,8 +451,10 @@ def render_hybrid_weight_sweep_table(
                     f"nDCG@{k}",
                     "delta AP vs direct",
                     "p>",
+                    "Holm p>",
                     "delta AP vs PageRank",
                     "p>",
+                    "Holm p>",
                 ],
                 rows,
             ),
