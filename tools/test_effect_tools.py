@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 TOOLS_DIR = Path(__file__).resolve().parent
@@ -901,15 +902,14 @@ class EffectArtifactRunnerTests(unittest.TestCase):
 
 
 class EffectArtifactVerifierTests(unittest.TestCase):
+    SUMMARY_FIXTURE = {"schema_version": 1, "repo_temporal_holdout": {}}
+
     def write_artifact_set(self, output_dir: Path) -> None:
         output_dir.mkdir()
         artifacts = {
             "effect.json": json.dumps({"measurements": []}) + "\n",
             "effect.md": "# Effect Report\n",
-            "result_summary.json": (
-                json.dumps({"schema_version": 1, "repo_temporal_holdout": {}})
-                + "\n"
-            ),
+            "result_summary.json": json.dumps(self.SUMMARY_FIXTURE) + "\n",
             "thresholds.txt": "effect threshold check passed\n",
         }
         for filename, content in artifacts.items():
@@ -936,13 +936,33 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def verify_with_patched_semantics(
+        self,
+        output_dir: Path,
+        *,
+        threshold_failures: list[str] | None = None,
+        extracted_summary: dict | None = None,
+    ) -> list[str]:
+        threshold_failures = threshold_failures or []
+        extracted_summary = extracted_summary or self.SUMMARY_FIXTURE
+        with mock.patch.object(
+            verify_effect_artifacts.check_effect_thresholds,
+            "check_report",
+            return_value=threshold_failures,
+        ), mock.patch.object(
+            verify_effect_artifacts.extract_effect_summary,
+            "extract_summary",
+            return_value=extracted_summary,
+        ):
+            return verify_effect_artifacts.verify_artifact_directory(output_dir)
+
     def test_artifact_verifier_accepts_complete_artifact_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
 
             self.assertEqual(
-                verify_effect_artifacts.verify_artifact_directory(output_dir),
+                self.verify_with_patched_semantics(output_dir),
                 [],
             )
 
@@ -955,7 +975,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            failures = verify_effect_artifacts.verify_artifact_directory(output_dir)
+            failures = self.verify_with_patched_semantics(output_dir)
 
         self.assertTrue(
             any("effect.md sha256 mismatch" in failure for failure in failures),
@@ -971,10 +991,43 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            failures = verify_effect_artifacts.verify_artifact_directory(output_dir)
+            failures = self.verify_with_patched_semantics(output_dir)
 
         self.assertTrue(
             any("thresholds.txt does not contain" in failure for failure in failures),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_result_summary_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary={"schema_version": 1, "changed": True},
+            )
+
+        self.assertTrue(
+            any("result_summary.json does not match" in failure for failure in failures),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_recomputed_threshold_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                threshold_failures=["hybrid AP degraded"],
+            )
+
+        self.assertTrue(
+            any(
+                "threshold recheck failed: hybrid AP degraded" in failure
+                for failure in failures
+            ),
             failures,
         )
 

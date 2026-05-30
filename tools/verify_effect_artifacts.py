@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -27,6 +28,20 @@ REQUIRED_COMMANDS = {
     "summarize",
     "extract_result_summary",
 }
+
+
+def load_sibling_tool(name: str) -> Any:
+    path = Path(__file__).resolve().parent / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+check_effect_thresholds = load_sibling_tool("check_effect_thresholds")
+extract_effect_summary = load_sibling_tool("extract_effect_summary")
 
 
 def file_sha256(path: Path) -> str:
@@ -130,6 +145,34 @@ def verify_result_summary_schema(
         )
 
 
+def verify_result_summary_matches_report(
+    effect_report: dict[str, Any],
+    result_summary: dict[str, Any],
+    failures: list[str],
+) -> None:
+    expected = extract_effect_summary.extract_summary(effect_report)
+    if result_summary != expected:
+        failures.append(
+            "result_summary.json does not match extract_effect_summary.py output"
+        )
+
+
+def verify_threshold_recheck(
+    effect_report: dict[str, Any],
+    manifest: dict[str, Any],
+    failures: list[str],
+) -> None:
+    require_holdout = manifest.get("require_holdout_thresholds")
+    if not isinstance(require_holdout, bool):
+        return
+    threshold_failures = check_effect_thresholds.check_report(
+        effect_report,
+        require_holdout=require_holdout,
+    )
+    for failure in threshold_failures:
+        failures.append(f"threshold recheck failed: {failure}")
+
+
 def verify_artifact_directory(artifact_dir: Path) -> list[str]:
     artifact_dir = artifact_dir.resolve()
     failures: list[str] = []
@@ -159,8 +202,10 @@ def verify_artifact_directory(artifact_dir: Path) -> list[str]:
     if "measurements" not in effect_report:
         failures.append("effect.json missing measurements")
     verify_result_summary_schema(result_summary, failures)
+    verify_result_summary_matches_report(effect_report, result_summary, failures)
     verify_manifest_shape(manifest, failures)
     verify_checksums(artifact_dir, manifest, failures)
+    verify_threshold_recheck(effect_report, manifest, failures)
     verify_threshold_log(artifact_dir / "thresholds.txt", failures)
     return failures
 
