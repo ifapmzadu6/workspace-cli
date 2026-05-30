@@ -108,8 +108,8 @@ Effect measurement is documented in
 [docs/effect-measurement.md](docs/effect-measurement.md) and implemented by
 `tools/measure_effect.py`. It measures observation coverage, related-file
 discovery across multiple history topologies, seed-specific path-locality
-and lexical-similarity baselines, seed-agnostic recent-activity and
-global-PageRank baselines,
+lexical-similarity, and content-similarity baselines, seed-agnostic
+recent-activity and global-PageRank baselines,
 temporal-holdout predictable-only slices, and audit/rollback evidence instead
 of only checking that commands run. The rendered effect summary also reports
 holdout dataset composition, skipped commit reasons, target-label

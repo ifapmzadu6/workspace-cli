@@ -145,6 +145,25 @@ class StaticBaselineTests(unittest.TestCase):
         self.assertNotIn("src/auth.rs", ranked)
         self.assertEqual(ranked[:2], ["docs/auth.md", "tests/auth_test.rs"])
 
+    def test_content_similarity_ranks_body_overlap_without_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            measure_effect.git(root, "init", "-q")
+            files = {
+                "src/auth.rs": "fn login() { validate_password(); issue_token(); }\n",
+                "src/session.rs": "fn validate_password() { issue_session(); }\n",
+                "docs/auth.md": "deployment guide\n",
+                "README.md": "project overview\n",
+            }
+            for path, content in files.items():
+                measure_effect.write(root / path, content)
+            measure_effect.git(root, "add", ".")
+
+            ranked = measure_effect.content_similarity_paths(root, {"src/auth.rs"})
+
+        self.assertNotIn("src/auth.rs", ranked)
+        self.assertEqual(ranked[0], "src/session.rs")
+
 
 class SummaryFormattingTests(unittest.TestCase):
     def test_small_p_values_render_without_rounding_to_zero(self) -> None:
@@ -225,6 +244,9 @@ class EffectThresholdTests(unittest.TestCase):
                 "baseline_lexical_similarity": {
                     "mean_average_precision_at_5": lexical_ap,
                 },
+                "baseline_content_similarity": {
+                    "mean_average_precision_at_5": 0.30,
+                },
                 "workspace_related_hybrid_loro": {
                     "mean_average_precision_at_5": ap,
                 },
@@ -242,6 +264,9 @@ class EffectThresholdTests(unittest.TestCase):
                     },
                     "baseline_lexical_similarity": {
                         "mean_average_precision_at_5": 0.20,
+                    },
+                    "baseline_content_similarity": {
+                        "mean_average_precision_at_5": 0.30,
                     },
                     "workspace_related_pagerank": {
                         "mean_average_precision_at_5": 0.60,
@@ -271,6 +296,9 @@ class EffectThresholdTests(unittest.TestCase):
                 },
                 "baseline_lexical_similarity": {
                     "mean_average_precision_at_5": 0.20,
+                },
+                "baseline_content_similarity": {
+                    "mean_average_precision_at_5": 0.30,
                 },
                 "workspace_related_pagerank": {
                     "mean_average_precision_at_5": 0.53,
@@ -314,6 +342,9 @@ class EffectThresholdTests(unittest.TestCase):
                         },
                         "baseline_lexical_similarity": {
                             "mean_average_precision_at_5": 0.40,
+                        },
+                        "baseline_content_similarity": {
+                            "mean_average_precision_at_5": 0.45,
                         },
                         "workspace_related_hybrid": {
                             "mean_recall_at_5": 1.0,
@@ -371,6 +402,17 @@ class EffectThresholdTests(unittest.TestCase):
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any("baseline_lexical_similarity" in item for item in failures),
+            failures,
+        )
+
+    def test_effect_thresholds_fail_when_content_baseline_catches_hybrid(self) -> None:
+        report = self.passing_report()
+        report["measurements"][-1]["aggregate"]["baseline_content_similarity"][
+            "mean_average_precision_at_5"
+        ] = 0.50
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any("baseline_content_similarity" in item for item in failures),
             failures,
         )
 

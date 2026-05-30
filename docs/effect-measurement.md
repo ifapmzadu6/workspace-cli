@@ -157,13 +157,13 @@ cutoff, which defaults to 5:
 - an optional leave-one-repo-out direct-weight selection check when multiple
   temporal holdout repositories and sweep weights are provided
 
-The suite compares `git diff --name-only`, seed-specific path-locality and
-lexical-similarity baselines, a seed-agnostic recent-activity baseline,
-seed-agnostic global PageRank over the co-change graph, direct co-change
-ranking, personalized PageRank over the saved co-change index, hybrid ranking
-that combines direct co-change evidence with PageRank reachability, and the
-impact-specific PageRank ranking that lightly prioritizes tests over
-documentation noise.
+The suite compares `git diff --name-only`, seed-specific path-locality,
+lexical-similarity, and content-similarity baselines, a seed-agnostic
+recent-activity baseline, seed-agnostic global PageRank over the co-change
+graph, direct co-change ranking, personalized PageRank over the saved co-change
+index, hybrid ranking that combines direct co-change evidence with PageRank
+reachability, and the impact-specific PageRank ranking that lightly prioritizes
+tests over documentation noise.
 The path-locality baseline ranks tracked files by shared parent directories and
 file extensions with the seed files, so it controls for a cheap static
 seed-specific signal without using history.
@@ -171,6 +171,9 @@ The lexical-similarity baseline ranks tracked files by token overlap in file
 and directory names after dropping common structural tokens such as source,
 test, documentation, and file-extension markers. It controls for cheap static
 name matching without using history.
+The content-similarity baseline ranks tracked files by TF-IDF cosine similarity
+between seed file contents and candidate file contents, without using history.
+It controls for a cheap static content-retrieval explanation of the result.
 The recent-activity baseline ranks tracked files by their latest prior Git
 activity while excluding the seed files, so it controls for generally hot files
 without using any seed-specific relationship signal.
@@ -233,6 +236,9 @@ retrieval_suite path_locality mean_ndcg@5: 0.782
 retrieval_suite lexical_similarity mean_recall@5: 0.708
 retrieval_suite lexical_similarity mean_average_precision@5: 0.400
 retrieval_suite lexical_similarity mean_ndcg@5: 0.502
+retrieval_suite content_similarity mean_recall@5: 0.792
+retrieval_suite content_similarity mean_average_precision@5: 0.560
+retrieval_suite content_similarity mean_ndcg@5: 0.661
 retrieval_suite recent_activity mean_recall@5: 0.750
 retrieval_suite recent_activity mean_average_precision@5: 0.451
 retrieval_suite recent_activity mean_ndcg@5: 0.530
@@ -287,6 +293,8 @@ retrieval_suite related_hybrid - path_locality average_precision@5: +0.204 (-0.1
 retrieval_suite related_hybrid - path_locality ndcg@5: +0.138 (-0.070, 0.369)
 retrieval_suite related_hybrid - lexical_similarity average_precision@5: +0.506 (0.000, 0.917)
 retrieval_suite related_hybrid - lexical_similarity ndcg@5: +0.470 (0.000, 0.798)
+retrieval_suite related_hybrid - content_similarity average_precision@5: +0.404 (0.000, 0.611)
+retrieval_suite related_hybrid - content_similarity ndcg@5: +0.361 (0.000, 0.613)
 retrieval_suite related_hybrid - recent_activity average_precision@5: +0.632 (0.375, 1.000)
 retrieval_suite related_hybrid - recent_activity ndcg@5: +0.577 (0.349, 1.000)
 retrieval_suite related_hybrid - global_pagerank average_precision@5: +0.317 (-0.050, 0.667)
@@ -299,6 +307,8 @@ retrieval_suite impact_hybrid - path_locality average_precision@5: +0.332 (0.206
 retrieval_suite impact_hybrid - path_locality ndcg@5: +0.218 (0.097, 0.338)
 retrieval_suite impact_hybrid - lexical_similarity average_precision@5: +0.600 (0.225, 0.909)
 retrieval_suite impact_hybrid - lexical_similarity ndcg@5: +0.498 (0.191, 0.780)
+retrieval_suite impact_hybrid - content_similarity average_precision@5: +0.440 (0.125, 0.756)
+retrieval_suite impact_hybrid - content_similarity ndcg@5: +0.339 (0.061, 0.616)
 retrieval_suite impact_hybrid - recent_activity average_precision@5: +0.549 (0.131, 0.881)
 retrieval_suite impact_hybrid - recent_activity ndcg@5: +0.470 (0.125, 0.846)
 retrieval_suite impact_hybrid - global_pagerank average_precision@5: +0.375 (0.250, 0.563)
@@ -530,20 +540,24 @@ expanded cross_repo recent_activity average_precision@5: 0.450 (0.357, 0.543)
 expanded cross_repo global_pagerank average_precision@5: 0.471 (0.385, 0.562)
 expanded cross_repo path_locality average_precision@5: 0.100 (0.069, 0.135)
 expanded cross_repo lexical_similarity average_precision@5: 0.240 (0.151, 0.343)
+expanded cross_repo content_similarity average_precision@5: 0.378 (0.318, 0.435)
 expanded cross_repo history_oracle_ceiling average_precision@5: 0.811 (0.733, 0.878)
 expanded cross_repo hybrid oracle-normalized average_precision@5: 0.803, oracle gap: 0.160
 expanded cross_repo hybrid - direct average_precision@5: +0.087 (0.049, 0.131), wins/ties/losses 21/24/5, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded cross_repo hybrid - pagerank average_precision@5: +0.115 (0.050, 0.186), wins/ties/losses 13/33/4, p_greater=0.0003, holm_p_greater=0.0005
 expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.411 (0.314, 0.503), wins/ties/losses 39/11/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - content_similarity average_precision@5: +0.273 (0.188, 0.357), wins/ties/losses 35/2/13, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded cross_repo hybrid - recent_activity average_precision@5: +0.201 (0.135, 0.271), wins/ties/losses 34/13/3, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded cross_repo hybrid - global_pagerank average_precision@5: +0.179 (0.103, 0.263), wins/ties/losses 20/23/7, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded predictable cross_repo hybrid average_precision@5: 0.731 (0.638, 0.826)
 expanded predictable cross_repo lexical_similarity average_precision@5: 0.264 (0.164, 0.376)
+expanded predictable cross_repo content_similarity average_precision@5: 0.419 (0.359, 0.481)
 expanded predictable cross_repo history_oracle_ceiling average_precision@5: 0.908 (0.852, 0.963)
 expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.805, oracle gap: 0.177
 expanded predictable cross_repo hybrid - direct average_precision@5: +0.106 (0.062, 0.153), wins/ties/losses 21/22/5, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.128 (0.064, 0.199), wins/ties/losses 13/31/4, p_greater=0.0003, holm_p_greater=0.0005
 expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.467 (0.355, 0.565), wins/ties/losses 39/9/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - content_similarity average_precision@5: +0.312 (0.226, 0.400), wins/ties/losses 35/0/13, p_greater=<0.0001, holm_p_greater=<0.0001
 ```
 
 The expanded manifest also runs a denser hybrid direct-weight sweep:
