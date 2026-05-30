@@ -15,6 +15,7 @@ METHOD_LABELS = {
     "baseline_path_locality": "path locality",
     "baseline_recent_activity": "recent activity",
     "baseline_global_pagerank": "global PageRank",
+    "history_oracle_ceiling": "history oracle ceiling",
     "workspace_related_direct": "related direct",
     "workspace_related_pagerank": "related PageRank",
     "workspace_related_hybrid": "related hybrid",
@@ -28,6 +29,7 @@ METHOD_ORDER = [
     "baseline_path_locality",
     "baseline_recent_activity",
     "baseline_global_pagerank",
+    "history_oracle_ceiling",
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
@@ -40,6 +42,15 @@ RELATED_METHODS = [
     "baseline_path_locality",
     "baseline_recent_activity",
     "baseline_global_pagerank",
+    "workspace_related_direct",
+    "workspace_related_pagerank",
+    "workspace_related_hybrid",
+]
+HOLDOUT_RELATED_METHODS = [
+    "baseline_path_locality",
+    "baseline_recent_activity",
+    "baseline_global_pagerank",
+    "history_oracle_ceiling",
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
@@ -488,9 +499,12 @@ def render_repo_holdout_table(
         optional_methods = {
             "baseline_path_locality",
             "baseline_global_pagerank",
+            "history_oracle_ceiling",
         }
         required_methods = [
-            method for method in RELATED_METHODS if method not in optional_methods
+            method
+            for method in HOLDOUT_RELATED_METHODS
+            if method not in optional_methods
         ]
         if not all(method in aggregate for method in required_methods):
             continue
@@ -503,11 +517,13 @@ def render_repo_holdout_table(
         hybrid_global = "workspace_related_hybrid_minus_baseline_global_pagerank"
         path_locality = aggregate.get("baseline_path_locality")
         global_pagerank = aggregate.get("baseline_global_pagerank")
+        history_oracle = aggregate.get("history_oracle_ceiling")
         rows.append(
             [
                 repo_label(holdout["repo"]),
                 str(summary["case_count"]),
                 str(summary.get("target_count", "")),
+                fmt_mean(history_oracle, ap_metric) if history_oracle else "",
                 fmt_mean(path_locality, ap_metric) if path_locality else "",
                 fmt_mean(aggregate["baseline_recent_activity"], ap_metric),
                 fmt_mean(global_pagerank, ap_metric) if global_pagerank else "",
@@ -543,6 +559,7 @@ def render_repo_holdout_table(
                     "repo",
                     "cases",
                     "targets",
+                    "history oracle AP",
                     "path AP",
                     "recent AP",
                     "global PR AP",
@@ -869,7 +886,7 @@ def render_report(report: dict[str, Any]) -> str:
                 [
                     (
                         "Cross-Repo Temporal Holdout",
-                        RELATED_METHODS,
+                        HOLDOUT_RELATED_METHODS,
                         RELATED_COMPARISONS[:2],
                     )
                 ],
@@ -944,7 +961,7 @@ def render_report(report: dict[str, Any]) -> str:
                     [
                         (
                             "Predictable Cross-Repo Temporal Holdout",
-                            RELATED_METHODS,
+                            HOLDOUT_RELATED_METHODS,
                             RELATED_COMPARISONS[:2],
                         )
                     ],

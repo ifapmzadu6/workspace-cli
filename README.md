@@ -101,10 +101,11 @@ baselines, seed-agnostic recent-activity and global-PageRank baselines,
 temporal-holdout predictable-only slices, and audit/rollback evidence instead
 of only checking that commands run. The rendered effect summary also reports
 holdout dataset composition, skipped commit reasons, target-label
-distributions, and case-level win/loss diagnostics for paper-style
-reproducibility checks, plus leave-one-repo-out hybrid weight selection when
-sweep weights are provided. The fixed-ref cross-repo holdout set used for
-paper-style reproduction is captured in `tools/effect_paper_holdouts.json`.
+distributions, history-only oracle ceilings, and case-level win/loss
+diagnostics for paper-style reproducibility checks, plus leave-one-repo-out
+hybrid weight selection when sweep weights are provided. The fixed-ref
+cross-repo holdout set used for paper-style reproduction is captured in
+`tools/effect_paper_holdouts.json`.
 Effect reports include reproducibility metadata with the workspace commit,
 dirty state, resampling counts, exact sign-flip p-value method, holdout
 manifest hash, and pinned repository refs.

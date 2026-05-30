@@ -179,6 +179,9 @@ the same rankings against expected target files that already existed at the
 held-out commit's parent. This separates ordinary related-file prediction from
 new-file creation targets that no history-based method can name before they
 exist.
+The all-target holdout also reports a `history_oracle_ceiling` method. It ranks
+the predictable target files first, so it is an upper bound for any method that
+can only return files already present in the training history.
 
 ### Transaction Audit Signal Recall
 
@@ -323,6 +326,7 @@ cross_repo recent_activity ndcg@5: 0.541 (0.410, 0.662)
 cross_repo global_pagerank recall@5: 0.778 (0.625, 0.903)
 cross_repo global_pagerank average_precision@5: 0.473 (0.332, 0.627)
 cross_repo global_pagerank ndcg@5: 0.568 (0.432, 0.698)
+cross_repo history_oracle_ceiling average_precision@5: 0.833 (0.708, 0.931)
 cross_repo direct recall@5: 0.806 (0.667, 0.931)
 cross_repo direct average_precision@5: 0.689 (0.547, 0.826)
 cross_repo direct ndcg@5: 0.741 (0.600, 0.864)
@@ -360,6 +364,7 @@ For predictable-only targets, 22 seed cases and 58 target labels remain:
 predictable cross_repo path_locality average_precision@5: 0.132 (0.072, 0.203)
 predictable cross_repo recent_activity average_precision@5: 0.518 (0.398, 0.636)
 predictable cross_repo global_pagerank average_precision@5: 0.538 (0.398, 0.687)
+predictable cross_repo history_oracle_ceiling average_precision@5: 1.000 (1.000, 1.000)
 predictable cross_repo direct average_precision@5: 0.799 (0.697, 0.899)
 predictable cross_repo pagerank average_precision@5: 0.738 (0.595, 0.856)
 predictable cross_repo hybrid average_precision@5: 0.885 (0.781, 0.957)
@@ -418,6 +423,7 @@ cross_repo direct average_precision@1: 0.340
 cross_repo path_locality average_precision@1: 0.031
 cross_repo recent_activity average_precision@1: 0.208
 cross_repo global_pagerank average_precision@1: 0.094
+cross_repo history_oracle_ceiling average_precision@1: 0.437
 cross_repo pagerank average_precision@1: 0.205
 cross_repo hybrid average_precision@1: 0.413
 cross_repo hybrid - direct average_precision@1: +0.073 (0.024, 0.122), wins/ties/losses 6/18/0, p_greater=0.0156, holm_p_greater=0.0469
@@ -426,6 +432,7 @@ cross_repo direct average_precision@3: 0.546
 cross_repo path_locality average_precision@3: 0.072
 cross_repo recent_activity average_precision@3: 0.335
 cross_repo global_pagerank average_precision@3: 0.252
+cross_repo history_oracle_ceiling average_precision@3: 0.729
 cross_repo pagerank average_precision@3: 0.442
 cross_repo hybrid average_precision@3: 0.608
 cross_repo hybrid - direct average_precision@3: +0.062 (0.024, 0.110), wins/ties/losses 8/16/0, p_greater=0.0039, holm_p_greater=0.0117
@@ -500,11 +507,13 @@ expanded cross_repo pagerank average_precision@5: 0.536 (0.443, 0.626)
 expanded cross_repo recent_activity average_precision@5: 0.450 (0.357, 0.543)
 expanded cross_repo global_pagerank average_precision@5: 0.471 (0.385, 0.562)
 expanded cross_repo path_locality average_precision@5: 0.100 (0.069, 0.135)
+expanded cross_repo history_oracle_ceiling average_precision@5: 0.811 (0.733, 0.878)
 expanded cross_repo hybrid - direct average_precision@5: +0.076 (0.028, 0.127), wins/ties/losses 23/19/8, p_greater=0.0019, holm_p_greater=0.0039
 expanded cross_repo hybrid - pagerank average_precision@5: +0.104 (0.046, 0.169), wins/ties/losses 12/38/0, p_greater=0.0002, holm_p_greater=0.0007
 expanded cross_repo hybrid - recent_activity average_precision@5: +0.190 (0.125, 0.263), wins/ties/losses 36/11/3, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded cross_repo hybrid - global_pagerank average_precision@5: +0.169 (0.092, 0.250), wins/ties/losses 19/28/3, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded predictable cross_repo hybrid average_precision@5: 0.719 (0.626, 0.818)
+expanded predictable cross_repo history_oracle_ceiling average_precision@5: 0.908 (0.852, 0.963)
 expanded predictable cross_repo hybrid - direct average_precision@5: +0.094 (0.039, 0.151), wins/ties/losses 23/17/8, p_greater=0.0008, holm_p_greater=0.0016
 expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.117 (0.057, 0.183), wins/ties/losses 12/36/0, p_greater=0.0002, holm_p_greater=0.0007
 ```

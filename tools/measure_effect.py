@@ -25,6 +25,7 @@ BOOTSTRAP_SAMPLES = 1000
 SIGN_FLIP_SAMPLES = 10000
 SIGN_FLIP_EXACT_SCALE = 1000
 SIGN_FLIP_EXACT_MAX_STATES = 200_001
+HISTORY_ORACLE_METHOD = "history_oracle_ceiling"
 DEFAULT_CUTOFF_SWEEP = [1, 3, 5]
 RECENT_ACTIVITY_MAX_COMMITS = 500
 GLOBAL_PAGERANK_ITERATIONS = 50
@@ -70,6 +71,7 @@ REPO_HOLDOUT_BASE_METHODS = [
     "baseline_path_locality",
     "baseline_recent_activity",
     "baseline_global_pagerank",
+    HISTORY_ORACLE_METHOD,
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
@@ -2006,6 +2008,9 @@ def measure_repo_holdout(
                     for weight in hybrid_weights
                 }
                 methods = {
+                    HISTORY_ORACLE_METHOD: ranking_metrics(
+                        sorted(predictable_expected), expected, k
+                    ),
                     "baseline_path_locality": ranking_metrics(
                         path_locality, expected, k
                     ),

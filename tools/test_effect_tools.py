@@ -80,6 +80,41 @@ class PValueAdjustmentTests(unittest.TestCase):
         )
 
 
+class HoldoutOracleTests(unittest.TestCase):
+    def test_history_oracle_ceiling_retargets_to_predictable_slice(self) -> None:
+        case = {
+            "expected": ["existing.rs", "new.rs"],
+            "predictable_expected": ["existing.rs"],
+            "methods": {
+                "history_oracle_ceiling": measure_effect.ranking_metrics(
+                    ["existing.rs"],
+                    {"existing.rs", "new.rs"},
+                    5,
+                ),
+                "workspace_related_hybrid": measure_effect.ranking_metrics(
+                    ["existing.rs"],
+                    {"existing.rs", "new.rs"},
+                    5,
+                ),
+            },
+        }
+
+        all_targets = measure_effect.repo_holdout_metric_summary([case], 5, [])
+        oracle = all_targets["aggregate"]["history_oracle_ceiling"]
+        self.assertEqual(oracle["mean_recall_at_5"], 0.5)
+        self.assertEqual(oracle["mean_average_precision_at_5"], 0.5)
+
+        predictable = measure_effect.repo_holdout_metric_summary(
+            [case],
+            5,
+            [],
+            expected_key="predictable_expected",
+        )
+        oracle = predictable["aggregate"]["history_oracle_ceiling"]
+        self.assertEqual(oracle["mean_recall_at_5"], 1.0)
+        self.assertEqual(oracle["mean_average_precision_at_5"], 1.0)
+
+
 class SummaryFormattingTests(unittest.TestCase):
     def test_small_p_values_render_without_rounding_to_zero(self) -> None:
         self.assertEqual(
