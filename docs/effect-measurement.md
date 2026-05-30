@@ -42,6 +42,9 @@ python3 tools/measure_effect.py \
   --repo-holdout-ref HEAD
 ```
 
+Use `--k` to change the primary ranking cutoff. The report includes a
+`cutoff_sweep` for the default cutoffs at or below `k`, plus `k` itself.
+
 This checks out each held-out commit's parent in a temporary clone, builds the
 co-change index from only the older history, and measures whether
 `workspace related` predicts the files that changed together in the held-out
@@ -100,16 +103,18 @@ topologies instead of relying on one perfect fixture:
 - multi-seed bridge: two changed files share a dependency that reaches a test
 - hard negatives: direct documentation co-changes compete with an indirect test
 
-For each scenario the script reports:
+For each scenario the script reports the following metrics at the primary
+cutoff, which defaults to 5:
 
-- precision@5
-- recall@5
-- average precision@5
+- precision@k
+- recall@k
+- average precision@k
 - mean reciprocal rank
-- nDCG@5
+- nDCG@k
 - deterministic bootstrap 95% confidence intervals for aggregate means
 - paired mean deltas, win/tie/loss counts, and paired sign-flip randomization
   p-values
+- a default cutoff sweep at @1, @3, and @5
 
 The suite compares `git diff --name-only`, direct co-change ranking,
 personalized PageRank over the saved co-change index, hybrid ranking that
@@ -236,6 +241,22 @@ cross_repo hybrid - pagerank average_precision@5: +0.135 (0.031, 0.250), wins/ti
 cross_repo hybrid - pagerank ndcg@5: +0.102 (0.031, 0.181), wins/ties/losses 5/19/0, p_greater=0.0311
 cross_repo pagerank - direct average_precision@5: -0.076 (-0.205, 0.035), wins/ties/losses 10/9/5, p_greater=0.8742
 cross_repo pagerank - direct ndcg@5: -0.049 (-0.153, 0.039), wins/ties/losses 10/9/5, p_greater=0.8239
+```
+
+The report also includes a `cutoff_sweep` array for the same held-out cases.
+Representative cross-repo average precision by cutoff:
+
+```text
+cross_repo direct average_precision@1: 0.340
+cross_repo pagerank average_precision@1: 0.205
+cross_repo hybrid average_precision@1: 0.413
+cross_repo hybrid - direct average_precision@1: +0.073 (0.024, 0.122), wins/ties/losses 6/18/0, p_greater=0.0170
+cross_repo hybrid - pagerank average_precision@1: +0.208 (0.042, 0.375), wins/ties/losses 5/19/0, p_greater=0.0314
+cross_repo direct average_precision@3: 0.546
+cross_repo pagerank average_precision@3: 0.442
+cross_repo hybrid average_precision@3: 0.608
+cross_repo hybrid - direct average_precision@3: +0.062 (0.024, 0.110), wins/ties/losses 8/16/0, p_greater=0.0027
+cross_repo hybrid - pagerank average_precision@3: +0.167 (0.042, 0.312), wins/ties/losses 5/19/0, p_greater=0.0303
 ```
 
 Interpretation: the CLI is not just running; it measurably improves observation

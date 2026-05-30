@@ -23,6 +23,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP_SAMPLES = 1000
 SIGN_FLIP_SAMPLES = 10000
+DEFAULT_CUTOFF_SWEEP = [1, 3, 5]
 RELATED_COMPARISON_PAIRS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "workspace_related_pagerank"),
@@ -161,6 +162,47 @@ def aggregate_metric_sets(scenarios: list[dict[str, Any]], k: int) -> dict[str, 
         method_summary["scenario_count"] = len(values)
         aggregate[method] = method_summary
     return aggregate
+
+
+def default_cutoffs(k: int) -> list[int]:
+    return sorted({cutoff for cutoff in DEFAULT_CUTOFF_SWEEP if cutoff <= k} | {k})
+
+
+def cutoff_sweep_metric_sets(
+    scenarios: list[dict[str, Any]],
+    cutoffs: list[int],
+    pairs: list[tuple[str, str]],
+) -> list[dict[str, Any]]:
+    sweep = []
+    for cutoff in cutoffs:
+        cutoff_scenarios = []
+        for scenario in scenarios:
+            expected = set(scenario["expected"])
+            cutoff_scenarios.append(
+                {
+                    "methods": {
+                        method: ranking_metrics(metrics["top"], expected, cutoff)
+                        for method, metrics in scenario["methods"].items()
+                    }
+                }
+            )
+        sweep.append(
+            {
+                "k": cutoff,
+                "sample_count": len(cutoff_scenarios),
+                "aggregate": aggregate_metric_sets(cutoff_scenarios, cutoff)
+                if cutoff_scenarios
+                else {},
+                "paired_deltas": paired_delta_metric_sets(
+                    cutoff_scenarios,
+                    cutoff,
+                    pairs,
+                )
+                if cutoff_scenarios
+                else {},
+            }
+        )
+    return sweep
 
 
 def paired_delta_metric_sets(
@@ -784,9 +826,9 @@ def evaluate_impact_case(
     }
 
 
-def measure_retrieval_suite(bin_path: Path) -> dict[str, Any]:
-    k = 5
+def measure_retrieval_suite(bin_path: Path, k: int) -> dict[str, Any]:
     scenarios: list[dict[str, Any]] = []
+    pairs = RELATED_COMPARISON_PAIRS + IMPACT_COMPARISON_PAIRS
 
     with make_history_fixture() as name:
         scenarios.append(
@@ -843,10 +885,15 @@ def measure_retrieval_suite(bin_path: Path) -> dict[str, Any]:
         "scenario_count": len(scenarios),
         "scenarios": scenarios,
         "aggregate": aggregate_metric_sets(scenarios, k),
+        "cutoff_sweep": cutoff_sweep_metric_sets(
+            scenarios,
+            default_cutoffs(k),
+            pairs,
+        ),
         "paired_deltas": paired_delta_metric_sets(
             scenarios,
             k,
-            RELATED_COMPARISON_PAIRS + IMPACT_COMPARISON_PAIRS,
+            pairs,
         ),
     }
 
@@ -1071,6 +1118,13 @@ def measure_repo_holdout(
         "skipped": skipped,
         "cases": cases,
         "aggregate": aggregate_metric_sets(cases, k) if cases else {},
+        "cutoff_sweep": cutoff_sweep_metric_sets(
+            cases,
+            default_cutoffs(k),
+            RELATED_COMPARISON_PAIRS,
+        )
+        if cases
+        else [],
         "paired_deltas": paired_delta_metric_sets(
             cases,
             k,
@@ -1108,6 +1162,13 @@ def aggregate_repo_holdouts(holdouts: list[dict[str, Any]], k: int) -> dict[str,
         "case_count": len(cases),
         "skipped": skipped,
         "aggregate": aggregate_metric_sets(cases, k) if cases else {},
+        "cutoff_sweep": cutoff_sweep_metric_sets(
+            cases,
+            default_cutoffs(k),
+            RELATED_COMPARISON_PAIRS,
+        )
+        if cases
+        else [],
         "paired_deltas": paired_delta_metric_sets(
             cases,
             k,
@@ -1138,6 +1199,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-files-per-commit", type=int, default=40)
     parser.add_argument("--k", type=int, default=5)
     args = parser.parse_args()
+    if args.k < 1:
+        parser.error("--k must be at least 1")
     if args.repo_holdout_ref and len(args.repo_holdout_ref) != len(args.repo_holdout):
         parser.error("--repo-holdout-ref must be repeated once per --repo-holdout")
     return args
@@ -1149,7 +1212,7 @@ def main() -> None:
     measurements = [
         measure_observation(bin_path),
         measure_related_and_impact(bin_path),
-        measure_retrieval_suite(bin_path),
+        measure_retrieval_suite(bin_path, args.k),
         measure_transaction(bin_path),
     ]
     if args.repo_holdout:
