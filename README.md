@@ -102,7 +102,8 @@ of only checking that commands run. The rendered effect summary also reports
 holdout dataset composition, skipped commit reasons, target-label
 distributions, and case-level win/loss diagnostics for paper-style
 reproducibility checks, plus leave-one-repo-out hybrid weight selection when
-sweep weights are provided.
+sweep weights are provided. The fixed-ref cross-repo holdout set used for
+paper-style reproduction is captured in `tools/effect_paper_holdouts.json`.
 
 ### History-Based Related-File Observation
 

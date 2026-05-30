@@ -2117,6 +2117,11 @@ def aggregate_repo_holdouts(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--repo-holdout-manifest",
+        type=Path,
+        help="JSON file with repo/ref holdout entries and optional default limits",
+    )
+    parser.add_argument(
         "--repo-holdout",
         action="append",
         default=[],
@@ -2129,16 +2134,25 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="git revision that ends the corresponding --repo-holdout history; repeat once per repo",
     )
-    parser.add_argument("--max-heldout-commits", type=int, default=5)
-    parser.add_argument("--max-candidate-commits", type=int, default=40)
-    parser.add_argument("--max-files-per-commit", type=int, default=40)
-    parser.add_argument("--k", type=int, default=5)
+    parser.add_argument("--max-heldout-commits", type=int)
+    parser.add_argument("--max-candidate-commits", type=int)
+    parser.add_argument("--max-files-per-commit", type=int)
+    parser.add_argument("--k", type=int)
     parser.add_argument(
         "--hybrid-direct-weight-sweep",
         default="",
         help="comma-separated hybrid direct weights to evaluate in addition to defaults",
     )
     args = parser.parse_args()
+    apply_repo_holdout_manifest(args, parser)
+    if args.max_heldout_commits is None:
+        args.max_heldout_commits = 5
+    if args.max_candidate_commits is None:
+        args.max_candidate_commits = 40
+    if args.max_files_per_commit is None:
+        args.max_files_per_commit = 40
+    if args.k is None:
+        args.k = 5
     if args.k < 1:
         parser.error("--k must be at least 1")
     if args.repo_holdout_ref and len(args.repo_holdout_ref) != len(args.repo_holdout):
@@ -2148,6 +2162,67 @@ def parse_args() -> argparse.Namespace:
         parser,
     )
     return args
+
+
+def apply_repo_holdout_manifest(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+) -> None:
+    if args.repo_holdout_manifest is None:
+        return
+    if args.repo_holdout or args.repo_holdout_ref:
+        parser.error(
+            "--repo-holdout-manifest cannot be combined with "
+            "--repo-holdout or --repo-holdout-ref"
+        )
+    try:
+        manifest = json.loads(args.repo_holdout_manifest.read_text())
+    except OSError as error:
+        parser.error(f"cannot read --repo-holdout-manifest: {error}")
+    except json.JSONDecodeError as error:
+        parser.error(f"invalid --repo-holdout-manifest JSON: {error}")
+
+    entries = manifest.get("repo_holdouts")
+    if not isinstance(entries, list) or not entries:
+        parser.error(
+            "--repo-holdout-manifest must contain a non-empty repo_holdouts array"
+        )
+
+    repos = []
+    refs = []
+    for index, entry in enumerate(entries, start=1):
+        if not isinstance(entry, dict):
+            parser.error(f"repo_holdouts[{index}] must be an object")
+        repo = entry.get("repo")
+        ref = entry.get("ref")
+        if not isinstance(repo, str) or not repo:
+            parser.error(f"repo_holdouts[{index}].repo must be a non-empty string")
+        if not isinstance(ref, str) or not ref:
+            parser.error(f"repo_holdouts[{index}].ref must be a non-empty string")
+        repos.append(Path(repo))
+        refs.append(ref)
+    args.repo_holdout = repos
+    args.repo_holdout_ref = refs
+
+    for field in [
+        "max_heldout_commits",
+        "max_candidate_commits",
+        "max_files_per_commit",
+        "k",
+    ]:
+        if getattr(args, field) is None and field in manifest:
+            value = manifest[field]
+            if not isinstance(value, int):
+                parser.error(f"--repo-holdout-manifest {field} must be an integer")
+            setattr(args, field, value)
+
+    if not args.hybrid_direct_weight_sweep and "hybrid_direct_weight_sweep" in manifest:
+        value = manifest["hybrid_direct_weight_sweep"]
+        if not isinstance(value, list):
+            parser.error(
+                "--repo-holdout-manifest hybrid_direct_weight_sweep must be an array"
+            )
+        args.hybrid_direct_weight_sweep = ",".join(str(weight) for weight in value)
 
 
 def parse_hybrid_weight_sweep(

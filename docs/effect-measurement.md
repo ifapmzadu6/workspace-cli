@@ -58,6 +58,14 @@ without changing the CLI defaults:
 python3 tools/measure_effect.py --hybrid-direct-weight-sweep 0,0.05,0.5,1
 ```
 
+The fixed-ref cross-repository setup used for the paper-style results is stored
+in `tools/effect_paper_holdouts.json`:
+
+```sh
+python3 tools/measure_effect.py \
+  --repo-holdout-manifest tools/effect_paper_holdouts.json
+```
+
 This checks out each held-out commit's parent in a temporary clone, builds the
 co-change index from only the older history, and measures whether
 `workspace related` predicts the files that changed together in the held-out
@@ -469,15 +477,7 @@ candidate commits and up to 5 held-out commits per repository:
 
 ```sh
 python3 tools/measure_effect.py \
-  --repo-holdout . \
-  --repo-holdout-ref 104bbc9155b2ab7df8159f6cb1efe26cd8e95a48 \
-  --repo-holdout ../related-cli \
-  --repo-holdout-ref 5cf1f671993ff93b908dd23e46819a10408042c2 \
-  --repo-holdout ../llm-json-extract \
-  --repo-holdout-ref 9631a65ab4797fb9260d90fc68db9526811a3be6 \
-  --max-heldout-commits 5 \
-  --max-candidate-commits 50 \
-  --hybrid-direct-weight-sweep 0,0.05,0.5,1
+  --repo-holdout-manifest tools/effect_paper_holdouts.json
 ```
 
 That expanded run contains 15 held-out commits, 50 seed cases, and 207 target

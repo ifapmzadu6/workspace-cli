@@ -1,0 +1,21 @@
+{
+  "repo_holdouts": [
+    {
+      "repo": ".",
+      "ref": "104bbc9155b2ab7df8159f6cb1efe26cd8e95a48"
+    },
+    {
+      "repo": "../related-cli",
+      "ref": "5cf1f671993ff93b908dd23e46819a10408042c2"
+    },
+    {
+      "repo": "../llm-json-extract",
+      "ref": "9631a65ab4797fb9260d90fc68db9526811a3be6"
+    }
+  ],
+  "max_heldout_commits": 5,
+  "max_candidate_commits": 50,
+  "max_files_per_commit": 40,
+  "k": 5,
+  "hybrid_direct_weight_sweep": [0, 0.05, 0.5, 1]
+}
