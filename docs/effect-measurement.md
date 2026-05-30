@@ -96,6 +96,7 @@ For each scenario the script reports:
 - average precision@5
 - mean reciprocal rank
 - nDCG@5
+- deterministic bootstrap 95% confidence intervals for aggregate means
 
 The suite compares `git diff --name-only`, direct co-change ranking,
 personalized PageRank over the saved co-change index, hybrid ranking that
@@ -175,18 +176,19 @@ python3 tools/measure_effect.py \
   --max-candidate-commits 20
 ```
 
-Representative aggregate over 9 held-out commits and 34 seed cases:
+Representative aggregate over 9 held-out commits and 27 seed cases. Parentheses
+show deterministic bootstrap 95% confidence intervals for the mean:
 
 ```text
-cross_repo direct mean_recall@5: 0.649
-cross_repo direct mean_average_precision@5: 0.559
-cross_repo direct mean_ndcg@5: 0.675
-cross_repo pagerank mean_recall@5: 0.716
-cross_repo pagerank mean_average_precision@5: 0.537
-cross_repo pagerank mean_ndcg@5: 0.689
-cross_repo hybrid mean_recall@5: 0.716
-cross_repo hybrid mean_average_precision@5: 0.633
-cross_repo hybrid mean_ndcg@5: 0.765
+cross_repo direct recall@5: 0.772 (0.648, 0.883)
+cross_repo direct average_precision@5: 0.663 (0.531, 0.789)
+cross_repo direct ndcg@5: 0.728 (0.612, 0.836)
+cross_repo pagerank recall@5: 0.827 (0.691, 0.938)
+cross_repo pagerank average_precision@5: 0.637 (0.501, 0.775)
+cross_repo pagerank ndcg@5: 0.709 (0.579, 0.826)
+cross_repo hybrid recall@5: 0.827 (0.704, 0.938)
+cross_repo hybrid average_precision@5: 0.757 (0.633, 0.880)
+cross_repo hybrid ndcg@5: 0.803 (0.676, 0.907)
 ```
 
 Interpretation: the CLI is not just running; it measurably improves observation

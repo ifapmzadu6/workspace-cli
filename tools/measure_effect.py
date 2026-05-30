@@ -9,9 +9,11 @@ current git diff or direct co-change only.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
+import random
 import subprocess
 import tempfile
 from pathlib import Path
@@ -19,6 +21,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+BOOTSTRAP_SAMPLES = 1000
 
 
 def run(cmd: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -137,14 +140,58 @@ def aggregate_metric_sets(scenarios: list[dict[str, Any]], k: int) -> dict[str, 
             for scenario in scenarios
             if method in scenario["methods"]
         ]
-        aggregate[method] = {
-            f"mean_{name}": round(
-                sum(value[name] for value in values) / len(values), 3
-            )
-            for name in metric_names
-        }
-        aggregate[method]["scenario_count"] = len(values)
+        method_summary: dict[str, Any] = {}
+        for name in metric_names:
+            metric_values = [value[name] for value in values]
+            method_summary[f"mean_{name}"] = round(mean(metric_values), 3)
+            low, high = bootstrap_mean_ci(metric_values, method, name)
+            method_summary[f"ci95_low_{name}"] = round(low, 3)
+            method_summary[f"ci95_high_{name}"] = round(high, 3)
+        method_summary["scenario_count"] = len(values)
+        aggregate[method] = method_summary
     return aggregate
+
+
+def mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def bootstrap_mean_ci(
+    values: list[float],
+    method: str,
+    metric_name: str,
+    samples: int = BOOTSTRAP_SAMPLES,
+) -> tuple[float, float]:
+    if not values:
+        return (0.0, 0.0)
+    if len(values) == 1:
+        return (values[0], values[0])
+
+    seed = int.from_bytes(
+        hashlib.sha256(f"{method}:{metric_name}:{len(values)}".encode()).digest()[:8],
+        "big",
+    )
+    rng = random.Random(seed)
+    means = []
+    for _ in range(samples):
+        means.append(mean([values[rng.randrange(len(values))] for _ in values]))
+    means.sort()
+    return (
+        percentile_sorted(means, 0.025),
+        percentile_sorted(means, 0.975),
+    )
+
+
+def percentile_sorted(values: list[float], quantile: float) -> float:
+    if not values:
+        return 0.0
+    position = quantile * (len(values) - 1)
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return values[lower]
+    fraction = position - lower
+    return values[lower] + ((values[upper] - values[lower]) * fraction)
 
 
 def paths(value: dict[str, Any], *segments: str) -> list[str]:
