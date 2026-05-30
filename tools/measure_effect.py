@@ -828,6 +828,7 @@ def measure_repo_holdout(
                 )
                 cases.append(
                     {
+                        "repo": str(repo),
                         "heldout_commit": commit["hash"][:12],
                         "parent": parent[:12],
                         "seed": seed,
@@ -869,12 +870,42 @@ def measure_repo_holdout(
     }
 
 
+def aggregate_repo_holdouts(holdouts: list[dict[str, Any]], k: int) -> dict[str, Any]:
+    cases = [
+        case
+        for holdout in holdouts
+        for case in holdout["cases"]
+    ]
+    skipped: dict[str, int] = {}
+    for holdout in holdouts:
+        for key, value in holdout["skipped"].items():
+            skipped[key] = skipped.get(key, 0) + value
+
+    return {
+        "metric": "repo_temporal_holdout_aggregate",
+        "repo_count": len(holdouts),
+        "repos": [holdout["repo"] for holdout in holdouts],
+        "k": k,
+        "candidate_commit_count": sum(
+            holdout["candidate_commit_count"] for holdout in holdouts
+        ),
+        "heldout_commit_count": sum(
+            holdout["heldout_commit_count"] for holdout in holdouts
+        ),
+        "case_count": len(cases),
+        "skipped": skipped,
+        "aggregate": aggregate_metric_sets(cases, k) if cases else {},
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--repo-holdout",
+        action="append",
+        default=[],
         type=Path,
-        help="optionally add temporal holdout metrics for a real git repository",
+        help="optionally add temporal holdout metrics for a real git repository; repeat for multiple repos",
     )
     parser.add_argument("--max-heldout-commits", type=int, default=5)
     parser.add_argument("--max-candidate-commits", type=int, default=40)
@@ -892,17 +923,21 @@ def main() -> None:
         measure_retrieval_suite(bin_path),
         measure_transaction(bin_path),
     ]
-    if args.repo_holdout is not None:
-        measurements.append(
+    if args.repo_holdout:
+        repo_holdouts = [
             measure_repo_holdout(
                 bin_path,
-                args.repo_holdout,
+                repo,
                 max_heldout_commits=args.max_heldout_commits,
                 max_candidate_commits=args.max_candidate_commits,
                 max_files_per_commit=args.max_files_per_commit,
                 k=args.k,
             )
-        )
+            for repo in args.repo_holdout
+        ]
+        measurements.extend(repo_holdouts)
+        if len(repo_holdouts) > 1:
+            measurements.append(aggregate_repo_holdouts(repo_holdouts, args.k))
 
     report = {
         "workspace_bin": str(bin_path),

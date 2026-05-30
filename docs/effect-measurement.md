@@ -25,6 +25,13 @@ repository path:
 python3 tools/measure_effect.py --repo-holdout . --max-heldout-commits 5
 ```
 
+Repeat `--repo-holdout` to evaluate several repositories and emit a cross-repo
+aggregate:
+
+```sh
+python3 tools/measure_effect.py --repo-holdout . --repo-holdout ../other-repo
+```
+
 This checks out each held-out commit's parent in a temporary clone, builds the
 co-change index from only the older history, and measures whether
 `workspace related` predicts the files that changed together in the held-out
@@ -104,6 +111,9 @@ set is the other files changed in the same commit. The training history is the
 commit's parent and earlier ancestors only. This keeps future co-change edges
 out of the index and makes the metric closer to a realistic prospective
 prediction task.
+When several repositories are provided, the script keeps the per-repository
+measurements and also reports a `repo_temporal_holdout_aggregate` metric over
+all held-out seed cases.
 
 ### Transaction Audit Signal Recall
 
