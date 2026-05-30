@@ -83,6 +83,8 @@ const IMPACT_SOURCE_DIFF: &str = "diff";
 const RELATED_METHOD_COCHANGE: &str = "cochange";
 const RANK_DIRECT: &str = "direct";
 const RANK_PAGERANK: &str = "pagerank";
+const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
+const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const RELATIONSHIP_SOURCE_COCHANGE_INDEX: &str = "cochange-index";
 const RELATIONSHIP_SOURCE_GIT_LOG: &str = "git-log";
 const RELATIONSHIP_SOURCE_RELATED_CLI: &str = "related-cli";
@@ -3186,8 +3188,7 @@ fn record_map_file(signals: &mut MapSignals, path: &str) {
         signals.config_extras.push(path.to_string());
     }
 
-    let lower = path.to_lowercase();
-    if lower == "readme.md" || lower.starts_with("docs/") || lower.ends_with(".md") {
+    if is_documentation_file(path) {
         signals.docs.push(path.to_string());
     }
 }
@@ -4544,7 +4545,8 @@ fn rank_cochange_impact_pagerank_from_index(
     max_results: usize,
 ) -> ImpactRanking {
     let seed_files = normalized_seed_file_set(seed_files);
-    let hits = personalized_pagerank(index, &seed_files, 40, 0.85);
+    let mut hits = personalized_pagerank(index, &seed_files, 40, 0.85);
+    apply_impact_pagerank_path_prior(&mut hits);
     let edge_lookup = cochange_edge_lookup(index);
     let mut impacted = hits
         .into_iter()
@@ -4558,6 +4560,34 @@ fn rank_cochange_impact_pagerank_from_index(
         impacted,
         commits_matched,
         ignored_large_commits: 0,
+    }
+}
+
+fn apply_impact_pagerank_path_prior(hits: &mut [PageRankHit]) {
+    for hit in hits.iter_mut() {
+        hit.score *= impact_path_score_multiplier(&hit.path);
+    }
+    normalize_pagerank_hit_scores(hits);
+    hits.sort_by(compare_pagerank_hit_by_score);
+}
+
+fn impact_path_score_multiplier(path: &str) -> f64 {
+    if is_test_file(path) {
+        IMPACT_TEST_SCORE_MULTIPLIER
+    } else if is_documentation_file(path) {
+        IMPACT_DOC_SCORE_MULTIPLIER
+    } else {
+        1.0
+    }
+}
+
+fn normalize_pagerank_hit_scores(hits: &mut [PageRankHit]) {
+    let max_score = max_rank_weight(hits.iter().map(|hit| hit.score));
+    if max_score == 0.0 {
+        return;
+    }
+    for hit in hits {
+        hit.score /= max_score;
     }
 }
 
@@ -6838,6 +6868,11 @@ fn is_test_file(path: &str) -> bool {
         || lower.contains("_test.")
         || lower.contains(".test.")
         || lower.contains(".spec.")
+}
+
+fn is_documentation_file(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower == "readme.md" || lower.starts_with("docs/") || lower.ends_with(".md")
 }
 
 fn print_list(label: &str, values: &[String]) {
@@ -11031,6 +11066,58 @@ src/b.rs
             .unwrap();
         assert_eq!(indirect.cochanged_commits, 0);
         assert_eq!(indirect.seed_files, vec!["src/a.rs"]);
+    }
+
+    #[test]
+    fn pagerank_impact_prioritizes_indirect_tests_over_doc_noise() {
+        let commits = vec![
+            GitCommitFiles {
+                hash: "ffffffffffff".to_string(),
+                files: vec!["src/core.rs".to_string(), "docs/core_2.md".to_string()],
+            },
+            GitCommitFiles {
+                hash: "eeeeeeeeeeee".to_string(),
+                files: vec!["src/core.rs".to_string(), "docs/core_1.md".to_string()],
+            },
+            GitCommitFiles {
+                hash: "dddddddddddd".to_string(),
+                files: vec!["src/core.rs".to_string(), "docs/core_0.md".to_string()],
+            },
+            GitCommitFiles {
+                hash: "cccccccccccc".to_string(),
+                files: vec![
+                    "src/adapter.rs".to_string(),
+                    "tests/adapter_test.rs".to_string(),
+                ],
+            },
+            GitCommitFiles {
+                hash: "bbbbbbbbbbbb".to_string(),
+                files: vec!["src/core.rs".to_string(), "src/adapter.rs".to_string()],
+            },
+        ];
+        let index = cochange_index_from_commits(&commits, 100, 10, None);
+        let seeds = vec!["src/core.rs".to_string()];
+
+        let ranking = rank_cochange_impact_pagerank_from_index(&index, &seeds, 10);
+        let paths = ranking
+            .impacted
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>();
+        let test_position = paths
+            .iter()
+            .position(|path| *path == "tests/adapter_test.rs")
+            .expect("indirect test should be ranked");
+        let first_doc_position = paths
+            .iter()
+            .position(|path| path.starts_with("docs/"))
+            .expect("doc noise should remain visible");
+
+        assert_eq!(paths.first().copied(), Some("src/adapter.rs"));
+        assert!(
+            test_position < first_doc_position,
+            "impact ranking should put test evidence before doc noise: {paths:?}"
+        );
     }
 
     #[test]

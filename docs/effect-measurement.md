@@ -76,8 +76,9 @@ For each scenario the script reports:
 - mean reciprocal rank
 - nDCG@5
 
-The suite compares `git diff --name-only`, direct co-change ranking, and
-personalized PageRank over the saved co-change index.
+The suite compares `git diff --name-only`, direct co-change ranking,
+personalized PageRank over the saved co-change index, and the impact-specific
+PageRank ranking that lightly prioritizes tests over documentation noise.
 
 ### Transaction Audit Signal Recall
 
@@ -105,9 +106,12 @@ workspace_related_pagerank recall@3: 1.000
 workspace_impact_pagerank recall@3: 1.000
 retrieval_suite git_diff_only mean_recall@5: 0.000
 retrieval_suite direct_cochange mean_recall@5: 0.500-0.611
-retrieval_suite pagerank mean_recall@5: 1.000
-retrieval_suite pagerank mean_average_precision@5: 0.900-0.925
-retrieval_suite pagerank mean_ndcg@5: 0.950-0.963
+retrieval_suite related_pagerank mean_recall@5: 1.000
+retrieval_suite related_pagerank mean_average_precision@5: 0.900
+retrieval_suite related_pagerank mean_ndcg@5: 0.950
+retrieval_suite impact_pagerank mean_recall@5: 1.000
+retrieval_suite impact_pagerank mean_average_precision@5: 1.000
+retrieval_suite impact_pagerank mean_ndcg@5: 1.000
 transaction_audit_signal_recall: 1.000
 ```
 

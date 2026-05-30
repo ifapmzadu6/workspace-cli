@@ -160,6 +160,9 @@ and returns nearby files from history. This helps decide what to read next and
 which tests or documents may need verification.
 Large seed-file lists are bounded in the observation. The full seed count
 remains available as `seed_file_count`, with omitted seeds reported separately.
+When `--rank pagerank` is used for impact analysis, tests receive a small rank
+boost and documentation receives a small down-weight so likely verification
+targets stay ahead of direct documentation noise.
 
 ```sh
 workspace impact --diff --by cochange --json
