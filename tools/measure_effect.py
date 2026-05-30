@@ -186,6 +186,121 @@ def aggregate_metric_sets(scenarios: list[dict[str, Any]], k: int) -> dict[str, 
     return aggregate
 
 
+def macro_average_repo_holdouts(
+    holdouts: list[dict[str, Any]],
+    k: int,
+    pairs: list[tuple[str, str]],
+) -> dict[str, Any]:
+    nonempty_holdouts = [holdout for holdout in holdouts if holdout["case_count"] > 0]
+    return {
+        "k": k,
+        "repo_count": len(nonempty_holdouts),
+        "aggregate": macro_average_metric_sets(nonempty_holdouts, k),
+        "paired_deltas": macro_paired_delta_metric_sets(nonempty_holdouts, k, pairs),
+    }
+
+
+def macro_average_metric_sets(holdouts: list[dict[str, Any]], k: int) -> dict[str, Any]:
+    method_names = sorted(
+        {
+            method
+            for holdout in holdouts
+            for method in holdout["aggregate"].keys()
+        }
+    )
+    metric_names = [
+        f"precision_at_{k}",
+        f"recall_at_{k}",
+        f"average_precision_at_{k}",
+        "mrr",
+        f"ndcg_at_{k}",
+    ]
+    aggregate: dict[str, Any] = {}
+    for method in method_names:
+        method_holdouts = [
+            holdout
+            for holdout in holdouts
+            if method in holdout["aggregate"]
+        ]
+        method_summary: dict[str, Any] = {
+            "repo_count": len(method_holdouts),
+            "scenario_count": len(method_holdouts),
+        }
+        for name in metric_names:
+            metric_values = [
+                holdout["aggregate"][method][f"mean_{name}"]
+                for holdout in method_holdouts
+            ]
+            method_summary[f"mean_{name}"] = round(mean(metric_values), 3)
+            low, high = bootstrap_mean_ci(metric_values, f"repo_macro:{method}", name)
+            method_summary[f"ci95_low_{name}"] = round(low, 3)
+            method_summary[f"ci95_high_{name}"] = round(high, 3)
+        aggregate[method] = method_summary
+    return aggregate
+
+
+def macro_paired_delta_metric_sets(
+    holdouts: list[dict[str, Any]],
+    k: int,
+    pairs: list[tuple[str, str]],
+) -> dict[str, Any]:
+    metric_names = [
+        f"precision_at_{k}",
+        f"recall_at_{k}",
+        f"average_precision_at_{k}",
+        "mrr",
+        f"ndcg_at_{k}",
+    ]
+    deltas: dict[str, Any] = {}
+    for left, right in pairs:
+        comparison_name = f"{left}_minus_{right}"
+        matching_holdouts = [
+            holdout
+            for holdout in holdouts
+            if comparison_name in holdout["paired_deltas"]
+        ]
+        if not matching_holdouts:
+            continue
+        comparison: dict[str, Any] = {
+            "repo_count": len(matching_holdouts),
+            "scenario_count": len(matching_holdouts),
+        }
+        for metric_name in metric_names:
+            values = [
+                holdout["paired_deltas"][comparison_name][
+                    f"mean_delta_{metric_name}"
+                ]
+                for holdout in matching_holdouts
+            ]
+            comparison[f"mean_delta_{metric_name}"] = round(mean(values), 3)
+            low, high = bootstrap_mean_ci(
+                values,
+                f"repo_macro:{comparison_name}",
+                metric_name,
+            )
+            comparison[f"ci95_low_delta_{metric_name}"] = round(low, 3)
+            comparison[f"ci95_high_delta_{metric_name}"] = round(high, 3)
+            wins = sum(1 for value in values if value > 0)
+            ties = sum(1 for value in values if value == 0)
+            losses = sum(1 for value in values if value < 0)
+            comparison[f"win_count_delta_{metric_name}"] = wins
+            comparison[f"tie_count_delta_{metric_name}"] = ties
+            comparison[f"loss_count_delta_{metric_name}"] = losses
+            comparison[f"win_rate_delta_{metric_name}"] = round(
+                wins / len(values),
+                3,
+            )
+            p_greater, p_two_sided = paired_sign_flip_p_values(
+                values,
+                f"repo_macro:{comparison_name}",
+                metric_name,
+            )
+            comparison[f"p_greater_delta_{metric_name}"] = round(p_greater, 4)
+            comparison[f"p_two_sided_delta_{metric_name}"] = round(p_two_sided, 4)
+        deltas[comparison_name] = comparison
+    return deltas
+
+
 def default_cutoffs(k: int) -> list[int]:
     return sorted({cutoff for cutoff in DEFAULT_CUTOFF_SWEEP if cutoff <= k} | {k})
 
@@ -1399,6 +1514,11 @@ def aggregate_repo_holdouts(
         )
         if cases
         else [],
+        "repo_macro_average": macro_average_repo_holdouts(
+            holdouts,
+            k,
+            RELATED_COMPARISON_PAIRS,
+        ),
         "paired_deltas": paired_delta_metric_sets(
             base_cases,
             k,

@@ -259,6 +259,25 @@ cross_repo pagerank - direct average_precision@5: -0.076 (-0.205, 0.035), wins/t
 cross_repo pagerank - direct ndcg@5: -0.049 (-0.153, 0.039), wins/ties/losses 10/9/5, p_greater=0.8239
 ```
 
+Per-repository means show where the aggregate gain comes from:
+
+```text
+workspace-cli cases: 6, direct AP@5: 1.000, pagerank AP@5: 0.458, hybrid AP@5: 1.000
+related-cli cases: 7, direct AP@5: 0.302, pagerank AP@5: 0.437, hybrid AP@5: 0.437
+llm-json-extract cases: 11, direct AP@5: 0.765, pagerank AP@5: 0.809, hybrid AP@5: 0.809
+```
+
+The report also includes `repo_macro_average`, which treats each repository as
+one unit instead of weighting by seed-case count:
+
+```text
+repo_macro direct average_precision@5: 0.689 (0.302, 1.000)
+repo_macro pagerank average_precision@5: 0.568 (0.437, 0.809)
+repo_macro hybrid average_precision@5: 0.749 (0.437, 1.000)
+repo_macro hybrid - direct average_precision@5: +0.059 (0.000, 0.135), wins/ties/losses 2/1/0
+repo_macro hybrid - pagerank average_precision@5: +0.181 (0.000, 0.542), wins/ties/losses 1/2/0
+```
+
 The report also includes a `cutoff_sweep` array for the same held-out cases.
 Representative cross-repo average precision by cutoff:
 

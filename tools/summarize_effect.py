@@ -88,6 +88,10 @@ def fmt_mean_ci(summary: dict[str, Any], metric: str) -> str:
     )
 
 
+def fmt_mean(summary: dict[str, Any], metric: str) -> str:
+    return fmt_number(summary[f"mean_{metric}"])
+
+
 def fmt_delta_ci(summary: dict[str, Any], metric: str) -> str:
     return (
         f"{fmt_number(summary[f'mean_delta_{metric}'], signed=True)} "
@@ -96,12 +100,20 @@ def fmt_delta_ci(summary: dict[str, Any], metric: str) -> str:
     )
 
 
+def fmt_delta(summary: dict[str, Any], metric: str) -> str:
+    return fmt_number(summary[f"mean_delta_{metric}"], signed=True)
+
+
 def fmt_wtl(summary: dict[str, Any], metric: str) -> str:
     return (
         f"{summary[f'win_count_delta_{metric}']}/"
         f"{summary[f'tie_count_delta_{metric}']}/"
         f"{summary[f'loss_count_delta_{metric}']}"
     )
+
+
+def repo_label(repo: str) -> str:
+    return Path(repo).name
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
@@ -270,6 +282,8 @@ def render_hybrid_weight_sweep_table(
                 row.extend(["", ""])
         rows.append(row)
 
+    if not rows:
+        return ""
     return "\n".join(
         [
             f"## {title} Hybrid Weight Sweep @{k}",
@@ -282,6 +296,62 @@ def render_hybrid_weight_sweep_table(
                     "p>",
                     "delta AP vs PageRank",
                     "p>",
+                ],
+                rows,
+            ),
+        ]
+    )
+
+
+def render_repo_holdout_table(report: dict[str, Any]) -> str:
+    holdouts = [
+        measurement
+        for measurement in report["measurements"]
+        if measurement["metric"] == "repo_temporal_holdout"
+    ]
+    rows = []
+    for holdout in holdouts:
+        k = holdout["k"]
+        aggregate = holdout.get("aggregate", {})
+        deltas = holdout.get("paired_deltas", {})
+        if not all(method in aggregate for method in RELATED_METHODS):
+            continue
+        ap_metric = f"average_precision_at_{k}"
+        ndcg_metric = f"ndcg_at_{k}"
+        hybrid_direct = "workspace_related_hybrid_minus_workspace_related_direct"
+        hybrid_pagerank = "workspace_related_hybrid_minus_workspace_related_pagerank"
+        rows.append(
+            [
+                repo_label(holdout["repo"]),
+                str(holdout["case_count"]),
+                fmt_mean(aggregate["workspace_related_direct"], ap_metric),
+                fmt_mean(aggregate["workspace_related_pagerank"], ap_metric),
+                fmt_mean(aggregate["workspace_related_hybrid"], ap_metric),
+                fmt_mean(aggregate["workspace_related_hybrid"], ndcg_metric),
+                fmt_delta(deltas[hybrid_direct], ap_metric)
+                if hybrid_direct in deltas
+                else "",
+                fmt_delta(deltas[hybrid_pagerank], ap_metric)
+                if hybrid_pagerank in deltas
+                else "",
+            ]
+        )
+
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            "## Per-Repo Temporal Holdout",
+            markdown_table(
+                [
+                    "repo",
+                    "cases",
+                    "direct AP",
+                    "PageRank AP",
+                    "hybrid AP",
+                    "hybrid nDCG",
+                    "hybrid-direct delta AP",
+                    "hybrid-PageRank delta AP",
                 ],
                 rows,
             ),
@@ -335,27 +405,30 @@ def render_report(report: dict[str, Any]) -> str:
                 ],
             )
         )
-        sections.append(
+        for weight_sweep_table in [
             render_hybrid_weight_sweep_table(
                 retrieval,
                 "Retrieval Suite Related",
                 "related",
                 "workspace_related_direct",
                 "workspace_related_pagerank",
-            )
-        )
-        sections.append(
+            ),
             render_hybrid_weight_sweep_table(
                 retrieval,
                 "Retrieval Suite Impact",
                 "impact",
                 "workspace_impact_direct",
                 "workspace_impact_pagerank",
-            )
-        )
+            ),
+        ]:
+            if weight_sweep_table:
+                sections.append(weight_sweep_table)
 
     holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
     if holdout is not None:
+        per_repo = render_repo_holdout_table(report)
+        if per_repo:
+            sections.append(per_repo)
         sections.extend(
             render_measurement(
                 holdout,
@@ -370,15 +443,30 @@ def render_report(report: dict[str, Any]) -> str:
                 ],
             )
         )
-        sections.append(
-            render_hybrid_weight_sweep_table(
-                holdout,
-                "Cross-Repo Temporal Holdout",
-                "related",
-                "workspace_related_direct",
-                "workspace_related_pagerank",
+        macro_average = holdout.get("repo_macro_average")
+        if macro_average and macro_average.get("repo_count", 0) > 0:
+            sections.append(
+                render_aggregate_table(
+                    macro_average,
+                    "Repo-Macro Temporal Holdout",
+                )
             )
+            sections.append(
+                render_delta_table(
+                    macro_average,
+                    "Repo-Macro Temporal Holdout",
+                    RELATED_COMPARISONS,
+                )
+            )
+        weight_sweep_table = render_hybrid_weight_sweep_table(
+            holdout,
+            "Cross-Repo Temporal Holdout",
+            "related",
+            "workspace_related_direct",
+            "workspace_related_pagerank",
         )
+        if weight_sweep_table:
+            sections.append(weight_sweep_table)
 
     return "\n\n".join(sections) + "\n"
 
