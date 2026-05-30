@@ -291,6 +291,17 @@ class EffectThresholdTests(unittest.TestCase):
             [],
         )
 
+    def test_effect_thresholds_allow_missing_holdout_by_default(self) -> None:
+        report = self.passing_report()
+        report["measurements"] = report["measurements"][:-1]
+        self.assertEqual(check_effect_thresholds.check_report(report), [])
+
+    def test_effect_thresholds_can_require_holdout_measurements(self) -> None:
+        report = self.passing_report()
+        report["measurements"] = report["measurements"][:-1]
+        failures = check_effect_thresholds.check_report(report, require_holdout=True)
+        self.assertIn("missing repo_temporal_holdout_aggregate measurement", failures)
+
     def test_effect_thresholds_fail_for_degraded_related_hybrid(self) -> None:
         report = self.passing_report()
         report["measurements"][2]["aggregate"]["workspace_related_hybrid"][

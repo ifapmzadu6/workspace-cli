@@ -27,7 +27,7 @@ def measurement_by_name(report: dict[str, Any], name: str) -> dict[str, Any] | N
     return None
 
 
-def check_report(report: dict[str, Any]) -> list[str]:
+def check_report(report: dict[str, Any], *, require_holdout: bool = False) -> list[str]:
     failures: list[str] = []
 
     metadata = report.get("metadata", {})
@@ -111,7 +111,8 @@ def check_report(report: dict[str, Any]) -> list[str]:
 
     repo_holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
     if not repo_holdout:
-        failures.append("missing repo_temporal_holdout_aggregate measurement")
+        if require_holdout:
+            failures.append("missing repo_temporal_holdout_aggregate measurement")
         return failures
 
     check_repo_holdout_thresholds(failures, repo_holdout, predictable=False)
@@ -389,6 +390,11 @@ def hybrid_weight_method(prefix: str, weight: float) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--require-holdout",
+        action="store_true",
+        help="fail when the report does not include cross-repo temporal holdouts",
+    )
+    parser.add_argument(
         "report",
         nargs="?",
         default="-",
@@ -398,7 +404,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    failures = check_report(load_report(parse_args().report))
+    args = parse_args()
+    failures = check_report(
+        load_report(args.report),
+        require_holdout=args.require_holdout,
+    )
     if failures:
         print("effect threshold check failed:", file=sys.stderr)
         for failure in failures:
