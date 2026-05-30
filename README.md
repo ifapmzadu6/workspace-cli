@@ -82,6 +82,7 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings
 cargo build
+python3 -m unittest discover -s tools -p 'test_*.py'
 ```
 
 The same gates, plus `python3 tools/measure_effect.py`, run in GitHub Actions
@@ -105,8 +106,8 @@ reproducibility checks, plus leave-one-repo-out hybrid weight selection when
 sweep weights are provided. The fixed-ref cross-repo holdout set used for
 paper-style reproduction is captured in `tools/effect_paper_holdouts.json`.
 Effect reports include reproducibility metadata with the workspace commit,
-dirty state, resampling counts, holdout manifest hash, and pinned repository
-refs.
+dirty state, resampling counts, exact sign-flip p-value method, holdout
+manifest hash, and pinned repository refs.
 
 ### History-Based Related-File Observation
 

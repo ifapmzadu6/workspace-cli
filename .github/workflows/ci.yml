@@ -39,6 +39,9 @@ jobs:
       - name: Build
         run: cargo build
 
+      - name: Python tool tests
+        run: python3 -m unittest discover -s tools -p 'test_*.py'
+
       - name: Effect measurement
         run: |
           python3 tools/measure_effect.py > /tmp/workspace-effect.json
