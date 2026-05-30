@@ -164,6 +164,31 @@ repo_holdout hybrid mean_average_precision@5: 0.583
 transaction_audit_signal_recall: 1.000
 ```
 
+A three-repository temporal holdout run can be reproduced with:
+
+```sh
+python3 tools/measure_effect.py \
+  --repo-holdout . \
+  --repo-holdout ../related-cli \
+  --repo-holdout ../llm-json-extract \
+  --max-heldout-commits 3 \
+  --max-candidate-commits 20
+```
+
+Representative aggregate over 9 held-out commits and 34 seed cases:
+
+```text
+cross_repo direct mean_recall@5: 0.649
+cross_repo direct mean_average_precision@5: 0.559
+cross_repo direct mean_ndcg@5: 0.675
+cross_repo pagerank mean_recall@5: 0.716
+cross_repo pagerank mean_average_precision@5: 0.537
+cross_repo pagerank mean_ndcg@5: 0.689
+cross_repo hybrid mean_recall@5: 0.716
+cross_repo hybrid mean_average_precision@5: 0.633
+cross_repo hybrid mean_ndcg@5: 0.765
+```
+
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and
 multi-seed fixtures, while preserving auditable change/rollback evidence.
