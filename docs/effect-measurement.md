@@ -33,6 +33,11 @@ python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
 python3 tools/verify_effect_artifacts.py target/effect-paper
 ```
 
+The `Paper Effect Artifacts` GitHub workflow runs the clean-machine path on
+demand and weekly. It prepares the public holdout remotes, generates
+`target/effect-paper`, verifies the artifact directory, and uploads it as a
+workflow artifact.
+
 If those pinned repositories are not already checked out at the manifest paths,
 prepare a local manifest from the recorded remotes before generating artifacts:
 

@@ -1,0 +1,52 @@
+name: Paper Effect Artifacts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  paper-effect:
+    name: Generate and verify paper effect artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Select Rust
+        run: rustup override set stable
+
+      - name: Build workspace binary
+        run: cargo build
+
+      - name: Prepare holdout repositories
+        run: |
+          python3 tools/prepare_effect_holdouts.py tools/effect_paper_holdouts.json \
+            --repo-root target/effect-repos \
+            --output-manifest target/effect-repos/holdouts.local.json
+
+      - name: Generate paper artifacts
+        run: |
+          python3 tools/run_effect_artifacts.py \
+            --manifest target/effect-repos/holdouts.local.json \
+            --output-dir target/effect-paper
+          python3 tools/verify_effect_artifacts.py target/effect-paper
+
+      - name: Upload paper artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: effect-paper-artifacts
+          path: target/effect-paper
+          if-no-files-found: error
+          retention-days: 30
