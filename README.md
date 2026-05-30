@@ -83,10 +83,14 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 cargo build
 python3 -m unittest discover -s tools -p 'test_*.py'
+python3 tools/measure_effect.py > /tmp/workspace-effect.json
+python3 tools/check_effect_thresholds.py /tmp/workspace-effect.json
 ```
 
 The same gates, plus `python3 tools/measure_effect.py`, run in GitHub Actions
-on pushes to `main` and pull requests.
+on pushes to `main` and pull requests. The threshold check consumes the JSON
+report from `tools/measure_effect.py` and fails if the fixture effect drops
+below the expected floor.
 
 In addition to unit tests, the repository has integration tests that run the
 real `workspace` binary inside temporary workspaces. The tests cover

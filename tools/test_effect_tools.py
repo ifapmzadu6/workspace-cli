@@ -23,6 +23,7 @@ def load_tool(name: str):
 
 measure_effect = load_tool("measure_effect")
 summarize_effect = load_tool("summarize_effect")
+check_effect_thresholds = load_tool("check_effect_thresholds")
 
 
 class ExactSignFlipTests(unittest.TestCase):
@@ -158,6 +159,65 @@ class SummaryFormattingTests(unittest.TestCase):
         )
         self.assertIn("AP/oracle", table)
         self.assertIn("| related hybrid | 0.600 | 0.800 | 0.750 | 0.200 |", table)
+
+
+class EffectThresholdTests(unittest.TestCase):
+    def passing_report(self) -> dict:
+        return {
+            "metadata": {
+                "sign_flip_method": "exact_grid_dp_with_sampled_fallback",
+            },
+            "measurements": [
+                {
+                    "metric": "map_fact_recall",
+                    "recall": 1.0,
+                },
+                {
+                    "metric": "transaction_audit_signal_recall",
+                    "recall": 1.0,
+                },
+                {
+                    "metric": "retrieval_suite",
+                    "scenario_count": 4,
+                    "aggregate": {
+                        "workspace_related_direct": {
+                            "mean_average_precision_at_5": 0.50,
+                        },
+                        "workspace_related_hybrid": {
+                            "mean_recall_at_5": 1.0,
+                            "mean_average_precision_at_5": 0.90,
+                        },
+                        "workspace_impact_direct": {
+                            "mean_average_precision_at_5": 0.50,
+                        },
+                        "workspace_impact_hybrid": {
+                            "mean_recall_at_5": 1.0,
+                            "mean_average_precision_at_5": 1.0,
+                        },
+                    },
+                },
+            ],
+        }
+
+    def test_effect_thresholds_pass_for_expected_fixture_floor(self) -> None:
+        self.assertEqual(
+            check_effect_thresholds.check_report(self.passing_report()),
+            [],
+        )
+
+    def test_effect_thresholds_fail_for_degraded_related_hybrid(self) -> None:
+        report = self.passing_report()
+        report["measurements"][2]["aggregate"]["workspace_related_hybrid"][
+            "mean_average_precision_at_5"
+        ] = 0.70
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any(
+                "workspace_related_hybrid.mean_average_precision_at_5" in item
+                for item in failures
+            ),
+            failures,
+        )
 
 
 if __name__ == "__main__":

@@ -45,4 +45,5 @@ jobs:
       - name: Effect measurement
         run: |
           python3 tools/measure_effect.py > /tmp/workspace-effect.json
+          python3 tools/check_effect_thresholds.py /tmp/workspace-effect.json
           python3 tools/summarize_effect.py /tmp/workspace-effect.json > /tmp/workspace-effect.md
