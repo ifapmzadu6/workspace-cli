@@ -60,8 +60,8 @@ verifier checks required files, JSON parseability, a passing threshold log,
 manifest hash consistency, recomputed threshold gates, and result-summary
 consistency with `effect.json`.
 For paper-style holdout reports, the threshold log gates case-weighted and
-repo-macro AP effect-size floors plus Holm-adjusted paired sign-flip p-value
-ceilings for the key hybrid-vs-baseline deltas.
+repo-macro AP effect-size floors, oracle-normalized AP, plus Holm-adjusted
+paired sign-flip p-value ceilings for the key hybrid-vs-baseline deltas.
 It also gates a temporal leakage audit: every held-out seed case must have
 been scored with a co-change index whose head exactly matches the held-out
 commit's parent.

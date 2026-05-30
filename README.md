@@ -136,8 +136,8 @@ distributions, history-only oracle ceilings, and case-level win/loss
 diagnostics for paper-style reproducibility checks. It also reports
 oracle-normalized AP, oracle gaps, and leave-one-repo-out hybrid weight
 selection when sweep weights are provided. Paper holdout threshold checks gate
-case-weighted and repo-macro effect sizes plus the corrected paired
-significance of the key deltas.
+case-weighted and repo-macro effect sizes, oracle-normalized AP, plus the
+corrected paired significance of the key deltas.
 The artifact runner also writes `result_summary.json`, a compact machine-readable
 summary of the headline metrics, full weight sweep, best weight result, and
 per-repository holdout results, oracle-normalized AP gaps, plus the leakage

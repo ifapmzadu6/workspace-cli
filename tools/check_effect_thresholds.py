@@ -32,6 +32,7 @@ EXPECTED_HYBRID_WEIGHT_SWEEP = [
 EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT = 0.9
 FLOAT_TOLERANCE = 1e-12
 MAX_HOLDOUT_HOLM_P = 0.005
+MIN_HOLDOUT_ORACLE_NORMALIZED_AP = 0.80
 
 
 def load_report(path: str) -> dict[str, Any]:
@@ -199,7 +200,7 @@ def check_repo_holdout_thresholds(
     min_recent_delta = 0.20 if predictable else 0.15
     min_global_delta = 0.18 if predictable else 0.15
     min_pagerank_delta = 0.11 if predictable else 0.10
-    min_oracle_normalized = 0.75
+    min_oracle_normalized = MIN_HOLDOUT_ORACLE_NORMALIZED_AP
     min_loro_ap = 0.71 if predictable else 0.63
     min_macro_hybrid_ap = 0.75 if predictable else 0.68
     min_macro_direct_delta = 0.08 if predictable else 0.06
@@ -276,6 +277,7 @@ def check_repo_holdout_thresholds(
         oracle="history_oracle_ceiling",
         metric=ap_metric,
         minimum=min_oracle_normalized,
+        label=label,
     )
     require_holm_evidence(
         failures,
@@ -524,21 +526,28 @@ def require_oracle_normalized(
     oracle: str,
     metric: str,
     minimum: float,
+    label: str | None = None,
 ) -> None:
+    prefix = f"{label}." if label else ""
     method_summary = aggregate.get(method)
     oracle_summary = aggregate.get(oracle)
     if method_summary is None or oracle_summary is None:
-        failures.append(f"missing oracle-normalized inputs: {method} / {oracle}")
+        failures.append(
+            f"missing oracle-normalized inputs: {prefix}{method} / {oracle}"
+        )
         return
     method_value = float(method_summary.get(metric, 0.0))
     oracle_value = float(oracle_summary.get(metric, 0.0))
     if oracle_value <= 0.0:
-        failures.append(f"{oracle}.{metric} must be positive for oracle normalization")
+        failures.append(
+            f"{prefix}{oracle}.{metric} must be positive for oracle normalization"
+        )
         return
     normalized = method_value / oracle_value
     if normalized < minimum:
         failures.append(
-            f"{method}.{metric} / {oracle}.{metric} < {minimum}: {normalized}"
+            f"{prefix}{method}.{metric} / {oracle}.{metric} < {minimum}: "
+            f"{normalized}"
         )
 
 

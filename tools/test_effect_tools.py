@@ -1041,6 +1041,21 @@ class EffectThresholdTests(unittest.TestCase):
             failures,
         )
 
+    def test_effect_thresholds_fail_for_degraded_oracle_normalized_ap(self) -> None:
+        report = self.passing_report()
+        report["measurements"][-1]["aggregate"]["history_oracle_ceiling"][
+            "mean_average_precision_at_5"
+        ] = 0.90
+        failures = check_effect_thresholds.check_report(report)
+        self.assertTrue(
+            any(
+                "workspace_related_hybrid.mean_average_precision_at_5 / "
+                "history_oracle_ceiling.mean_average_precision_at_5" in item
+                for item in failures
+            ),
+            failures,
+        )
+
     def test_effect_thresholds_fail_when_recent_baseline_catches_hybrid(self) -> None:
         report = self.passing_report()
         report["measurements"][-1]["aggregate"]["baseline_recent_activity"][
