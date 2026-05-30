@@ -44,7 +44,7 @@ jobs:
           python3 tools/verify_effect_artifacts.py target/effect-paper
 
       - name: Upload paper artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: effect-paper-artifacts
           path: target/effect-paper
