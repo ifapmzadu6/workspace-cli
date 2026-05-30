@@ -66,6 +66,7 @@ topologies instead of relying on one perfect fixture:
 - transitive chain: code to session to cookie to test
 - broad generated update: a large generated commit should be filtered out
 - multi-seed bridge: two changed files share a dependency that reaches a test
+- hard negatives: direct documentation co-changes compete with an indirect test
 
 For each scenario the script reports:
 
@@ -103,10 +104,10 @@ workspace_related_direct recall@3: 0.333
 workspace_related_pagerank recall@3: 1.000
 workspace_impact_pagerank recall@3: 1.000
 retrieval_suite git_diff_only mean_recall@5: 0.000
-retrieval_suite direct_cochange mean_recall@5: 0.500-0.666
+retrieval_suite direct_cochange mean_recall@5: 0.500-0.611
 retrieval_suite pagerank mean_recall@5: 1.000
-retrieval_suite pagerank mean_average_precision@5: 1.000
-retrieval_suite pagerank mean_ndcg@5: 1.000
+retrieval_suite pagerank mean_average_precision@5: 0.900-0.925
+retrieval_suite pagerank mean_ndcg@5: 0.950-0.963
 transaction_audit_signal_recall: 1.000
 ```
 

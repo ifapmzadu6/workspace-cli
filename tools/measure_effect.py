@@ -229,6 +229,32 @@ def make_multi_seed_fixture() -> tempfile.TemporaryDirectory[str]:
     return temp
 
 
+def make_doc_noise_fixture() -> tempfile.TemporaryDirectory[str]:
+    temp = tempfile.TemporaryDirectory()
+    root = Path(temp.name)
+    git(root, "init", "-q")
+    git(root, "config", "user.email", "measure@example.com")
+    git(root, "config", "user.name", "Measure")
+
+    write(root / "README.md", "# doc noise fixture\n")
+    write(root / "src/main.rs", "fn main() {}\n")
+    commit_all(root, "initial project scaffold")
+
+    write(root / "src/core.rs", "core module\n")
+    write(root / "src/adapter.rs", "adapter module\n")
+    commit_all(root, "core with adapter")
+
+    append(root / "src/adapter.rs", "tested behavior\n")
+    write(root / "tests/adapter_test.rs", "adapter tests\n")
+    commit_all(root, "adapter with tests")
+
+    for index in range(3):
+        append(root / "src/core.rs", f"doc touch {index}\n")
+        write(root / f"docs/core_{index}.md", f"core docs {index}\n")
+        commit_all(root, f"core docs {index}")
+    return temp
+
+
 def measure_observation(bin_path: Path) -> dict[str, Any]:
     with make_history_fixture() as name:
         root = Path(name)
@@ -495,6 +521,18 @@ def measure_retrieval_suite(bin_path: Path) -> dict[str, Any]:
                 root=Path(name),
                 seed_files=["src/api.rs", "src/worker.rs"],
                 expected={"src/shared.rs", "tests/shared_test.rs"},
+                k=k,
+            )
+        )
+
+    with make_doc_noise_fixture() as name:
+        scenarios.append(
+            evaluate_related_case(
+                bin_path,
+                name="direct_doc_noise_with_indirect_test",
+                root=Path(name),
+                target="src/core.rs",
+                expected={"src/adapter.rs", "tests/adapter_test.rs"},
                 k=k,
             )
         )
