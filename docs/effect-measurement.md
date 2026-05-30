@@ -33,6 +33,19 @@ python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
 python3 tools/verify_effect_artifacts.py target/effect-paper
 ```
 
+If those pinned repositories are not already checked out at the manifest paths,
+prepare a local manifest from the recorded remotes before generating artifacts:
+
+```sh
+python3 tools/prepare_effect_holdouts.py tools/effect_paper_holdouts.json \
+  --repo-root target/effect-repos \
+  --output-manifest target/effect-repos/holdouts.local.json
+python3 tools/run_effect_artifacts.py \
+  --manifest target/effect-repos/holdouts.local.json \
+  --output-dir target/effect-paper
+python3 tools/verify_effect_artifacts.py target/effect-paper
+```
+
 The JSON report includes reproducibility metadata: the workspace commit, dirty
 state, primary cutoff, resampling counts, sign-flip p-value method, holdout
 manifest path/hash, pinned holdout repositories, and holdout remote URLs. The
@@ -94,6 +107,11 @@ history:
 python3 tools/measure_effect.py \
   --repo-holdout-manifest tools/effect_paper_holdouts.json
 ```
+
+For a clean machine, `tools/prepare_effect_holdouts.py` clones or refreshes the
+recorded remotes into a chosen directory, verifies that each pinned ref resolves
+to a commit, and writes a local manifest that can be passed to
+`--repo-holdout-manifest` or `tools/run_effect_artifacts.py --manifest`.
 
 This checks out each held-out commit's parent in a temporary clone, builds the
 co-change index from only the older history, and measures whether

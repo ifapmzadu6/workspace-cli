@@ -104,6 +104,20 @@ python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
 python3 tools/verify_effect_artifacts.py target/effect-paper
 ```
 
+If the pinned holdout repositories are not already checked out at the manifest
+paths, materialize them from the recorded remotes first and run the artifact
+flow against the generated local manifest:
+
+```sh
+python3 tools/prepare_effect_holdouts.py tools/effect_paper_holdouts.json \
+  --repo-root target/effect-repos \
+  --output-manifest target/effect-repos/holdouts.local.json
+python3 tools/run_effect_artifacts.py \
+  --manifest target/effect-repos/holdouts.local.json \
+  --output-dir target/effect-paper
+python3 tools/verify_effect_artifacts.py target/effect-paper
+```
+
 In addition to unit tests, the repository has integration tests that run the
 real `workspace` binary inside temporary workspaces. The tests cover
 `map/read`, the co-change index, `related/impact`, and the
@@ -135,7 +149,9 @@ and a result summary that matches `effect.json`. The manifest also records the
 verifier command for artifact consumers.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
-is captured in `tools/effect_paper_holdouts.json`.
+is captured in `tools/effect_paper_holdouts.json`. `tools/prepare_effect_holdouts.py`
+can clone or refresh those repositories from their recorded remotes and write a
+local manifest for the artifact runner.
 Effect reports include reproducibility metadata with the workspace commit,
 dirty state, resampling counts, exact sign-flip p-value method, holdout
 manifest hash, pinned repository refs and remote URLs, and a temporal leakage

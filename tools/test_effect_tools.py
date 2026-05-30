@@ -32,6 +32,7 @@ check_effect_thresholds = load_tool("check_effect_thresholds")
 run_effect_artifacts = load_tool("run_effect_artifacts")
 extract_effect_summary = load_tool("extract_effect_summary")
 verify_effect_artifacts = load_tool("verify_effect_artifacts")
+prepare_effect_holdouts = load_tool("prepare_effect_holdouts")
 
 
 class ExactSignFlipTests(unittest.TestCase):
@@ -200,6 +201,167 @@ class HoldoutOracleTests(unittest.TestCase):
             args.repo_holdout_manifest_records[0]["remote_url"],
             "https://example.test/repo.git",
         )
+
+
+class HoldoutPreparationTests(unittest.TestCase):
+    def test_safe_repo_dir_name_uses_remote_basename(self) -> None:
+        self.assertEqual(
+            prepare_effect_holdouts.safe_repo_dir_name(
+                "git@github.com:example/workspace-cli.git"
+            ),
+            "workspace-cli",
+        )
+        self.assertEqual(
+            prepare_effect_holdouts.safe_repo_dir_name("https://example.test/a b.git"),
+            "a-b",
+        )
+
+    def test_prepare_holdouts_clones_and_writes_local_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            manifest = root / "holdouts.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "repo_holdouts": [
+                            {
+                                "repo": ".",
+                                "remote_url": (
+                                    "https://example.test/workspace-cli.git"
+                                ),
+                                "ref": "aaaa",
+                            },
+                            {
+                                "repo": "../other",
+                                "url": "git@example.test:org/workspace-cli.git",
+                                "ref": "bbbb",
+                            },
+                        ],
+                        "k": 5,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            calls = []
+
+            def fake_runner(command, **kwargs):
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout="commit\n")
+
+            output_manifest = root / "holdouts.local.json"
+            result = prepare_effect_holdouts.prepare_holdouts(
+                manifest,
+                root / "repos",
+                output_manifest,
+                runner=fake_runner,
+            )
+
+            local_manifest = json.loads(output_manifest.read_text(encoding="utf-8"))
+            repos = local_manifest["repo_holdouts"]
+            self.assertEqual(repos[0]["repo"], str(root / "repos" / "workspace-cli"))
+            self.assertEqual(repos[1]["repo"], str(root / "repos" / "workspace-cli-2"))
+            self.assertEqual(
+                repos[0]["remote_url"],
+                "https://example.test/workspace-cli.git",
+            )
+            self.assertEqual(
+                repos[1]["remote_url"],
+                "git@example.test:org/workspace-cli.git",
+            )
+            self.assertEqual(result["local_repos"][1].name, "workspace-cli-2")
+            self.assertEqual(
+                calls[0],
+                [
+                    "git",
+                    "clone",
+                    "--quiet",
+                    "https://example.test/workspace-cli.git",
+                    str(root / "repos" / "workspace-cli"),
+                ],
+            )
+            self.assertEqual(
+                calls[1],
+                [
+                    "git",
+                    "-C",
+                    str(root / "repos" / "workspace-cli"),
+                    "rev-parse",
+                    "--verify",
+                    "aaaa^{commit}",
+                ],
+            )
+
+    def test_prepare_holdouts_fetches_existing_clone_after_origin_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            local_repo = root / "repos" / "existing"
+            local_repo.mkdir(parents=True)
+            manifest = root / "holdouts.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "repo_holdouts": [
+                            {
+                                "repo": "../existing",
+                                "remote_url": "https://example.test/existing.git",
+                                "ref": "cccc",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            calls = []
+
+            def fake_runner(command, **kwargs):
+                calls.append(command)
+                if command[-1] == "--is-inside-work-tree":
+                    return subprocess.CompletedProcess(command, 0, stdout="true\n")
+                if command[-2:] == ["get-url", "origin"]:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout="https://example.test/existing.git\n",
+                    )
+                return subprocess.CompletedProcess(command, 0, stdout="commit\n")
+
+            prepare_effect_holdouts.prepare_holdouts(
+                manifest,
+                root / "repos",
+                root / "holdouts.local.json",
+                runner=fake_runner,
+            )
+
+            self.assertIn(
+                [
+                    "git",
+                    "-C",
+                    str(local_repo),
+                    "fetch",
+                    "--quiet",
+                    "--tags",
+                    "origin",
+                    "+refs/heads/*:refs/remotes/origin/*",
+                ],
+                calls,
+            )
+
+    def test_prepare_holdouts_requires_remote_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            manifest = root / "holdouts.json"
+            manifest.write_text(
+                json.dumps({"repo_holdouts": [{"repo": ".", "ref": "dddd"}]}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(prepare_effect_holdouts.ManifestError):
+                prepare_effect_holdouts.prepare_holdouts(
+                    manifest,
+                    root / "repos",
+                    root / "holdouts.local.json",
+                    runner=subprocess.run,
+                )
 
 
 class StaticBaselineTests(unittest.TestCase):
