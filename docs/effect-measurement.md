@@ -143,6 +143,8 @@ cutoff, which defaults to 5:
 - paired mean deltas, win/tie/loss counts, exact paired sign-flip p-values
   when the metric grid is finite, and deterministic sampled fallback p-values,
   including Holm-adjusted p-values within each comparison family
+- oracle-normalized AP and oracle gap for temporal holdout measurements that
+  include the history-only oracle ceiling
 - a default cutoff sweep at @1, @3, and @5
 - an optional hybrid direct-weight sweep for ablation
 - an optional leave-one-repo-out direct-weight selection check when multiple
@@ -336,6 +338,7 @@ cross_repo pagerank ndcg@5: 0.692 (0.555, 0.813)
 cross_repo hybrid recall@5: 0.806 (0.667, 0.931)
 cross_repo hybrid average_precision@5: 0.748 (0.620, 0.869)
 cross_repo hybrid ndcg@5: 0.794 (0.669, 0.909)
+cross_repo hybrid oracle-normalized average_precision@5: 0.898, oracle gap: 0.085
 cross_repo hybrid - direct average_precision@5: +0.059 (0.025, 0.097), wins/ties/losses 10/14/0, p_greater=0.0010, holm_p_greater=0.0029
 cross_repo hybrid - direct ndcg@5: +0.053 (0.023, 0.082), wins/ties/losses 10/14/0, p_greater=0.0010, holm_p_greater=0.0029
 cross_repo hybrid - pagerank average_precision@5: +0.135 (0.031, 0.250), wins/ties/losses 5/19/0, p_greater=0.0312, holm_p_greater=0.0625
@@ -368,6 +371,7 @@ predictable cross_repo history_oracle_ceiling average_precision@5: 1.000 (1.000,
 predictable cross_repo direct average_precision@5: 0.799 (0.697, 0.899)
 predictable cross_repo pagerank average_precision@5: 0.738 (0.595, 0.856)
 predictable cross_repo hybrid average_precision@5: 0.885 (0.781, 0.957)
+predictable cross_repo hybrid oracle-normalized average_precision@5: 0.885, oracle gap: 0.115
 predictable cross_repo hybrid - direct average_precision@5: +0.086 (0.035, 0.142), wins/ties/losses 10/12/0, p_greater=0.0010, holm_p_greater=0.0029
 predictable cross_repo hybrid - pagerank average_precision@5: +0.148 (0.045, 0.273), wins/ties/losses 5/17/0, p_greater=0.0312, holm_p_greater=0.0625
 predictable cross_repo hybrid - path_locality average_precision@5: +0.753 (0.616, 0.876), wins/ties/losses 21/0/1, p_greater=<0.0001, holm_p_greater=<0.0001
@@ -508,12 +512,14 @@ expanded cross_repo recent_activity average_precision@5: 0.450 (0.357, 0.543)
 expanded cross_repo global_pagerank average_precision@5: 0.471 (0.385, 0.562)
 expanded cross_repo path_locality average_precision@5: 0.100 (0.069, 0.135)
 expanded cross_repo history_oracle_ceiling average_precision@5: 0.811 (0.733, 0.878)
+expanded cross_repo hybrid oracle-normalized average_precision@5: 0.789, oracle gap: 0.171
 expanded cross_repo hybrid - direct average_precision@5: +0.076 (0.028, 0.127), wins/ties/losses 23/19/8, p_greater=0.0019, holm_p_greater=0.0039
 expanded cross_repo hybrid - pagerank average_precision@5: +0.104 (0.046, 0.169), wins/ties/losses 12/38/0, p_greater=0.0002, holm_p_greater=0.0007
 expanded cross_repo hybrid - recent_activity average_precision@5: +0.190 (0.125, 0.263), wins/ties/losses 36/11/3, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded cross_repo hybrid - global_pagerank average_precision@5: +0.169 (0.092, 0.250), wins/ties/losses 19/28/3, p_greater=<0.0001, holm_p_greater=<0.0001
 expanded predictable cross_repo hybrid average_precision@5: 0.719 (0.626, 0.818)
 expanded predictable cross_repo history_oracle_ceiling average_precision@5: 0.908 (0.852, 0.963)
+expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.792, oracle gap: 0.189
 expanded predictable cross_repo hybrid - direct average_precision@5: +0.094 (0.039, 0.151), wins/ties/losses 23/17/8, p_greater=0.0008, holm_p_greater=0.0016
 expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.117 (0.057, 0.183), wins/ties/losses 12/36/0, p_greater=0.0002, holm_p_greater=0.0007
 ```

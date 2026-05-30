@@ -140,6 +140,25 @@ class SummaryFormattingTests(unittest.TestCase):
         )
         self.assertIn("sign-flip method", current)
 
+    def test_oracle_normalized_table_reports_gap(self) -> None:
+        table = summarize_effect.render_oracle_normalized_table(
+            {
+                "k": 5,
+                "aggregate": {
+                    "history_oracle_ceiling": {
+                        "mean_average_precision_at_5": 0.8,
+                    },
+                    "workspace_related_hybrid": {
+                        "mean_average_precision_at_5": 0.6,
+                    },
+                },
+            },
+            "Holdout",
+            ["workspace_related_hybrid"],
+        )
+        self.assertIn("AP/oracle", table)
+        self.assertIn("| related hybrid | 0.600 | 0.800 | 0.750 | 0.200 |", table)
+
 
 if __name__ == "__main__":
     unittest.main()

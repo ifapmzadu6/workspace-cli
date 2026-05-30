@@ -321,6 +321,50 @@ def render_aggregate_table(measurement: dict[str, Any], title: str) -> str:
     )
 
 
+def render_oracle_normalized_table(
+    measurement: dict[str, Any],
+    title: str,
+    methods: list[str],
+) -> str:
+    aggregate = measurement.get("aggregate", {})
+    oracle = aggregate.get("history_oracle_ceiling")
+    if not oracle:
+        return ""
+    k = measurement["k"]
+    metric = f"average_precision_at_{k}"
+    oracle_ap = float(oracle[f"mean_{metric}"])
+    if oracle_ap <= 0.0:
+        return ""
+
+    rows = []
+    for method in methods:
+        summary = aggregate.get(method)
+        if not summary:
+            continue
+        ap = float(summary[f"mean_{metric}"])
+        rows.append(
+            [
+                label_method(method),
+                fmt_number(ap),
+                fmt_number(oracle_ap),
+                fmt_number(ap / oracle_ap),
+                fmt_number(oracle_ap - ap),
+            ]
+        )
+
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            f"## {title} Oracle-Normalized AP @{k}",
+            markdown_table(
+                ["method", f"AP@{k}", "oracle AP", "AP/oracle", "oracle gap"],
+                rows,
+            ),
+        ]
+    )
+
+
 def render_delta_table(
     measurement: dict[str, Any],
     title: str,
@@ -892,6 +936,20 @@ def render_report(report: dict[str, Any]) -> str:
                 ],
             )
         )
+        oracle_normalized = render_oracle_normalized_table(
+            holdout,
+            "Cross-Repo Temporal Holdout",
+            [
+                "baseline_path_locality",
+                "baseline_recent_activity",
+                "baseline_global_pagerank",
+                "workspace_related_direct",
+                "workspace_related_pagerank",
+                "workspace_related_hybrid",
+            ],
+        )
+        if oracle_normalized:
+            sections.append(oracle_normalized)
         case_deltas = render_case_delta_table(
             report,
             "Cross-Repo Temporal Holdout",
@@ -967,6 +1025,20 @@ def render_report(report: dict[str, Any]) -> str:
                     ],
                 )
             )
+            predictable_oracle_normalized = render_oracle_normalized_table(
+                predictable,
+                "Predictable Cross-Repo Temporal Holdout",
+                [
+                    "baseline_path_locality",
+                    "baseline_recent_activity",
+                    "baseline_global_pagerank",
+                    "workspace_related_direct",
+                    "workspace_related_pagerank",
+                    "workspace_related_hybrid",
+                ],
+            )
+            if predictable_oracle_normalized:
+                sections.append(predictable_oracle_normalized)
             predictable_case_deltas = render_case_delta_table(
                 report,
                 "Predictable Cross-Repo Temporal Holdout",
