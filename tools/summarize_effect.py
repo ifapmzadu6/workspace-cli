@@ -282,7 +282,11 @@ def render_metadata_table(report: dict[str, Any]) -> str:
                 continue
             repo = holdout.get("repo", "")
             ref = holdout.get("ref", "")
-            holdout_parts.append(f"{repo}@{short_commit(ref)}")
+            remote_url = holdout.get("remote_url")
+            label = f"{repo}@{short_commit(ref)}"
+            if remote_url:
+                label = f"{label} ({remote_url})"
+            holdout_parts.append(label)
         holdout_text = ", ".join(holdout_parts)
 
     rows = [

@@ -2545,19 +2545,28 @@ def apply_repo_holdout_manifest(
 
     repos = []
     refs = []
+    manifest_records = []
     for index, entry in enumerate(entries, start=1):
         if not isinstance(entry, dict):
             parser.error(f"repo_holdouts[{index}] must be an object")
         repo = entry.get("repo")
         ref = entry.get("ref")
+        remote_url = entry.get("remote_url", entry.get("url"))
         if not isinstance(repo, str) or not repo:
             parser.error(f"repo_holdouts[{index}].repo must be a non-empty string")
         if not isinstance(ref, str) or not ref:
             parser.error(f"repo_holdouts[{index}].ref must be a non-empty string")
+        if remote_url is not None and not isinstance(remote_url, str):
+            parser.error(f"repo_holdouts[{index}].remote_url must be a string")
         repos.append(Path(repo))
         refs.append(ref)
+        manifest_record = {"repo": repo, "ref": ref}
+        if remote_url:
+            manifest_record["remote_url"] = remote_url
+        manifest_records.append(manifest_record)
     args.repo_holdout = repos
     args.repo_holdout_ref = refs
+    args.repo_holdout_manifest_records = manifest_records
 
     for field in [
         "max_heldout_commits",
@@ -2565,13 +2574,16 @@ def apply_repo_holdout_manifest(
         "max_files_per_commit",
         "k",
     ]:
-        if getattr(args, field) is None and field in manifest:
+        if getattr(args, field, None) is None and field in manifest:
             value = manifest[field]
             if not isinstance(value, int):
                 parser.error(f"--repo-holdout-manifest {field} must be an integer")
             setattr(args, field, value)
 
-    if not args.hybrid_direct_weight_sweep and "hybrid_direct_weight_sweep" in manifest:
+    if (
+        not getattr(args, "hybrid_direct_weight_sweep", "")
+        and "hybrid_direct_weight_sweep" in manifest
+    ):
         value = manifest["hybrid_direct_weight_sweep"]
         if not isinstance(value, list):
             parser.error(
@@ -2606,6 +2618,25 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def repo_remote_url(repo: Path) -> str | None:
+    return git_text_or_none(repo.resolve(), "remote", "get-url", "origin")
+
+
+def repo_holdout_record(
+    repo: Path,
+    ref: str,
+    manifest_record: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    record = {"repo": str(repo), "ref": ref}
+    remote_url = None
+    if manifest_record is not None:
+        remote_url = manifest_record.get("remote_url")
+    remote_url = remote_url or repo_remote_url(repo)
+    if remote_url:
+        record["remote_url"] = remote_url
+    return record
+
+
 def measurement_metadata(
     args: argparse.Namespace,
     bin_path: Path,
@@ -2614,6 +2645,7 @@ def measurement_metadata(
     workspace_commit = git_text_or_none(ROOT, "rev-parse", "HEAD")
     workspace_status = git_text_or_none(ROOT, "status", "--porcelain")
     repo_holdout_refs = args.repo_holdout_ref or ["HEAD"] * len(args.repo_holdout)
+    manifest_records = getattr(args, "repo_holdout_manifest_records", [])
     metadata: dict[str, Any] = {
         "schema_version": 1,
         "workspace_bin": str(bin_path),
@@ -2636,8 +2668,14 @@ def measurement_metadata(
         "max_files_per_commit": args.max_files_per_commit,
         "hybrid_direct_weight_sweep": hybrid_weights,
         "repo_holdouts": [
-            {"repo": str(repo), "ref": ref}
-            for repo, ref in zip(args.repo_holdout, repo_holdout_refs)
+            repo_holdout_record(
+                repo,
+                ref,
+                manifest_records[index] if index < len(manifest_records) else None,
+            )
+            for index, (repo, ref) in enumerate(
+                zip(args.repo_holdout, repo_holdout_refs)
+            )
         ],
     }
     if args.repo_holdout_manifest is not None:

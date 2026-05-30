@@ -138,8 +138,8 @@ used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`.
 Effect reports include reproducibility metadata with the workspace commit,
 dirty state, resampling counts, exact sign-flip p-value method, holdout
-manifest hash, pinned repository refs, and a temporal leakage audit that checks
-each training index head against the held-out commit's parent.
+manifest hash, pinned repository refs and remote URLs, and a temporal leakage
+audit that checks each training index head against the held-out commit's parent.
 
 ### History-Based Related-File Observation
 

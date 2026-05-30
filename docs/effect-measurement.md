@@ -35,7 +35,8 @@ python3 tools/verify_effect_artifacts.py target/effect-paper
 
 The JSON report includes reproducibility metadata: the workspace commit, dirty
 state, primary cutoff, resampling counts, sign-flip p-value method, holdout
-manifest path/hash, and pinned holdout repositories. The Markdown summary
+manifest path/hash, pinned holdout repositories, and holdout remote URLs. The
+Markdown summary
 renders the same metadata before the metric tables, while
 `result_summary.json` extracts the headline metrics, full weight sweep, best
 weight result, per-repository holdout results, and leakage audit into a compact
@@ -85,7 +86,9 @@ python3 tools/measure_effect.py --hybrid-direct-weight-sweep 0,0.05,0.1,0.25,0.5
 ```
 
 The fixed-ref cross-repository setup used for the paper-style results is stored
-in `tools/effect_paper_holdouts.json`:
+in `tools/effect_paper_holdouts.json`. Its entries pin each repository ref and
+may include `remote_url` so artifact metadata records how to fetch the source
+history:
 
 ```sh
 python3 tools/measure_effect.py \

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import itertools
 import json
@@ -154,6 +155,52 @@ class HoldoutOracleTests(unittest.TestCase):
         self.assertEqual(audit["failure_count"], 1)
         self.assertEqual(audit["failures"][0]["seed"], "src/b.rs")
 
+    def test_repo_holdout_record_includes_origin_remote(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo = Path(tmp_dir)
+            measure_effect.git(repo, "init", "-q")
+            measure_effect.git(
+                repo,
+                "remote",
+                "add",
+                "origin",
+                "https://example.test/project.git",
+            )
+
+            record = measure_effect.repo_holdout_record(repo, "HEAD")
+
+        self.assertEqual(record["remote_url"], "https://example.test/project.git")
+
+    def test_repo_holdout_manifest_preserves_optional_remote_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            manifest = Path(tmp_dir) / "holdouts.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "repo_holdouts": [
+                            {
+                                "repo": ".",
+                                "ref": "abcdef",
+                                "remote_url": "https://example.test/repo.git",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = argparse.Namespace(
+                repo_holdout_manifest=manifest,
+                repo_holdout=[],
+                repo_holdout_ref=[],
+            )
+
+            measure_effect.apply_repo_holdout_manifest(args, argparse.ArgumentParser())
+
+        self.assertEqual(
+            args.repo_holdout_manifest_records[0]["remote_url"],
+            "https://example.test/repo.git",
+        )
+
 
 class StaticBaselineTests(unittest.TestCase):
     def test_path_tokens_split_names_and_ignore_structural_tokens(self) -> None:
@@ -224,6 +271,25 @@ class SummaryFormattingTests(unittest.TestCase):
             }
         )
         self.assertIn("sign-flip method", current)
+
+    def test_metadata_table_includes_holdout_remote_urls(self) -> None:
+        table = summarize_effect.render_metadata_table(
+            {
+                "metadata": {
+                    "workspace_bin": "target/debug/workspace",
+                    "repo_holdouts": [
+                        {
+                            "repo": "../example",
+                            "ref": "abcdef123456",
+                            "remote_url": "https://example.test/repo.git",
+                        }
+                    ],
+                }
+            }
+        )
+
+        self.assertIn("../example@abcdef1234", table)
+        self.assertIn("https://example.test/repo.git", table)
 
     def test_oracle_normalized_table_reports_gap(self) -> None:
         table = summarize_effect.render_oracle_normalized_table(
