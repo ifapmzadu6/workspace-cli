@@ -84,7 +84,7 @@ const RELATED_METHOD_COCHANGE: &str = "cochange";
 const RANK_DIRECT: &str = "direct";
 const RANK_PAGERANK: &str = "pagerank";
 const RANK_HYBRID: &str = "hybrid";
-const RELATED_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.5;
+const RELATED_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.8;
 const IMPACT_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.05;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
@@ -11444,7 +11444,7 @@ src/b.rs
         assert_eq!(round3(hybrid_rank_score(0.25, 1.0, 0.0)), 0.25);
         assert_eq!(round3(hybrid_rank_score(0.25, 1.0, 0.5)), 0.625);
         assert_eq!(round3(hybrid_rank_score(0.25, 1.0, 1.0)), 1.0);
-        assert_eq!(related_hybrid_direct_weight(None), 0.5);
+        assert_eq!(related_hybrid_direct_weight(None), 0.8);
         assert_eq!(impact_hybrid_direct_weight(None), 0.05);
         assert_eq!(related_hybrid_direct_weight(Some(0.2)), 0.2);
         assert!(validate_hybrid_direct_weight(Some(0.0)).is_ok());

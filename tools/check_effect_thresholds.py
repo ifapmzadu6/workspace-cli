@@ -11,7 +11,19 @@ from typing import Any
 
 
 EXPECTED_SIGN_FLIP_METHOD = "exact_grid_dp_with_sampled_fallback"
-EXPECTED_HYBRID_WEIGHT_SWEEP = [0.0, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0]
+EXPECTED_HYBRID_WEIGHT_SWEEP = [
+    0.0,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    0.6,
+    0.75,
+    0.8,
+    0.9,
+    1.0,
+]
+FLOAT_TOLERANCE = 1e-12
 
 
 def load_report(path: str) -> dict[str, Any]:
@@ -155,12 +167,12 @@ def check_repo_holdout_thresholds(
     require_count(failures, holdout, "target_count", 180, label)
 
     aggregate = holdout.get("aggregate", {})
-    min_hybrid_ap = 0.70 if predictable else 0.63
-    min_direct_delta = 0.08 if predictable else 0.05
-    min_lexical_delta = 0.35 if predictable else 0.30
-    min_pagerank_delta = 0.09 if predictable else 0.08
+    min_hybrid_ap = 0.72 if predictable else 0.64
+    min_direct_delta = 0.09 if predictable else 0.07
+    min_lexical_delta = 0.40 if predictable else 0.35
+    min_pagerank_delta = 0.11 if predictable else 0.10
     min_oracle_normalized = 0.75
-    min_loro_ap = 0.70 if predictable else 0.62
+    min_loro_ap = 0.71 if predictable else 0.63
 
     require_mean(
         failures,
@@ -271,7 +283,7 @@ def require_delta(
         failures.append(f"missing aggregate delta inputs: {left} - {right}")
         return
     delta = float(left_summary.get(metric, 0.0)) - float(right_summary.get(metric, 0.0))
-    if delta < minimum:
+    if delta + FLOAT_TOLERANCE < minimum:
         failures.append(f"{left}.{metric} - {right}.{metric} < {minimum}: {delta}")
 
 

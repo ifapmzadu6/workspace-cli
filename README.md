@@ -184,7 +184,7 @@ that were not directly changed with the seed file, but are connected through
 related history. `hybrid` combines PageRank reachability with a direct
 co-change boost, preserving indirect discovery while improving temporal
 holdout ranking quality. Use `--hybrid-direct-weight` with values from `0.0`
-to `1.0` for ablation runs; the default is `0.5` for `related`.
+to `1.0` for ablation runs; the default is `0.8` for `related`.
 
 `workspace impact --diff --by cochange` uses the current Git diff as seed files
 and returns nearby files from history. This helps decide what to read next and
