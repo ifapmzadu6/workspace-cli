@@ -417,6 +417,24 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                         },
                     ],
                 },
+                {
+                    "metric": "repo_temporal_holdout",
+                    "repo": "/tmp/workspace-cli",
+                    "k": 5,
+                    "case_count": 6,
+                    "target_count": 8,
+                    "heldout_commit_count": 2,
+                    "aggregate": {
+                        "workspace_related_hybrid": {
+                            "mean_average_precision_at_5": 0.75,
+                        },
+                        "workspace_related_direct": {
+                            "mean_average_precision_at_5": 0.5,
+                        },
+                    },
+                    "paired_deltas": {},
+                    "hybrid_weight_sweep": [],
+                },
             ],
         }
 
@@ -438,6 +456,13 @@ class EffectSummaryExtractionTests(unittest.TestCase):
         self.assertEqual(
             holdout["weight_sweep"][1]["delta_vs_direct"]["mean_delta"],
             0.087,
+        )
+        self.assertEqual(holdout["per_repo"][0]["repo_name"], "workspace-cli")
+        self.assertEqual(
+            holdout["per_repo"][0]["methods"]["workspace_related_hybrid"][
+                "average_precision_at_5"
+            ]["mean"],
+            0.75,
         )
         self.assertEqual(
             holdout["methods"]["workspace_related_hybrid"][

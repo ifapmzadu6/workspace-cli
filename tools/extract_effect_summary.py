@@ -26,6 +26,20 @@ def measurement_by_name(report: dict[str, Any], name: str) -> dict[str, Any] | N
     return None
 
 
+def measurements_by_name(report: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    return [
+        measurement
+        for measurement in report.get("measurements", [])
+        if measurement.get("metric") == name
+    ]
+
+
+def repo_name(repo: Any) -> str | None:
+    if not isinstance(repo, str) or not repo:
+        return None
+    return Path(repo).name or repo
+
+
 def rounded(value: Any) -> float | None:
     if value is None:
         return None
@@ -288,6 +302,14 @@ def extract_summary(report: dict[str, Any]) -> dict[str, Any]:
     holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
     map_recall = measurement_by_name(report, "map_fact_recall") or {}
     transaction = measurement_by_name(report, "transaction_audit_signal_recall") or {}
+    holdout_summary = headline_holdout_summary(holdout or {})
+    if holdout:
+        holdout_summary["per_repo"] = []
+        for measurement in measurements_by_name(report, "repo_temporal_holdout"):
+            repo_summary = headline_holdout_summary(measurement)
+            repo_summary["repo"] = measurement.get("repo")
+            repo_summary["repo_name"] = repo_name(measurement.get("repo"))
+            holdout_summary["per_repo"].append(repo_summary)
     return {
         "schema_version": SCHEMA_VERSION,
         "metadata": report.get("metadata", {}),
@@ -296,7 +318,7 @@ def extract_summary(report: dict[str, Any]) -> dict[str, Any]:
             "transaction_audit_signal_recall": rounded(transaction.get("recall")),
         },
         "retrieval_suite": headline_retrieval_summary(report),
-        "repo_temporal_holdout": headline_holdout_summary(holdout or {}),
+        "repo_temporal_holdout": holdout_summary,
     }
 
 
