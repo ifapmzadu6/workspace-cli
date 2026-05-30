@@ -84,9 +84,7 @@ const RELATED_METHOD_COCHANGE: &str = "cochange";
 const RANK_DIRECT: &str = "direct";
 const RANK_PAGERANK: &str = "pagerank";
 const RANK_HYBRID: &str = "hybrid";
-const RELATED_HYBRID_PAGERANK_SCORE_WEIGHT: f64 = 0.5;
 const RELATED_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.5;
-const IMPACT_HYBRID_PAGERANK_SCORE_WEIGHT: f64 = 0.95;
 const IMPACT_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.05;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
@@ -273,6 +271,9 @@ struct RelatedArgs {
     /// Ranking algorithm. pagerank requires the co-change index.
     #[arg(long, value_enum, default_value_t = RankingMethod::Direct)]
     rank: RankingMethod,
+    /// Direct co-change weight for hybrid ranking, from 0.0 to 1.0.
+    #[arg(long)]
+    hybrid_direct_weight: Option<f64>,
     /// Use .workspace/index/cochange.json instead of scanning git log.
     #[arg(long)]
     use_index: bool,
@@ -303,6 +304,9 @@ struct ImpactArgs {
     /// Ranking algorithm. pagerank requires the co-change index.
     #[arg(long, value_enum, default_value_t = RankingMethod::Direct)]
     rank: RankingMethod,
+    /// Direct co-change weight for hybrid ranking, from 0.0 to 1.0.
+    #[arg(long)]
+    hybrid_direct_weight: Option<f64>,
     /// Use .workspace/index/cochange.json instead of scanning git log.
     #[arg(long)]
     use_index: bool,
@@ -2214,16 +2218,9 @@ fn observed_related(
     target: &str,
     args: &RelatedArgs,
 ) -> Result<RelatedData> {
+    let hybrid_direct_weight = validate_hybrid_direct_weight(args.hybrid_direct_weight)?;
     if workspace.is_git_repo {
-        related_by_cochange(
-            workspace,
-            target,
-            args.max_commits,
-            args.max_files_per_commit,
-            args.max_results,
-            args.rank,
-            args.use_index,
-        )
+        related_by_cochange(workspace, target, args, hybrid_direct_weight)
     } else {
         Ok(related_data_for_non_repo(
             target,
@@ -2273,15 +2270,9 @@ fn observed_impact_args(workspace: &Workspace, args: &ImpactArgs) -> Result<Impa
 }
 
 fn observed_impact(workspace: &Workspace, args: &ImpactArgs) -> Result<ImpactData> {
+    let hybrid_direct_weight = validate_hybrid_direct_weight(args.hybrid_direct_weight)?;
     if workspace.is_git_repo {
-        impact_by_cochange(
-            workspace,
-            args.max_commits,
-            args.max_files_per_commit,
-            args.max_results,
-            args.rank,
-            args.use_index,
-        )
+        impact_by_cochange(workspace, args, hybrid_direct_weight)
     } else {
         Ok(impact_data_for_non_repo(
             &args.by,
@@ -3458,59 +3449,71 @@ fn map_next_observations(map: &WorkspaceMap) -> Vec<String> {
 fn related_by_cochange(
     workspace: &Workspace,
     target: &str,
-    max_commits: usize,
-    max_files_per_commit: usize,
-    max_results: usize,
-    rank: RankingMethod,
-    use_index: bool,
+    args: &RelatedArgs,
+    hybrid_direct_weight: Option<f64>,
 ) -> Result<RelatedData> {
-    let should_use_index = uses_cochange_index(use_index, rank);
+    let should_use_index = uses_cochange_index(args.use_index, args.rank);
     if !should_use_index && let Some(cli) = RelatedCli::detect() {
         let output = cli.query(
             &workspace.root,
             target,
-            max_commits,
-            max_files_per_commit,
-            max_results,
-            rank.as_str(),
+            args.max_commits,
+            args.max_files_per_commit,
+            args.max_results,
+            args.rank.as_str(),
         )?;
         return Ok(related_data_from_related_cli(
             target,
             output,
-            max_commits,
-            max_files_per_commit,
-            max_results,
-            rank,
+            args.max_commits,
+            args.max_files_per_commit,
+            args.max_results,
+            args.rank,
         ));
     }
 
     if should_use_index {
         let index = read_cochange_index(workspace)?;
-        let ranking = match rank {
-            RankingMethod::Direct => rank_cochanges_from_index(&index, target, max_results),
+        let ranking = match args.rank {
+            RankingMethod::Direct => rank_cochanges_from_index(&index, target, args.max_results),
             RankingMethod::Pagerank => {
-                rank_cochanges_pagerank_from_index(&index, target, max_results)
+                rank_cochanges_pagerank_from_index(&index, target, args.max_results)
             }
-            RankingMethod::Hybrid => rank_cochanges_hybrid_from_index(&index, target, max_results),
+            RankingMethod::Hybrid => rank_cochanges_hybrid_from_index(
+                &index,
+                target,
+                args.max_results,
+                related_hybrid_direct_weight(hybrid_direct_weight),
+            ),
         };
         return Ok(cochange_related_data(
-            RelatedDataMetadata::cochange(target, rank, RELATIONSHIP_SOURCE_COCHANGE_INDEX, true),
+            RelatedDataMetadata::cochange(
+                target,
+                args.rank,
+                RELATIONSHIP_SOURCE_COCHANGE_INDEX,
+                true,
+            ),
             RelationshipStats::from_cochange_index(&index, ranking.commits_matched),
             RelationshipLimits::from_cochange_index(&index),
             ranking.related,
         ));
     }
 
-    let commits = git_recent_name_only_commits(workspace, max_commits)?;
-    let ranking = rank_cochanges(&commits, target, max_files_per_commit, max_results);
+    let commits = git_recent_name_only_commits(workspace, args.max_commits)?;
+    let ranking = rank_cochanges(
+        &commits,
+        target,
+        args.max_files_per_commit,
+        args.max_results,
+    );
     Ok(cochange_related_data(
-        RelatedDataMetadata::cochange(target, rank, RELATIONSHIP_SOURCE_GIT_LOG, true),
+        RelatedDataMetadata::cochange(target, args.rank, RELATIONSHIP_SOURCE_GIT_LOG, true),
         RelationshipStats::from_git_log(
             &commits,
             ranking.commits_matched,
             ranking.ignored_large_commits,
         ),
-        RelationshipLimits::from_options(max_commits, max_files_per_commit),
+        RelationshipLimits::from_options(args.max_commits, args.max_files_per_commit),
         ranking.related,
     ))
 }
@@ -3858,25 +3861,22 @@ fn write_cochange_index_temp(path: &Path, index: &CochangeIndex) -> Result<()> {
 
 fn impact_by_cochange(
     workspace: &Workspace,
-    max_commits: usize,
-    max_files_per_commit: usize,
-    max_results: usize,
-    rank: RankingMethod,
-    use_index: bool,
+    args: &ImpactArgs,
+    hybrid_direct_weight: Option<f64>,
 ) -> Result<ImpactData> {
     let seed_files = git_changed_files(workspace)?;
     let seed_summary = SeedFileSummary::from_seed_files(&seed_files, MAX_CHANGED_FILES);
-    let should_use_index = uses_cochange_index(use_index, rank);
+    let should_use_index = uses_cochange_index(args.use_index, args.rank);
     if !should_use_index
         && let Some(cli) = RelatedCli::detect()
         && let Some(data) = impact_by_related_cli(
             workspace,
             &cli,
             &seed_files,
-            max_commits,
-            max_files_per_commit,
-            max_results,
-            rank,
+            args.max_commits,
+            args.max_files_per_commit,
+            args.max_results,
+            args.rank,
         )?
     {
         return Ok(data);
@@ -3884,19 +3884,22 @@ fn impact_by_cochange(
 
     if should_use_index {
         let index = read_cochange_index(workspace)?;
-        let ranking = match rank {
+        let ranking = match args.rank {
             RankingMethod::Direct => {
-                rank_cochange_impact_from_index(&index, &seed_files, max_results)
+                rank_cochange_impact_from_index(&index, &seed_files, args.max_results)
             }
             RankingMethod::Pagerank => {
-                rank_cochange_impact_pagerank_from_index(&index, &seed_files, max_results)
+                rank_cochange_impact_pagerank_from_index(&index, &seed_files, args.max_results)
             }
-            RankingMethod::Hybrid => {
-                rank_cochange_impact_hybrid_from_index(&index, &seed_files, max_results)
-            }
+            RankingMethod::Hybrid => rank_cochange_impact_hybrid_from_index(
+                &index,
+                &seed_files,
+                args.max_results,
+                impact_hybrid_direct_weight(hybrid_direct_weight),
+            ),
         };
         return Ok(cochange_impact_data(
-            ImpactDataMetadata::cochange(rank, RELATIONSHIP_SOURCE_COCHANGE_INDEX, true),
+            ImpactDataMetadata::cochange(args.rank, RELATIONSHIP_SOURCE_COCHANGE_INDEX, true),
             seed_summary,
             RelationshipStats::from_cochange_index(&index, ranking.commits_matched),
             RelationshipLimits::from_cochange_index(&index),
@@ -3904,18 +3907,23 @@ fn impact_by_cochange(
         ));
     }
 
-    let commits = git_recent_name_only_commits(workspace, max_commits)?;
-    let ranking = rank_cochange_impact(&commits, &seed_files, max_files_per_commit, max_results);
+    let commits = git_recent_name_only_commits(workspace, args.max_commits)?;
+    let ranking = rank_cochange_impact(
+        &commits,
+        &seed_files,
+        args.max_files_per_commit,
+        args.max_results,
+    );
 
     Ok(cochange_impact_data(
-        ImpactDataMetadata::cochange(rank, RELATIONSHIP_SOURCE_GIT_LOG, true),
+        ImpactDataMetadata::cochange(args.rank, RELATIONSHIP_SOURCE_GIT_LOG, true),
         seed_summary,
         RelationshipStats::from_git_log(
             &commits,
             ranking.commits_matched,
             ranking.ignored_large_commits,
         ),
-        RelationshipLimits::from_options(max_commits, max_files_per_commit),
+        RelationshipLimits::from_options(args.max_commits, args.max_files_per_commit),
         ranking.impacted,
     ))
 }
@@ -4424,6 +4432,7 @@ fn rank_cochanges_hybrid_from_index(
     index: &CochangeIndex,
     target: &str,
     max_results: usize,
+    direct_weight: f64,
 ) -> CochangeRanking {
     let target = normalize_repo_path(target);
     let seeds = BTreeSet::from([target.clone()]);
@@ -4435,7 +4444,7 @@ fn rank_cochanges_hybrid_from_index(
         let direct_score = find_cochange_edge(&edge_lookup, &target, &hit.path)
             .map(|edge| normalized_direct_score(edge.weighted_cochanges, max_direct_weight))
             .unwrap_or_default();
-        hit.score = related_hybrid_rank_score(hit.score, direct_score);
+        hit.score = hybrid_rank_score(hit.score, direct_score, direct_weight);
     }
     normalize_pagerank_hit_scores(&mut hits);
 
@@ -4620,6 +4629,7 @@ fn rank_cochange_impact_hybrid_from_index(
     index: &CochangeIndex,
     seed_files: &[String],
     max_results: usize,
+    direct_weight: f64,
 ) -> ImpactRanking {
     let seed_files = normalized_seed_file_set(seed_files);
     let mut hits = personalized_pagerank(
@@ -4635,7 +4645,7 @@ fn rank_cochange_impact_hybrid_from_index(
             impact_direct_edge_weight(&edge_lookup, &seed_files, &hit.path),
             max_direct_weight,
         );
-        hit.score = impact_hybrid_rank_score(hit.score, direct_score);
+        hit.score = hybrid_rank_score(hit.score, direct_score, direct_weight);
     }
     apply_impact_pagerank_path_prior(&mut hits);
     let mut impacted = hits
@@ -4681,14 +4691,25 @@ fn normalize_pagerank_hit_scores(hits: &mut [PageRankHit]) {
     }
 }
 
-fn related_hybrid_rank_score(pagerank_score: f64, direct_score: f64) -> f64 {
-    (RELATED_HYBRID_PAGERANK_SCORE_WEIGHT * pagerank_score)
-        + (RELATED_HYBRID_DIRECT_SCORE_WEIGHT * direct_score)
+fn related_hybrid_direct_weight(hybrid_direct_weight: Option<f64>) -> f64 {
+    hybrid_direct_weight.unwrap_or(RELATED_HYBRID_DIRECT_SCORE_WEIGHT)
 }
 
-fn impact_hybrid_rank_score(pagerank_score: f64, direct_score: f64) -> f64 {
-    (IMPACT_HYBRID_PAGERANK_SCORE_WEIGHT * pagerank_score)
-        + (IMPACT_HYBRID_DIRECT_SCORE_WEIGHT * direct_score)
+fn impact_hybrid_direct_weight(hybrid_direct_weight: Option<f64>) -> f64 {
+    hybrid_direct_weight.unwrap_or(IMPACT_HYBRID_DIRECT_SCORE_WEIGHT)
+}
+
+fn hybrid_rank_score(pagerank_score: f64, direct_score: f64, direct_weight: f64) -> f64 {
+    ((1.0 - direct_weight) * pagerank_score) + (direct_weight * direct_score)
+}
+
+fn validate_hybrid_direct_weight(value: Option<f64>) -> Result<Option<f64>> {
+    if let Some(weight) = value
+        && (!weight.is_finite() || !(0.0..=1.0).contains(&weight))
+    {
+        bail!("--hybrid-direct-weight must be between 0.0 and 1.0");
+    }
+    Ok(value)
 }
 
 fn pagerank_candidate_limit(max_results: usize) -> usize {
@@ -8208,6 +8229,7 @@ rename to new name.txt
             max_files_per_commit: 40,
             max_results: 7,
             rank: RankingMethod::Pagerank,
+            hybrid_direct_weight: None,
             use_index: false,
             path: PathBuf::from("src/main.rs"),
         };
@@ -8239,6 +8261,7 @@ rename to new name.txt
             max_files_per_commit: 80,
             max_results: 9,
             rank: RankingMethod::Direct,
+            hybrid_direct_weight: None,
             use_index: true,
         };
         let impact =
@@ -8263,6 +8286,7 @@ rename to new name.txt
             max_files_per_commit: 80,
             max_results: 9,
             rank: RankingMethod::Direct,
+            hybrid_direct_weight: None,
             use_index: true,
         };
         let error = match observed_impact_args(&workspace, &invalid_impact_args) {
@@ -11227,7 +11251,12 @@ src/b.rs
         ];
         let index = cochange_index_from_commits(&commits, 100, 10, None);
 
-        let ranking = rank_cochanges_hybrid_from_index(&index, "src/a.rs", 10);
+        let ranking = rank_cochanges_hybrid_from_index(
+            &index,
+            "src/a.rs",
+            10,
+            RELATED_HYBRID_DIRECT_SCORE_WEIGHT,
+        );
 
         assert_eq!(ranking.related[0].path, "src/b.rs");
         assert!(ranking.related.iter().any(|file| file.path == "src/c.rs"));
@@ -11284,7 +11313,12 @@ src/b.rs
         let index = cochange_index_from_commits(&commits, 100, 10, None);
         let seeds = vec!["src/a.rs".to_string()];
 
-        let ranking = rank_cochange_impact_hybrid_from_index(&index, &seeds, 10);
+        let ranking = rank_cochange_impact_hybrid_from_index(
+            &index,
+            &seeds,
+            10,
+            IMPACT_HYBRID_DIRECT_SCORE_WEIGHT,
+        );
 
         assert_eq!(ranking.impacted[0].path, "src/b.rs");
         assert!(
@@ -11406,6 +11440,17 @@ src/b.rs
         assert_eq!(impact_seed_weight(0), 1.0);
         assert_eq!(impact_seed_weight(1), 1.0);
         assert_eq!(impact_seed_weight(3), 1.5);
+
+        assert_eq!(round3(hybrid_rank_score(0.25, 1.0, 0.0)), 0.25);
+        assert_eq!(round3(hybrid_rank_score(0.25, 1.0, 0.5)), 0.625);
+        assert_eq!(round3(hybrid_rank_score(0.25, 1.0, 1.0)), 1.0);
+        assert_eq!(related_hybrid_direct_weight(None), 0.5);
+        assert_eq!(impact_hybrid_direct_weight(None), 0.05);
+        assert_eq!(related_hybrid_direct_weight(Some(0.2)), 0.2);
+        assert!(validate_hybrid_direct_weight(Some(0.0)).is_ok());
+        assert!(validate_hybrid_direct_weight(Some(1.0)).is_ok());
+        assert!(validate_hybrid_direct_weight(Some(-0.1)).is_err());
+        assert!(validate_hybrid_direct_weight(Some(1.1)).is_err());
     }
 
     #[test]

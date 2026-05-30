@@ -632,6 +632,44 @@ fn index_related_impact_and_status_cover_cochange_flow() {
     assert!(hybrid_related_paths.contains(&"src/b.rs".to_string()));
     assert!(hybrid_related_paths.contains(&"src/c.rs".to_string()));
 
+    let weighted_hybrid_related = run_workspace(
+        root,
+        &[
+            "related",
+            "src/a.rs",
+            "--by",
+            "cochange",
+            "--rank",
+            "hybrid",
+            "--hybrid-direct-weight",
+            "1.0",
+            "--json",
+        ],
+    );
+    assert_eq!(weighted_hybrid_related["data"]["ranking"], "hybrid");
+    assert!(
+        paths_at(&weighted_hybrid_related, &["data", "related"]).contains(&"src/b.rs".to_string())
+    );
+
+    let invalid_weight_stderr = run_workspace_failure(
+        root,
+        &[
+            "related",
+            "src/a.rs",
+            "--by",
+            "cochange",
+            "--rank",
+            "hybrid",
+            "--hybrid-direct-weight",
+            "1.1",
+            "--json",
+        ],
+    );
+    assert!(
+        invalid_weight_stderr.contains("--hybrid-direct-weight must be between 0.0 and 1.0"),
+        "unexpected stderr: {invalid_weight_stderr}"
+    );
+
     append_file(root, "src/a.rs", "local change\n");
     let impact = run_workspace(
         root,

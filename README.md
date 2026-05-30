@@ -145,6 +145,7 @@ workspace index cochange --max-commits 2000 --max-files-per-commit 30 --json
 workspace related src/config.rs --by cochange --use-index
 workspace related src/config.rs --by cochange --rank pagerank
 workspace related src/config.rs --by cochange --rank hybrid
+workspace related src/config.rs --by cochange --rank hybrid --hybrid-direct-weight 0.25
 ```
 
 `workspace index status` reports whether the saved index exists and whether it
@@ -157,7 +158,8 @@ graph to propagate from seed files through the graph. This can surface files
 that were not directly changed with the seed file, but are connected through
 related history. `hybrid` combines PageRank reachability with a direct
 co-change boost, preserving indirect discovery while improving temporal
-holdout ranking quality.
+holdout ranking quality. Use `--hybrid-direct-weight` with values from `0.0`
+to `1.0` for ablation runs; the default is `0.5` for `related`.
 
 `workspace impact --diff --by cochange` uses the current Git diff as seed files
 and returns nearby files from history. This helps decide what to read next and
@@ -166,7 +168,8 @@ Large seed-file lists are bounded in the observation. The full seed count
 remains available as `seed_file_count`, with omitted seeds reported separately.
 When `--rank pagerank` is used for impact analysis, tests receive a small rank
 boost and documentation receives a small down-weight so likely verification
-targets stay ahead of direct documentation noise.
+targets stay ahead of direct documentation noise. `impact --rank hybrid`
+also accepts `--hybrid-direct-weight`; its default direct weight is `0.05`.
 
 ```sh
 workspace impact --diff --by cochange --json
@@ -174,6 +177,7 @@ workspace impact --diff --max-commits 500 --max-results 30
 workspace impact --diff --by cochange --use-index
 workspace impact --diff --by cochange --rank pagerank
 workspace impact --diff --by cochange --rank hybrid
+workspace impact --diff --by cochange --rank hybrid --hybrid-direct-weight 0.10
 ```
 
 ## Background

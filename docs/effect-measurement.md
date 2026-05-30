@@ -96,9 +96,11 @@ The measurement compares:
 - `workspace related --use-index`
 - `workspace related --rank pagerank`
 - `workspace related --rank hybrid`
+- `workspace related --rank hybrid --hybrid-direct-weight <0.0-1.0>`
 - `workspace impact --diff --use-index`
 - `workspace impact --diff --rank pagerank`
 - `workspace impact --diff --rank hybrid`
+- `workspace impact --diff --rank hybrid --hybrid-direct-weight <0.0-1.0>`
 
 ### Retrieval Suite
 
