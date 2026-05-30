@@ -11264,6 +11264,42 @@ src/b.rs
     }
 
     #[test]
+    fn pagerank_related_applies_small_path_prior_to_close_siblings() {
+        let index = CochangeIndex {
+            version: 1,
+            generated_at_unix_ms: 0,
+            head: None,
+            max_commits: 10,
+            max_files_per_commit: 10,
+            commits_scanned: 2,
+            commits_indexed: 2,
+            ignored_large_commits: 0,
+            file_commit_counts: BTreeMap::from([("src/z.ts".to_string(), 2)]),
+            edges: vec![
+                CochangeEdge {
+                    a: "src/z.ts".to_string(),
+                    b: "aaa/a.md".to_string(),
+                    cochanged_commits: 1,
+                    weighted_cochanges: 1.0,
+                    sample_commits: vec!["aaaaaaaaaaaa".to_string()],
+                },
+                CochangeEdge {
+                    a: "src/z.ts".to_string(),
+                    b: "src/zz.ts".to_string(),
+                    cochanged_commits: 1,
+                    weighted_cochanges: 1.0,
+                    sample_commits: vec!["bbbbbbbbbbbb".to_string()],
+                },
+            ],
+        };
+
+        let ranking = rank_cochanges_pagerank_from_index(&index, "src/z.ts", 10);
+
+        assert_eq!(ranking.related[0].path, "src/zz.ts");
+        assert!(ranking.related[0].score > ranking.related[1].score);
+    }
+
+    #[test]
     fn pagerank_related_honors_requested_result_count_above_default_candidate_limit() {
         let mut commits = Vec::new();
         for index in 0..45 {

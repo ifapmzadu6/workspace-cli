@@ -181,8 +181,8 @@ The suite compares `git diff --name-only`, seed-specific path-locality,
 lexical-similarity, and content-similarity baselines, a seed-agnostic
 recent-activity baseline, seed-agnostic global PageRank over the co-change
 graph, direct co-change ranking, personalized PageRank over the saved co-change
-index, hybrid ranking that combines direct co-change evidence with PageRank
-reachability and a small path prior for close file siblings, and the
+index with a small path prior for close file siblings, hybrid ranking that
+combines direct co-change evidence with that PageRank reachability, and the
 impact-specific PageRank ranking that lightly prioritizes tests over
 documentation noise.
 The path-locality baseline ranks tracked files by shared parent directories and
