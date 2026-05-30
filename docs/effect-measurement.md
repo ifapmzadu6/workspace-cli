@@ -182,8 +182,9 @@ lexical-similarity, and content-similarity baselines, a seed-agnostic
 recent-activity baseline, seed-agnostic global PageRank over the co-change
 graph, direct co-change ranking, personalized PageRank over the saved co-change
 index, hybrid ranking that combines direct co-change evidence with PageRank
-reachability, and the impact-specific PageRank ranking that lightly prioritizes
-tests over documentation noise.
+reachability and a small path prior for close file siblings, and the
+impact-specific PageRank ranking that lightly prioritizes tests over
+documentation noise.
 The path-locality baseline ranks tracked files by shared parent directories and
 file extensions with the seed files, so it controls for a cheap static
 seed-specific signal without using history.
@@ -554,7 +555,7 @@ file labels. It preserves the main result with tighter aggregate evidence:
 
 ```text
 expanded temporal leakage audit: 50/50 cases checked, index head matched held-out parent for 50, failures 0
-expanded cross_repo hybrid average_precision@5: 0.651 (0.555, 0.741)
+expanded cross_repo hybrid average_precision@5: 0.655 (0.558, 0.745)
 expanded cross_repo direct average_precision@5: 0.564 (0.468, 0.655)
 expanded cross_repo pagerank average_precision@5: 0.536 (0.443, 0.626)
 expanded cross_repo recent_activity average_precision@5: 0.450 (0.357, 0.543)
@@ -563,22 +564,22 @@ expanded cross_repo path_locality average_precision@5: 0.100 (0.069, 0.135)
 expanded cross_repo lexical_similarity average_precision@5: 0.240 (0.151, 0.343)
 expanded cross_repo content_similarity average_precision@5: 0.378 (0.318, 0.435)
 expanded cross_repo history_oracle_ceiling average_precision@5: 0.811 (0.733, 0.878)
-expanded cross_repo hybrid oracle-normalized average_precision@5: 0.803, oracle gap: 0.160
-expanded cross_repo hybrid - direct average_precision@5: +0.087 (0.049, 0.131), wins/ties/losses 21/24/5, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - pagerank average_precision@5: +0.115 (0.050, 0.186), wins/ties/losses 13/33/4, p_greater=0.0003, holm_p_greater=0.0005
-expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.411 (0.314, 0.503), wins/ties/losses 39/11/0, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - content_similarity average_precision@5: +0.273 (0.188, 0.357), wins/ties/losses 35/2/13, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - recent_activity average_precision@5: +0.201 (0.135, 0.271), wins/ties/losses 34/13/3, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - global_pagerank average_precision@5: +0.179 (0.103, 0.263), wins/ties/losses 20/23/7, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid average_precision@5: 0.731 (0.638, 0.826)
+expanded cross_repo hybrid oracle-normalized average_precision@5: 0.808, oracle gap: 0.156
+expanded cross_repo hybrid - direct average_precision@5: +0.091 (0.052, 0.136), wins/ties/losses 21/24/5, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - pagerank average_precision@5: +0.119 (0.056, 0.190), wins/ties/losses 16/30/4, p_greater=0.0001, holm_p_greater=0.0002
+expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.416 (0.319, 0.507), wins/ties/losses 39/11/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - content_similarity average_precision@5: +0.277 (0.193, 0.361), wins/ties/losses 35/2/13, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - recent_activity average_precision@5: +0.205 (0.138, 0.278), wins/ties/losses 34/13/3, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - global_pagerank average_precision@5: +0.184 (0.106, 0.267), wins/ties/losses 23/20/7, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid average_precision@5: 0.735 (0.643, 0.830)
 expanded predictable cross_repo lexical_similarity average_precision@5: 0.264 (0.164, 0.376)
 expanded predictable cross_repo content_similarity average_precision@5: 0.419 (0.359, 0.481)
 expanded predictable cross_repo history_oracle_ceiling average_precision@5: 0.908 (0.852, 0.963)
-expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.805, oracle gap: 0.177
-expanded predictable cross_repo hybrid - direct average_precision@5: +0.106 (0.062, 0.153), wins/ties/losses 21/22/5, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.128 (0.064, 0.199), wins/ties/losses 13/31/4, p_greater=0.0003, holm_p_greater=0.0005
-expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.467 (0.355, 0.565), wins/ties/losses 39/9/0, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - content_similarity average_precision@5: +0.312 (0.226, 0.400), wins/ties/losses 35/0/13, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.809, oracle gap: 0.173
+expanded predictable cross_repo hybrid - direct average_precision@5: +0.110 (0.066, 0.160), wins/ties/losses 21/22/5, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.133 (0.068, 0.204), wins/ties/losses 16/28/4, p_greater=0.0001, holm_p_greater=0.0002
+expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.472 (0.359, 0.569), wins/ties/losses 39/9/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - content_similarity average_precision@5: +0.316 (0.230, 0.404), wins/ties/losses 35/0/13, p_greater=<0.0001, holm_p_greater=<0.0001
 ```
 
 The expanded manifest also runs a denser hybrid direct-weight sweep:
@@ -592,30 +593,28 @@ expanded cross_repo hybrid direct_weight=0.50 average_precision@5: 0.640
 expanded cross_repo hybrid direct_weight=0.60 average_precision@5: 0.645
 expanded cross_repo hybrid direct_weight=0.70 average_precision@5: 0.641
 expanded cross_repo hybrid direct_weight=0.75 average_precision@5: 0.641
-expanded cross_repo hybrid direct_weight=0.80 average_precision@5: 0.651
-expanded cross_repo hybrid direct_weight=0.82 average_precision@5: 0.651
-expanded cross_repo hybrid direct_weight=0.85 average_precision@5: 0.651
-expanded cross_repo hybrid direct_weight=0.88 average_precision@5: 0.651
-expanded cross_repo hybrid direct_weight=0.90 average_precision@5: 0.651
-expanded cross_repo hybrid direct_weight=0.92 average_precision@5: 0.650
-expanded cross_repo hybrid direct_weight=0.95 average_precision@5: 0.648
-expanded cross_repo hybrid direct_weight=1.00 average_precision@5: 0.564
-expanded cross_repo hybrid direct_weight=0.80 - direct average_precision@5: +0.087 (0.048, 0.130), p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid direct_weight=0.80 - pagerank average_precision@5: +0.115 (0.054, 0.179), p_greater=0.0003, holm_p_greater=0.0003
+expanded cross_repo hybrid direct_weight=0.80 average_precision@5: 0.641
+expanded cross_repo hybrid direct_weight=0.82 average_precision@5: 0.641
+expanded cross_repo hybrid direct_weight=0.85 average_precision@5: 0.648
+expanded cross_repo hybrid direct_weight=0.88 average_precision@5: 0.648
+expanded cross_repo hybrid direct_weight=0.90 average_precision@5: 0.655
+expanded cross_repo hybrid direct_weight=0.92 average_precision@5: 0.654
+expanded cross_repo hybrid direct_weight=0.95 average_precision@5: 0.653
+expanded cross_repo hybrid direct_weight=1.00 average_precision@5: 0.595
+expanded cross_repo hybrid direct_weight=0.90 - direct average_precision@5: +0.091 (0.052, 0.134), p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid direct_weight=0.90 - pagerank average_precision@5: +0.119 (0.055, 0.191), p_greater=0.0001, holm_p_greater=0.0001
 expanded predictable cross_repo hybrid direct_weight=0.50 average_precision@5: 0.719
-expanded predictable cross_repo hybrid direct_weight=0.80 average_precision@5: 0.731
+expanded predictable cross_repo hybrid direct_weight=0.90 average_precision@5: 0.735
 ```
 
-The fine sweep shows a flat AP@5 plateau from 0.80 through 0.90, with 0.92 and
-0.95 starting to decline and 1.00 reducing to the direct-only result.
-Leave-one-repo-out selection over that dense grid chooses 0.60 for
-`workspace-cli` and 0.80 for the other two repositories. Its aggregate AP@5 is
-0.644 versus 0.651 for the fixed 0.80 default, still above the former 0.50
-default's 0.640. On the predictable-only slice it selects 0.80 for
-`related-cli` and `llm-json-extract`, and its aggregate AP@5 is 0.724 versus
-0.731 for the fixed 0.80 default. Because 0.80 is the first point on the best
-all-target and predictable plateau while preserving the fixture retrieval
-result, the CLI related hybrid default is 0.80.
+With the related path prior enabled, the fine sweep peaks at direct weight 0.90
+on both all-target and predictable slices. Leave-one-repo-out selection over
+that dense grid chooses 0.95 for `workspace-cli` and 0.90 for the other two
+repositories. Its aggregate AP@5 is 0.652 versus 0.655 for the fixed 0.90
+default, and the predictable-only LORO aggregate is 0.732 versus 0.735 for the
+fixed default. Because 0.90 is the best all-target and predictable point in the
+expanded fixed-ref manifest while the LORO-selected aggregate remains within
+0.003 AP@5, the CLI related hybrid default is 0.90.
 
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and

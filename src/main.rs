@@ -84,8 +84,11 @@ const RELATED_METHOD_COCHANGE: &str = "cochange";
 const RANK_DIRECT: &str = "direct";
 const RANK_PAGERANK: &str = "pagerank";
 const RANK_HYBRID: &str = "hybrid";
-const RELATED_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.8;
+const RELATED_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.9;
 const IMPACT_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.05;
+const RELATED_SHARED_PARENT_SCORE_MULTIPLIER: f64 = 1.08;
+const RELATED_SHARED_EXTENSION_SCORE_MULTIPLIER: f64 = 1.03;
+const RELATED_SHARED_TEST_KIND_SCORE_MULTIPLIER: f64 = 1.04;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
@@ -4409,7 +4412,9 @@ fn rank_cochanges_pagerank_from_index(
 ) -> CochangeRanking {
     let target = normalize_repo_path(target);
     let seeds = BTreeSet::from([target.clone()]);
-    let hits = personalized_pagerank(index, &seeds, pagerank_candidate_limit(max_results), 0.85);
+    let mut hits =
+        personalized_pagerank(index, &seeds, pagerank_candidate_limit(max_results), 0.85);
+    apply_related_pagerank_path_prior(&mut hits, &target);
     let edge_lookup = cochange_edge_lookup(index);
     let mut related = hits
         .into_iter()
@@ -4446,7 +4451,7 @@ fn rank_cochanges_hybrid_from_index(
             .unwrap_or_default();
         hit.score = hybrid_rank_score(hit.score, direct_score, direct_weight);
     }
-    normalize_pagerank_hit_scores(&mut hits);
+    apply_related_pagerank_path_prior(&mut hits, &target);
 
     let mut related = hits
         .into_iter()
@@ -4594,6 +4599,43 @@ fn rank_cochange_impact_from_index(
         commits_matched,
         ignored_large_commits: 0,
     }
+}
+
+fn apply_related_pagerank_path_prior(hits: &mut [PageRankHit], target: &str) {
+    for hit in hits.iter_mut() {
+        hit.score *= related_path_score_multiplier(target, &hit.path);
+    }
+    normalize_pagerank_hit_scores(hits);
+    hits.sort_by(compare_pagerank_hit_by_score);
+}
+
+fn related_path_score_multiplier(target: &str, candidate: &str) -> f64 {
+    let mut multiplier = 1.0;
+    let target_parent = path_parent(target);
+    if !target_parent.is_empty() && target_parent == path_parent(candidate) {
+        multiplier *= RELATED_SHARED_PARENT_SCORE_MULTIPLIER;
+    }
+    if let Some(extension) = path_extension(target)
+        && Some(extension) == path_extension(candidate)
+    {
+        multiplier *= RELATED_SHARED_EXTENSION_SCORE_MULTIPLIER;
+    }
+    if is_test_file(target) && is_test_file(candidate) {
+        multiplier *= RELATED_SHARED_TEST_KIND_SCORE_MULTIPLIER;
+    }
+    multiplier
+}
+
+fn path_parent(path: &str) -> &str {
+    path.rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .unwrap_or("")
+}
+
+fn path_extension(path: &str) -> Option<&str> {
+    path.rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .filter(|extension| !extension.is_empty() && !extension.contains('/'))
 }
 
 fn rank_cochange_impact_pagerank_from_index(
@@ -11444,8 +11486,17 @@ src/b.rs
         assert_eq!(round3(hybrid_rank_score(0.25, 1.0, 0.0)), 0.25);
         assert_eq!(round3(hybrid_rank_score(0.25, 1.0, 0.5)), 0.625);
         assert_eq!(round3(hybrid_rank_score(0.25, 1.0, 1.0)), 1.0);
-        assert_eq!(related_hybrid_direct_weight(None), 0.8);
+        assert_eq!(related_hybrid_direct_weight(None), 0.9);
         assert_eq!(impact_hybrid_direct_weight(None), 0.05);
+        assert_eq!(path_parent("src/a.rs"), "src");
+        assert_eq!(path_parent("README.md"), "");
+        assert_eq!(path_extension("src/a.test.ts"), Some("ts"));
+        assert_eq!(path_extension("src/no_extension"), None);
+        assert!(related_path_score_multiplier("src/a.rs", "src/b.rs") > 1.0);
+        assert_eq!(
+            related_path_score_multiplier("src/a.rs", "tests/a_test.ts"),
+            1.0
+        );
         assert_eq!(related_hybrid_direct_weight(Some(0.2)), 0.2);
         assert!(validate_hybrid_direct_weight(Some(0.0)).is_ok());
         assert!(validate_hybrid_direct_weight(Some(1.0)).is_ok());
