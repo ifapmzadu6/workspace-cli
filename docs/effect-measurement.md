@@ -141,7 +141,7 @@ cutoff, which defaults to 5:
 - nDCG@k
 - deterministic bootstrap 95% confidence intervals for aggregate means
 - paired mean deltas, win/tie/loss counts, and paired sign-flip randomization
-  p-values
+  p-values, including Holm-adjusted p-values within each comparison family
 - a default cutoff sweep at @1, @3, and @5
 - an optional hybrid direct-weight sweep for ablation
 - an optional leave-one-repo-out direct-weight selection check when multiple
@@ -251,8 +251,8 @@ transaction_audit_signal_recall: 1.000
 
 Representative paired deltas over the retrieval suite. Parentheses show
 deterministic bootstrap 95% confidence intervals for the mean paired delta. The
-JSON output also includes win/tie/loss counts and one-sided/two-sided paired
-sign-flip p-values for each delta:
+JSON output also includes win/tie/loss counts, one-sided/two-sided paired
+sign-flip p-values, and Holm-adjusted p-values for each delta family:
 
 ```text
 retrieval_suite related_hybrid - direct average_precision@5: +0.414 (0.000, 0.667)
@@ -495,13 +495,13 @@ expanded cross_repo pagerank average_precision@5: 0.536 (0.443, 0.626)
 expanded cross_repo recent_activity average_precision@5: 0.450 (0.357, 0.543)
 expanded cross_repo global_pagerank average_precision@5: 0.471 (0.385, 0.562)
 expanded cross_repo path_locality average_precision@5: 0.100 (0.069, 0.135)
-expanded cross_repo hybrid - direct average_precision@5: +0.076 (0.028, 0.127), wins/ties/losses 23/19/8, p_greater=0.0019
-expanded cross_repo hybrid - pagerank average_precision@5: +0.104 (0.046, 0.169), wins/ties/losses 12/38/0, p_greater=0.0006
-expanded cross_repo hybrid - recent_activity average_precision@5: +0.190 (0.125, 0.263), wins/ties/losses 36/11/3, p_greater=0.0001
-expanded cross_repo hybrid - global_pagerank average_precision@5: +0.169 (0.092, 0.250), wins/ties/losses 19/28/3, p_greater=0.0001
+expanded cross_repo hybrid - direct average_precision@5: +0.076 (0.028, 0.127), wins/ties/losses 23/19/8, p_greater=0.0019, holm_p_greater=0.0038
+expanded cross_repo hybrid - pagerank average_precision@5: +0.104 (0.046, 0.169), wins/ties/losses 12/38/0, p_greater=0.0006, holm_p_greater=0.0018
+expanded cross_repo hybrid - recent_activity average_precision@5: +0.190 (0.125, 0.263), wins/ties/losses 36/11/3, p_greater=0.0001, holm_p_greater=0.0006
+expanded cross_repo hybrid - global_pagerank average_precision@5: +0.169 (0.092, 0.250), wins/ties/losses 19/28/3, p_greater=0.0001, holm_p_greater=0.0006
 expanded predictable cross_repo hybrid average_precision@5: 0.719 (0.626, 0.818)
-expanded predictable cross_repo hybrid - direct average_precision@5: +0.094 (0.039, 0.151), wins/ties/losses 23/17/8, p_greater=0.0006
-expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.117 (0.057, 0.183), wins/ties/losses 12/36/0, p_greater=0.0005
+expanded predictable cross_repo hybrid - direct average_precision@5: +0.094 (0.039, 0.151), wins/ties/losses 23/17/8, p_greater=0.0006, holm_p_greater=0.0015
+expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.117 (0.057, 0.183), wins/ties/losses 12/36/0, p_greater=0.0005, holm_p_greater=0.0015
 ```
 
 Interpretation: the CLI is not just running; it measurably improves observation

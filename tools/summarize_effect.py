@@ -146,6 +146,12 @@ def fmt_wtl(summary: dict[str, Any], metric: str) -> str:
     )
 
 
+def fmt_p_value(summary: dict[str, Any], key: str) -> str:
+    if key not in summary:
+        return ""
+    return fmt_number(summary[key], 4)
+
+
 def fmt_distribution(summary: dict[str, Any]) -> str:
     return (
         f"{fmt_number(summary['mean'])} "
@@ -319,10 +325,12 @@ def render_delta_table(
                 str(summary["scenario_count"]),
                 fmt_delta_ci(summary, ap_metric),
                 fmt_wtl(summary, ap_metric),
-                fmt_number(summary[f"p_greater_delta_{ap_metric}"], 4),
+                fmt_p_value(summary, f"p_greater_delta_{ap_metric}"),
+                fmt_p_value(summary, f"p_greater_holm_delta_{ap_metric}"),
                 fmt_delta_ci(summary, ndcg_metric),
                 fmt_wtl(summary, ndcg_metric),
-                fmt_number(summary[f"p_greater_delta_{ndcg_metric}"], 4),
+                fmt_p_value(summary, f"p_greater_delta_{ndcg_metric}"),
+                fmt_p_value(summary, f"p_greater_holm_delta_{ndcg_metric}"),
             ]
         )
     return "\n".join(
@@ -335,9 +343,11 @@ def render_delta_table(
                     f"delta AP@{k}",
                     "AP W/T/L",
                     "AP p>",
+                    "AP Holm p>",
                     f"delta nDCG@{k}",
                     "nDCG W/T/L",
                     "nDCG p>",
+                    "nDCG Holm p>",
                 ],
                 rows,
             ),

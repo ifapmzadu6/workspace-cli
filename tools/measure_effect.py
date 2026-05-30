@@ -393,6 +393,7 @@ def macro_paired_delta_metric_sets(
             comparison[f"p_greater_delta_{metric_name}"] = round(p_greater, 4)
             comparison[f"p_two_sided_delta_{metric_name}"] = round(p_two_sided, 4)
         deltas[comparison_name] = comparison
+    apply_holm_adjusted_p_values(deltas, metric_names)
     return deltas
 
 
@@ -781,7 +782,44 @@ def paired_delta_metric_sets(
             comparison[f"p_greater_delta_{metric_name}"] = round(p_greater, 4)
             comparison[f"p_two_sided_delta_{metric_name}"] = round(p_two_sided, 4)
         deltas[comparison_name] = comparison
+    apply_holm_adjusted_p_values(deltas, metric_names)
     return deltas
+
+
+def apply_holm_adjusted_p_values(
+    deltas: dict[str, Any],
+    metric_names: list[str],
+) -> None:
+    for metric_name in metric_names:
+        for prefix in ["p_greater", "p_two_sided"]:
+            source_key = f"{prefix}_delta_{metric_name}"
+            adjusted_key = f"{prefix}_holm_delta_{metric_name}"
+            entries = [
+                (comparison_name, summary[source_key])
+                for comparison_name, summary in deltas.items()
+                if source_key in summary
+            ]
+            adjusted = holm_adjusted_p_values(
+                [float(value) for _, value in entries]
+            )
+            for (comparison_name, _), adjusted_value in zip(entries, adjusted):
+                deltas[comparison_name][adjusted_key] = adjusted_value
+
+
+def holm_adjusted_p_values(values: list[float]) -> list[float]:
+    if not values:
+        return []
+    adjusted = [0.0 for _ in values]
+    previous = 0.0
+    ordered = sorted(enumerate(values), key=lambda item: (item[1], item[0]))
+    total = len(values)
+    for rank, (original_index, value) in enumerate(ordered, start=1):
+        multiplier = total - rank + 1
+        adjusted_value = min(max(value, 0.0) * multiplier, 1.0)
+        adjusted_value = max(previous, adjusted_value)
+        previous = adjusted_value
+        adjusted[original_index] = round(adjusted_value, 4)
+    return adjusted
 
 
 def mean(values: list[float]) -> float:
