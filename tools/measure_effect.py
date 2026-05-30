@@ -31,6 +31,7 @@ RELATED_HYBRID_LORO_METHOD = "workspace_related_hybrid_loro"
 RELATED_COMPARISON_PAIRS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "workspace_related_pagerank"),
+    ("workspace_related_hybrid", "baseline_path_locality"),
     ("workspace_related_hybrid", "baseline_recent_activity"),
     ("workspace_related_hybrid", "baseline_global_pagerank"),
     ("workspace_related_pagerank", "workspace_related_direct"),
@@ -38,6 +39,7 @@ RELATED_COMPARISON_PAIRS = [
 RELATED_LORO_COMPARISON_PAIRS = [
     (RELATED_HYBRID_LORO_METHOD, "workspace_related_direct"),
     (RELATED_HYBRID_LORO_METHOD, "workspace_related_pagerank"),
+    (RELATED_HYBRID_LORO_METHOD, "baseline_path_locality"),
     (RELATED_HYBRID_LORO_METHOD, "baseline_recent_activity"),
     (RELATED_HYBRID_LORO_METHOD, "baseline_global_pagerank"),
     (RELATED_HYBRID_LORO_METHOD, "workspace_related_hybrid"),
@@ -45,12 +47,14 @@ RELATED_LORO_COMPARISON_PAIRS = [
 IMPACT_COMPARISON_PAIRS = [
     ("workspace_impact_hybrid", "workspace_impact_direct"),
     ("workspace_impact_hybrid", "workspace_impact_pagerank"),
+    ("workspace_impact_hybrid", "baseline_path_locality"),
     ("workspace_impact_hybrid", "baseline_recent_activity"),
     ("workspace_impact_hybrid", "baseline_global_pagerank"),
     ("workspace_impact_pagerank", "workspace_impact_direct"),
 ]
 RETRIEVAL_BASE_METHODS = [
     "baseline_git_diff_only",
+    "baseline_path_locality",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "workspace_related_direct",
@@ -61,6 +65,7 @@ RETRIEVAL_BASE_METHODS = [
     "workspace_impact_hybrid",
 ]
 REPO_HOLDOUT_BASE_METHODS = [
+    "baseline_path_locality",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "workspace_related_direct",
@@ -916,6 +921,54 @@ def tracked_repo_paths(root: Path) -> set[str]:
     }
 
 
+def path_parent(path: str) -> str:
+    return path.rsplit("/", 1)[0] if "/" in path else ""
+
+
+def path_extension(path: str) -> str:
+    name = path.rsplit("/", 1)[-1]
+    return name.rsplit(".", 1)[-1] if "." in name else ""
+
+
+def common_directory_prefix(a: str, b: str) -> int:
+    a_parts = path_parent(a).split("/") if path_parent(a) else []
+    b_parts = path_parent(b).split("/") if path_parent(b) else []
+    count = 0
+    for left, right in zip(a_parts, b_parts):
+        if left != right:
+            break
+        count += 1
+    return count
+
+
+def path_locality_score(candidate: str, seed: str) -> float:
+    score = float(common_directory_prefix(candidate, seed) * 4)
+    if path_parent(candidate) == path_parent(seed):
+        score += 3.0
+    candidate_extension = path_extension(candidate)
+    if candidate_extension and candidate_extension == path_extension(seed):
+        score += 1.0
+    return score
+
+
+def path_locality_paths(root: Path, seeds: set[str]) -> list[str]:
+    tracked_paths = sorted(tracked_repo_paths(root))
+    normalized_seeds = {path for path in seeds if path}
+    ranked = []
+    for path in tracked_paths:
+        if path in normalized_seeds:
+            continue
+        score = max(
+            (path_locality_score(path, seed) for seed in normalized_seeds),
+            default=0.0,
+        )
+        ranked.append((score, path))
+    return [
+        path
+        for _, path in sorted(ranked, key=lambda item: (-item[0], item[1]))
+    ]
+
+
 def recent_activity_paths(
     root: Path,
     exclude: set[str],
@@ -1144,6 +1197,7 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
         root = Path(name)
         workspace_json(bin_path, root, "index", "cochange", "--json")
         expected = {"src/session.rs", "src/cookie.rs", "tests/cookie_test.rs"}
+        path_locality = path_locality_paths(root, {"src/auth.rs"})
         recent_activity = recent_activity_paths(root, {"src/auth.rs"})
         global_pagerank = global_pagerank_paths(root, {"src/auth.rs"})
 
@@ -1219,6 +1273,9 @@ def measure_related_and_impact(bin_path: Path) -> dict[str, Any]:
             "metric": "related_and_impact_recall_at_3",
             "expected_impacted_files": sorted(expected),
             "baseline_git_diff_only": precision_recall(git_diff, expected, 3),
+            "baseline_path_locality": precision_recall(
+                path_locality, expected, 3
+            ),
             "baseline_recent_activity": precision_recall(
                 recent_activity, expected, 3
             ),
@@ -1267,6 +1324,7 @@ def evaluate_related_case(
         str(max_files_per_commit),
         "--json",
     )
+    path_locality = path_locality_paths(root, {target})
     recent_activity = recent_activity_paths(root, {target})
     global_pagerank = global_pagerank_paths(root, {target})
     direct = workspace_json(
@@ -1370,6 +1428,11 @@ def evaluate_related_case(
     git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
     methods = {
         "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
+        "baseline_path_locality": ranking_metrics(
+            path_locality,
+            expected,
+            k,
+        ),
         "baseline_recent_activity": ranking_metrics(
             recent_activity,
             expected,
@@ -1447,8 +1510,10 @@ def evaluate_impact_case(
         str(max_files_per_commit),
         "--json",
     )
-    recent_activity = recent_activity_paths(root, set(seed_files))
-    global_pagerank = global_pagerank_paths(root, set(seed_files))
+    seed_set = set(seed_files)
+    path_locality = path_locality_paths(root, seed_set)
+    recent_activity = recent_activity_paths(root, seed_set)
+    global_pagerank = global_pagerank_paths(root, seed_set)
     for seed in seed_files:
         append(root / seed, "local evaluation change\n")
 
@@ -1503,6 +1568,11 @@ def evaluate_impact_case(
     git_diff = run(["git", "diff", "--name-only"], root).stdout.splitlines()
     methods = {
         "baseline_git_diff_only": ranking_metrics(git_diff, expected, k),
+        "baseline_path_locality": ranking_metrics(
+            path_locality,
+            expected,
+            k,
+        ),
         "baseline_recent_activity": ranking_metrics(
             recent_activity,
             expected,
@@ -1784,6 +1854,7 @@ def measure_repo_holdout(
 
                 expected = set(files) - {seed}
                 predictable_expected = expected & parent_paths
+                path_locality = path_locality_paths(clone, {seed})
                 recent_activity = recent_activity_paths(clone, {seed})
                 global_pagerank = global_pagerank_paths(clone, {seed})
                 direct = workspace_json(
@@ -1838,6 +1909,9 @@ def measure_repo_holdout(
                     for weight in hybrid_weights
                 }
                 methods = {
+                    "baseline_path_locality": ranking_metrics(
+                        path_locality, expected, k
+                    ),
                     "baseline_recent_activity": ranking_metrics(
                         recent_activity, expected, k
                     ),

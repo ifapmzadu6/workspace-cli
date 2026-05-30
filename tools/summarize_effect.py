@@ -12,6 +12,7 @@ from typing import Any
 
 METHOD_LABELS = {
     "baseline_git_diff_only": "git diff",
+    "baseline_path_locality": "path locality",
     "baseline_recent_activity": "recent activity",
     "baseline_global_pagerank": "global PageRank",
     "workspace_related_direct": "related direct",
@@ -24,6 +25,7 @@ METHOD_LABELS = {
 }
 METHOD_ORDER = [
     "baseline_git_diff_only",
+    "baseline_path_locality",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "workspace_related_direct",
@@ -35,6 +37,7 @@ METHOD_ORDER = [
     "workspace_impact_hybrid",
 ]
 RELATED_METHODS = [
+    "baseline_path_locality",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "workspace_related_direct",
@@ -42,6 +45,7 @@ RELATED_METHODS = [
     "workspace_related_hybrid",
 ]
 IMPACT_METHODS = [
+    "baseline_path_locality",
     "baseline_recent_activity",
     "baseline_global_pagerank",
     "workspace_impact_direct",
@@ -51,6 +55,7 @@ IMPACT_METHODS = [
 RELATED_COMPARISONS = [
     "workspace_related_hybrid_minus_workspace_related_direct",
     "workspace_related_hybrid_minus_workspace_related_pagerank",
+    "workspace_related_hybrid_minus_baseline_path_locality",
     "workspace_related_hybrid_minus_baseline_recent_activity",
     "workspace_related_hybrid_minus_baseline_global_pagerank",
     "workspace_related_pagerank_minus_workspace_related_direct",
@@ -58,6 +63,7 @@ RELATED_COMPARISONS = [
 RELATED_LORO_COMPARISONS = [
     "workspace_related_hybrid_loro_minus_workspace_related_direct",
     "workspace_related_hybrid_loro_minus_workspace_related_pagerank",
+    "workspace_related_hybrid_loro_minus_baseline_path_locality",
     "workspace_related_hybrid_loro_minus_baseline_recent_activity",
     "workspace_related_hybrid_loro_minus_baseline_global_pagerank",
     "workspace_related_hybrid_loro_minus_workspace_related_hybrid",
@@ -65,12 +71,14 @@ RELATED_LORO_COMPARISONS = [
 IMPACT_COMPARISONS = [
     "workspace_impact_hybrid_minus_workspace_impact_direct",
     "workspace_impact_hybrid_minus_workspace_impact_pagerank",
+    "workspace_impact_hybrid_minus_baseline_path_locality",
     "workspace_impact_hybrid_minus_baseline_recent_activity",
     "workspace_impact_hybrid_minus_baseline_global_pagerank",
     "workspace_impact_pagerank_minus_workspace_impact_direct",
 ]
 CASE_DELTA_COMPARISONS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
+    ("workspace_related_hybrid", "baseline_path_locality"),
     ("workspace_related_hybrid", "baseline_recent_activity"),
     ("workspace_related_hybrid", "baseline_global_pagerank"),
 ]
@@ -408,10 +416,12 @@ def render_repo_holdout_table(
         k = summary["k"]
         aggregate = summary.get("aggregate", {})
         deltas = summary.get("paired_deltas", {})
+        optional_methods = {
+            "baseline_path_locality",
+            "baseline_global_pagerank",
+        }
         required_methods = [
-            method
-            for method in RELATED_METHODS
-            if method != "baseline_global_pagerank"
+            method for method in RELATED_METHODS if method not in optional_methods
         ]
         if not all(method in aggregate for method in required_methods):
             continue
@@ -419,20 +429,26 @@ def render_repo_holdout_table(
         ndcg_metric = f"ndcg_at_{k}"
         hybrid_direct = "workspace_related_hybrid_minus_workspace_related_direct"
         hybrid_pagerank = "workspace_related_hybrid_minus_workspace_related_pagerank"
+        hybrid_path = "workspace_related_hybrid_minus_baseline_path_locality"
         hybrid_recent = "workspace_related_hybrid_minus_baseline_recent_activity"
         hybrid_global = "workspace_related_hybrid_minus_baseline_global_pagerank"
+        path_locality = aggregate.get("baseline_path_locality")
         global_pagerank = aggregate.get("baseline_global_pagerank")
         rows.append(
             [
                 repo_label(holdout["repo"]),
                 str(summary["case_count"]),
                 str(summary.get("target_count", "")),
+                fmt_mean(path_locality, ap_metric) if path_locality else "",
                 fmt_mean(aggregate["baseline_recent_activity"], ap_metric),
                 fmt_mean(global_pagerank, ap_metric) if global_pagerank else "",
                 fmt_mean(aggregate["workspace_related_direct"], ap_metric),
                 fmt_mean(aggregate["workspace_related_pagerank"], ap_metric),
                 fmt_mean(aggregate["workspace_related_hybrid"], ap_metric),
                 fmt_mean(aggregate["workspace_related_hybrid"], ndcg_metric),
+                fmt_delta(deltas[hybrid_path], ap_metric)
+                if hybrid_path in deltas
+                else "",
                 fmt_delta(deltas[hybrid_recent], ap_metric)
                 if hybrid_recent in deltas
                 else "",
@@ -458,12 +474,14 @@ def render_repo_holdout_table(
                     "repo",
                     "cases",
                     "targets",
+                    "path AP",
                     "recent AP",
                     "global PR AP",
                     "direct AP",
                     "PageRank AP",
                     "hybrid AP",
                     "hybrid nDCG",
+                    "hybrid-path delta AP",
                     "hybrid-recent delta AP",
                     "hybrid-global delta AP",
                     "hybrid-direct delta AP",
