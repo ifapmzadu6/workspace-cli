@@ -18,6 +18,13 @@ python3 tools/measure_effect.py
 The script creates temporary git repositories, runs the real `workspace`
 binary, and reports JSON metrics.
 
+To render paper-ready Markdown tables from a JSON report:
+
+```sh
+python3 tools/measure_effect.py > /tmp/workspace-effect.json
+python3 tools/summarize_effect.py /tmp/workspace-effect.json
+```
+
 To add an optional temporal holdout measurement on a real repository, pass a
 repository path:
 

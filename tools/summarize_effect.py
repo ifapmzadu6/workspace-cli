@@ -1,0 +1,323 @@
+#!/usr/bin/env python3
+"""Render effect measurement JSON as Markdown tables."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+
+METHOD_LABELS = {
+    "baseline_git_diff_only": "git diff",
+    "workspace_related_direct": "related direct",
+    "workspace_related_pagerank": "related PageRank",
+    "workspace_related_hybrid": "related hybrid",
+    "workspace_impact_direct": "impact direct",
+    "workspace_impact_pagerank": "impact PageRank",
+    "workspace_impact_hybrid": "impact hybrid",
+}
+METHOD_ORDER = [
+    "baseline_git_diff_only",
+    "workspace_related_direct",
+    "workspace_related_pagerank",
+    "workspace_related_hybrid",
+    "workspace_impact_direct",
+    "workspace_impact_pagerank",
+    "workspace_impact_hybrid",
+]
+RELATED_METHODS = [
+    "workspace_related_direct",
+    "workspace_related_pagerank",
+    "workspace_related_hybrid",
+]
+IMPACT_METHODS = [
+    "workspace_impact_direct",
+    "workspace_impact_pagerank",
+    "workspace_impact_hybrid",
+]
+RELATED_COMPARISONS = [
+    "workspace_related_hybrid_minus_workspace_related_direct",
+    "workspace_related_hybrid_minus_workspace_related_pagerank",
+    "workspace_related_pagerank_minus_workspace_related_direct",
+]
+IMPACT_COMPARISONS = [
+    "workspace_impact_hybrid_minus_workspace_impact_direct",
+    "workspace_impact_hybrid_minus_workspace_impact_pagerank",
+    "workspace_impact_pagerank_minus_workspace_impact_direct",
+]
+
+
+def load_report(path: str) -> dict[str, Any]:
+    if path == "-":
+        return json.load(sys.stdin)
+    return json.loads(Path(path).read_text())
+
+
+def measurement_by_name(report: dict[str, Any], name: str) -> dict[str, Any] | None:
+    for measurement in report["measurements"]:
+        if measurement["metric"] == name:
+            return measurement
+    return None
+
+
+def label_method(method: str) -> str:
+    return METHOD_LABELS.get(method, method)
+
+
+def label_comparison(comparison: str) -> str:
+    left, separator, right = comparison.partition("_minus_")
+    if not separator:
+        return comparison
+    return f"{label_method(left)} - {label_method(right)}"
+
+
+def fmt_number(value: Any, digits: int = 3, *, signed: bool = False) -> str:
+    numeric = float(value)
+    prefix = "+" if signed and numeric > 0 else ""
+    return f"{prefix}{numeric:.{digits}f}"
+
+
+def fmt_mean_ci(summary: dict[str, Any], metric: str) -> str:
+    return (
+        f"{fmt_number(summary[f'mean_{metric}'])} "
+        f"({fmt_number(summary[f'ci95_low_{metric}'])}, "
+        f"{fmt_number(summary[f'ci95_high_{metric}'])})"
+    )
+
+
+def fmt_delta_ci(summary: dict[str, Any], metric: str) -> str:
+    return (
+        f"{fmt_number(summary[f'mean_delta_{metric}'], signed=True)} "
+        f"({fmt_number(summary[f'ci95_low_delta_{metric}'])}, "
+        f"{fmt_number(summary[f'ci95_high_delta_{metric}'])})"
+    )
+
+
+def fmt_wtl(summary: dict[str, Any], metric: str) -> str:
+    return (
+        f"{summary[f'win_count_delta_{metric}']}/"
+        f"{summary[f'tie_count_delta_{metric}']}/"
+        f"{summary[f'loss_count_delta_{metric}']}"
+    )
+
+
+def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
+    if not rows:
+        return "_No rows._"
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+    ]
+    lines.extend("| " + " | ".join(row) + " |" for row in rows)
+    return "\n".join(lines)
+
+
+def present_methods(aggregate: dict[str, Any], preferred: list[str]) -> list[str]:
+    preferred_present = [method for method in preferred if method in aggregate]
+    extra = sorted(set(aggregate) - set(preferred_present))
+    return preferred_present + extra
+
+
+def render_aggregate_table(measurement: dict[str, Any], title: str) -> str:
+    k = measurement["k"]
+    aggregate = measurement["aggregate"]
+    rows = []
+    for method in present_methods(aggregate, METHOD_ORDER):
+        summary = aggregate[method]
+        rows.append(
+            [
+                label_method(method),
+                str(summary["scenario_count"]),
+                fmt_mean_ci(summary, f"recall_at_{k}"),
+                fmt_mean_ci(summary, f"average_precision_at_{k}"),
+                fmt_mean_ci(summary, f"ndcg_at_{k}"),
+            ]
+        )
+    return "\n".join(
+        [
+            f"## {title} @{k}",
+            markdown_table(
+                ["method", "n", f"recall@{k}", f"AP@{k}", f"nDCG@{k}"],
+                rows,
+            ),
+        ]
+    )
+
+
+def render_delta_table(
+    measurement: dict[str, Any],
+    title: str,
+    comparisons: list[str],
+) -> str:
+    k = measurement["k"]
+    deltas = measurement.get("paired_deltas", {})
+    rows = []
+    for comparison in comparisons:
+        if comparison not in deltas:
+            continue
+        summary = deltas[comparison]
+        ap_metric = f"average_precision_at_{k}"
+        ndcg_metric = f"ndcg_at_{k}"
+        rows.append(
+            [
+                label_comparison(comparison),
+                str(summary["scenario_count"]),
+                fmt_delta_ci(summary, ap_metric),
+                fmt_wtl(summary, ap_metric),
+                fmt_number(summary[f"p_greater_delta_{ap_metric}"], 4),
+                fmt_delta_ci(summary, ndcg_metric),
+                fmt_wtl(summary, ndcg_metric),
+                fmt_number(summary[f"p_greater_delta_{ndcg_metric}"], 4),
+            ]
+        )
+    return "\n".join(
+        [
+            f"## {title} Paired Deltas @{k}",
+            markdown_table(
+                [
+                    "comparison",
+                    "n",
+                    f"delta AP@{k}",
+                    "AP W/T/L",
+                    "AP p>",
+                    f"delta nDCG@{k}",
+                    "nDCG W/T/L",
+                    "nDCG p>",
+                ],
+                rows,
+            ),
+        ]
+    )
+
+
+def render_cutoff_table(
+    measurement: dict[str, Any],
+    title: str,
+    methods: list[str],
+    comparisons: list[str],
+) -> str:
+    rows = []
+    for cutoff in measurement.get("cutoff_sweep", []):
+        k = cutoff["k"]
+        aggregate = cutoff["aggregate"]
+        deltas = cutoff.get("paired_deltas", {})
+        row = [str(k)]
+        for method in methods:
+            if method in aggregate:
+                row.append(
+                    fmt_number(aggregate[method][f"mean_average_precision_at_{k}"])
+                )
+            else:
+                row.append("")
+        for comparison in comparisons:
+            if comparison in deltas:
+                metric = f"average_precision_at_{k}"
+                row.append(fmt_delta_ci(deltas[comparison], metric))
+                row.append(
+                    fmt_number(deltas[comparison][f"p_greater_delta_{metric}"], 4)
+                )
+            else:
+                row.extend(["", ""])
+        rows.append(row)
+
+    headers = ["k"]
+    headers.extend(f"{label_method(method)} AP" for method in methods)
+    for comparison in comparisons:
+        headers.append(f"{label_comparison(comparison)} delta AP")
+        headers.append("p>")
+    return "\n".join(
+        [
+            f"## {title} Cutoff Sweep",
+            markdown_table(headers, rows),
+        ]
+    )
+
+
+def render_measurement(
+    measurement: dict[str, Any],
+    title: str,
+    comparisons: list[str],
+    cutoff_groups: list[tuple[str, list[str], list[str]]],
+) -> list[str]:
+    sections = [
+        render_aggregate_table(measurement, title),
+        render_delta_table(measurement, title, comparisons),
+    ]
+    for group_title, methods, group_comparisons in cutoff_groups:
+        sections.append(
+            render_cutoff_table(
+                measurement,
+                group_title,
+                methods,
+                group_comparisons,
+            )
+        )
+    return sections
+
+
+def render_report(report: dict[str, Any]) -> str:
+    sections = ["# Effect Measurement Summary"]
+
+    retrieval = measurement_by_name(report, "retrieval_suite")
+    if retrieval is not None:
+        sections.extend(
+            render_measurement(
+                retrieval,
+                "Retrieval Suite",
+                RELATED_COMPARISONS + IMPACT_COMPARISONS,
+                [
+                    (
+                        "Retrieval Suite Related",
+                        RELATED_METHODS,
+                        RELATED_COMPARISONS[:2],
+                    ),
+                    (
+                        "Retrieval Suite Impact",
+                        IMPACT_METHODS,
+                        IMPACT_COMPARISONS[:2],
+                    ),
+                ],
+            )
+        )
+
+    holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
+    if holdout is not None:
+        sections.extend(
+            render_measurement(
+                holdout,
+                "Cross-Repo Temporal Holdout",
+                RELATED_COMPARISONS,
+                [
+                    (
+                        "Cross-Repo Temporal Holdout",
+                        RELATED_METHODS,
+                        RELATED_COMPARISONS[:2],
+                    )
+                ],
+            )
+        )
+
+    return "\n\n".join(sections) + "\n"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "report",
+        nargs="?",
+        default="-",
+        help="effect measurement JSON path; reads stdin when omitted or '-'",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    print(render_report(load_report(args.report)), end="")
+
+
+if __name__ == "__main__":
+    main()
