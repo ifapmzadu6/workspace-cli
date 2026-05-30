@@ -253,7 +253,21 @@ python3 tools/measure_effect.py \
   --repo-holdout ../llm-json-extract \
   --repo-holdout-ref 9631a65ab4797fb9260d90fc68db9526811a3be6 \
   --max-heldout-commits 3 \
-  --max-candidate-commits 20
+  --max-candidate-commits 20 \
+  --hybrid-direct-weight-sweep 0,0.05,0.5,1
+```
+
+Dataset composition for that run:
+
+```text
+cross_repo candidates: 60, examined: 11, heldout commits: 9
+cross_repo cases: 24, targets: 72, predictable cases: 22, predictable targets: 58, unpredictable targets: 14
+cross_repo targets/case mean (min/median/max): 3.000 (1/3.000/5)
+cross_repo predictable targets/case mean (min/median/max): 2.636 (1/2.000/4)
+cross_repo skipped root=0, too_few_files=2, too_many_files=0, new_seed_files=10
+workspace-cli candidates: 20, examined: 4, heldout: 3, cases: 6, targets: 6, predictable targets: 6, skipped too_few_files=1
+related-cli candidates: 20, examined: 3, heldout: 3, cases: 7, targets: 23, predictable targets: 12, unpredictable targets: 11, skipped new_seed_files=7
+llm-json-extract candidates: 20, examined: 4, heldout: 3, cases: 11, targets: 43, predictable targets: 40, unpredictable targets: 3, skipped too_few_files=1, new_seed_files=3
 ```
 
 Representative all-target aggregate over 9 held-out commits, 24 seed cases, and

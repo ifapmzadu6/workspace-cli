@@ -118,6 +118,24 @@ def fmt_wtl(summary: dict[str, Any], metric: str) -> str:
     )
 
 
+def fmt_distribution(summary: dict[str, Any]) -> str:
+    return (
+        f"{fmt_number(summary['mean'])} "
+        f"({summary['min']}/{fmt_number(summary['median'])}/{summary['max']})"
+    )
+
+
+def fmt_skipped(skipped: dict[str, Any]) -> str:
+    return ", ".join(
+        [
+            f"root={skipped.get('root_commit', 0)}",
+            f"few={skipped.get('too_few_files', 0)}",
+            f"broad={skipped.get('too_many_files', 0)}",
+            f"new_seed={skipped.get('new_seed_file', 0)}",
+        ]
+    )
+
+
 def repo_label(repo: str) -> str:
     return Path(repo).name
 
@@ -381,6 +399,64 @@ def render_repo_holdout_table(
     )
 
 
+def render_holdout_dataset_table(
+    report: dict[str, Any],
+    aggregate: dict[str, Any],
+) -> str:
+    rows = []
+
+    def add_row(scope: str, repo_count: str, dataset: dict[str, Any]) -> None:
+        rows.append(
+            [
+                scope,
+                repo_count,
+                str(dataset["candidate_commit_count"]),
+                str(dataset["examined_commit_count"]),
+                str(dataset["heldout_commit_count"]),
+                str(dataset["case_count"]),
+                str(dataset["target_count"]),
+                str(dataset["predictable_case_count"]),
+                str(dataset["predictable_target_count"]),
+                str(dataset["unpredictable_target_count"]),
+                fmt_distribution(dataset["target_count_distribution"]),
+                fmt_distribution(dataset["predictable_target_count_distribution"]),
+                fmt_skipped(dataset["skipped"]),
+            ]
+        )
+
+    if "dataset" in aggregate:
+        add_row("cross-repo", str(aggregate["repo_count"]), aggregate["dataset"])
+    for holdout in report["measurements"]:
+        if holdout["metric"] == "repo_temporal_holdout" and "dataset" in holdout:
+            add_row(repo_label(holdout["repo"]), "1", holdout["dataset"])
+
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            "## Temporal Holdout Dataset",
+            markdown_table(
+                [
+                    "scope",
+                    "repos",
+                    "candidates",
+                    "examined",
+                    "heldout",
+                    "cases",
+                    "targets",
+                    "predictable cases",
+                    "predictable targets",
+                    "unpredictable targets",
+                    "targets/case",
+                    "predictable/case",
+                    "skipped",
+                ],
+                rows,
+            ),
+        ]
+    )
+
+
 def render_measurement(
     measurement: dict[str, Any],
     title: str,
@@ -448,6 +524,9 @@ def render_report(report: dict[str, Any]) -> str:
 
     holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
     if holdout is not None:
+        dataset = render_holdout_dataset_table(report, holdout)
+        if dataset:
+            sections.append(dataset)
         per_repo = render_repo_holdout_table(report, "Per-Repo Temporal Holdout")
         if per_repo:
             sections.append(per_repo)

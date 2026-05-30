@@ -97,7 +97,9 @@ Effect measurement is documented in
 `tools/measure_effect.py`. It measures observation coverage, related-file
 discovery across multiple history topologies, seed-agnostic recent-activity
 baselines, temporal-holdout predictable-only slices, and audit/rollback
-evidence instead of only checking that commands run.
+evidence instead of only checking that commands run. The rendered effect
+summary also reports holdout dataset composition, skipped commit reasons, and
+target-label distributions for paper-style reproducibility checks.
 
 ### History-Based Related-File Observation
 

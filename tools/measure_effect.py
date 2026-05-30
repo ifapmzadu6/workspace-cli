@@ -191,6 +191,65 @@ def aggregate_metric_sets(scenarios: list[dict[str, Any]], k: int) -> dict[str, 
     return aggregate
 
 
+def distribution(values: list[int]) -> dict[str, Any]:
+    if not values:
+        return {
+            "count": 0,
+            "min": 0,
+            "median": 0.0,
+            "mean": 0.0,
+            "max": 0,
+        }
+    sorted_values = sorted(values)
+    return {
+        "count": len(sorted_values),
+        "min": sorted_values[0],
+        "median": round(percentile_sorted(sorted_values, 0.5), 3),
+        "mean": round(mean(sorted_values), 3),
+        "max": sorted_values[-1],
+    }
+
+
+def holdout_dataset_summary(
+    *,
+    candidate_commit_count: int,
+    examined_commit_count: int,
+    heldout_commit_count: int,
+    cases: list[dict[str, Any]],
+    skipped: dict[str, int],
+    limits: dict[str, int],
+) -> dict[str, Any]:
+    target_counts = [len(case["expected"]) for case in cases]
+    predictable_target_counts = [
+        len(case.get("predictable_expected", [])) for case in cases
+    ]
+    unpredictable_target_counts = [
+        len(case.get("unpredictable_expected", [])) for case in cases
+    ]
+    predictable_cases = [
+        case for case in cases if case.get("predictable_expected")
+    ]
+    return {
+        "candidate_commit_count": candidate_commit_count,
+        "examined_commit_count": examined_commit_count,
+        "heldout_commit_count": heldout_commit_count,
+        "case_count": len(cases),
+        "target_count": sum(target_counts),
+        "predictable_case_count": len(predictable_cases),
+        "predictable_target_count": sum(predictable_target_counts),
+        "unpredictable_target_count": sum(unpredictable_target_counts),
+        "skipped": dict(sorted(skipped.items())),
+        "limits": limits,
+        "target_count_distribution": distribution(target_counts),
+        "predictable_target_count_distribution": distribution(
+            [
+                len(case["predictable_expected"])
+                for case in predictable_cases
+            ]
+        ),
+    }
+
+
 def macro_average_repo_holdouts(
     holdouts: list[dict[str, Any]],
     k: int,
@@ -1412,6 +1471,8 @@ def measure_repo_holdout(
     )
     commits = parse_git_name_only_commits(log_output)
     cases: list[dict[str, Any]] = []
+    heldout_commit_records: list[dict[str, Any]] = []
+    examined_commit_count = 0
     skipped = {
         "root_commit": 0,
         "too_few_files": 0,
@@ -1426,6 +1487,7 @@ def measure_repo_holdout(
 
         heldout_commits = 0
         for commit in commits:
+            examined_commit_count += 1
             files = commit["files"]
             if len(files) < 2:
                 skipped["too_few_files"] += 1
@@ -1457,6 +1519,8 @@ def measure_repo_holdout(
             parent_paths = tracked_repo_paths(clone)
 
             heldout_commits += 1
+            commit_cases: list[dict[str, Any]] = []
+            new_seed_count = 0
             for seed in files:
                 exists = run(
                     ["git", "cat-file", "-e", f"{parent}:{seed}"],
@@ -1465,6 +1529,7 @@ def measure_repo_holdout(
                 ).returncode == 0
                 if not exists:
                     skipped["new_seed_file"] += 1
+                    new_seed_count += 1
                     continue
 
                 expected = set(files) - {seed}
@@ -1545,7 +1610,7 @@ def measure_repo_holdout(
                         for method, result in weighted_hybrid.items()
                     }
                 )
-                cases.append(
+                commit_cases.append(
                     {
                         "repo": str(repo),
                         "heldout_commit": commit["hash"][:12],
@@ -1567,9 +1632,34 @@ def measure_repo_holdout(
                     }
                 )
 
+            cases.extend(commit_cases)
+            heldout_commit_records.append(
+                {
+                    "commit": commit["hash"][:12],
+                    "parent": parent[:12],
+                    "file_count": len(files),
+                    "case_count": len(commit_cases),
+                    "target_count": sum(
+                        len(case["expected"]) for case in commit_cases
+                    ),
+                    "predictable_target_count": sum(
+                        len(case["predictable_expected"]) for case in commit_cases
+                    ),
+                    "unpredictable_target_count": sum(
+                        len(case["unpredictable_expected"]) for case in commit_cases
+                    ),
+                    "new_seed_count": new_seed_count,
+                }
+            )
+
             if heldout_commits >= max_heldout_commits:
                 break
 
+    limits = {
+        "max_candidate_commits": max_candidate_commits,
+        "max_heldout_commits": max_heldout_commits,
+        "max_files_per_commit": max_files_per_commit,
+    }
     all_target_summary = repo_holdout_metric_summary(cases, k, hybrid_weights)
     predictable_summary = repo_holdout_metric_summary(
         cases,
@@ -1584,9 +1674,12 @@ def measure_repo_holdout(
         "end_commit": end_commit[:12],
         "k": k,
         "candidate_commit_count": len(commits),
+        "examined_commit_count": examined_commit_count,
         "heldout_commit_count": heldout_commits,
         "case_count": len(cases),
         "skipped": skipped,
+        "limits": limits,
+        "heldout_commits": heldout_commit_records,
         "cases": cases,
         "aggregate": all_target_summary["aggregate"],
         "cutoff_sweep": all_target_summary["cutoff_sweep"],
@@ -1594,6 +1687,14 @@ def measure_repo_holdout(
         "paired_deltas": all_target_summary["paired_deltas"],
         "target_count": all_target_summary["target_count"],
         "predictable_only": predictable_summary,
+        "dataset": holdout_dataset_summary(
+            candidate_commit_count=len(commits),
+            examined_commit_count=examined_commit_count,
+            heldout_commit_count=heldout_commits,
+            cases=cases,
+            skipped=skipped,
+            limits=limits,
+        ),
     }
 
 
@@ -1625,6 +1726,16 @@ def aggregate_repo_holdouts(
         RELATED_COMPARISON_PAIRS,
         summary_key="predictable_only",
     )
+    candidate_commit_count = sum(
+        holdout["candidate_commit_count"] for holdout in holdouts
+    )
+    examined_commit_count = sum(
+        holdout["examined_commit_count"] for holdout in holdouts
+    )
+    heldout_commit_count = sum(
+        holdout["heldout_commit_count"] for holdout in holdouts
+    )
+    limits = holdouts[0].get("limits", {}) if holdouts else {}
     return {
         "metric": "repo_temporal_holdout_aggregate",
         "repo_count": len(holdouts),
@@ -1632,15 +1743,13 @@ def aggregate_repo_holdouts(
         "end_refs": [holdout["end_ref"] for holdout in holdouts],
         "end_commits": [holdout["end_commit"] for holdout in holdouts],
         "k": k,
-        "candidate_commit_count": sum(
-            holdout["candidate_commit_count"] for holdout in holdouts
-        ),
-        "heldout_commit_count": sum(
-            holdout["heldout_commit_count"] for holdout in holdouts
-        ),
+        "candidate_commit_count": candidate_commit_count,
+        "examined_commit_count": examined_commit_count,
+        "heldout_commit_count": heldout_commit_count,
         "case_count": len(cases),
         "target_count": all_target_summary["target_count"],
         "skipped": skipped,
+        "limits": limits,
         "aggregate": all_target_summary["aggregate"],
         "cutoff_sweep": all_target_summary["cutoff_sweep"],
         "hybrid_weight_sweep": all_target_summary["hybrid_weight_sweep"],
@@ -1651,6 +1760,14 @@ def aggregate_repo_holdouts(
         ),
         "paired_deltas": all_target_summary["paired_deltas"],
         "predictable_only": predictable_summary,
+        "dataset": holdout_dataset_summary(
+            candidate_commit_count=candidate_commit_count,
+            examined_commit_count=examined_commit_count,
+            heldout_commit_count=heldout_commit_count,
+            cases=cases,
+            skipped=skipped,
+            limits=limits,
+        ),
     }
 
 
