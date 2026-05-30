@@ -122,6 +122,13 @@ def git_text(cwd: Path, *args: str, check: bool = True) -> str:
     return run(["git", *args], cwd, check=check).stdout
 
 
+def git_text_or_none(cwd: Path, *args: str) -> str | None:
+    result = run(["git", *args], cwd, check=False)
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
 def commit_all(cwd: Path, message: str) -> None:
     git(cwd, "add", ".")
     git(cwd, "commit", "-m", message, "-q")
@@ -2247,6 +2254,49 @@ def parse_hybrid_weight_sweep(
     return weights
 
 
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def measurement_metadata(
+    args: argparse.Namespace,
+    bin_path: Path,
+    hybrid_weights: list[float],
+) -> dict[str, Any]:
+    workspace_commit = git_text_or_none(ROOT, "rev-parse", "HEAD")
+    workspace_status = git_text_or_none(ROOT, "status", "--porcelain")
+    repo_holdout_refs = args.repo_holdout_ref or ["HEAD"] * len(args.repo_holdout)
+    metadata: dict[str, Any] = {
+        "schema_version": 1,
+        "workspace_bin": str(bin_path),
+        "workspace_repo": str(ROOT),
+        "workspace_commit": workspace_commit,
+        "workspace_dirty": bool(workspace_status),
+        "workspace_status_line_count": (
+            len(workspace_status.splitlines()) if workspace_status else 0
+        ),
+        "measurement_script": "tools/measure_effect.py",
+        "primary_k": args.k,
+        "bootstrap_samples": BOOTSTRAP_SAMPLES,
+        "sign_flip_samples": SIGN_FLIP_SAMPLES,
+        "default_cutoff_sweep": DEFAULT_CUTOFF_SWEEP,
+        "max_heldout_commits": args.max_heldout_commits,
+        "max_candidate_commits": args.max_candidate_commits,
+        "max_files_per_commit": args.max_files_per_commit,
+        "hybrid_direct_weight_sweep": hybrid_weights,
+        "repo_holdouts": [
+            {"repo": str(repo), "ref": ref}
+            for repo, ref in zip(args.repo_holdout, repo_holdout_refs)
+        ],
+    }
+    if args.repo_holdout_manifest is not None:
+        metadata["repo_holdout_manifest"] = str(args.repo_holdout_manifest)
+        metadata["repo_holdout_manifest_sha256"] = file_sha256(
+            args.repo_holdout_manifest
+        )
+    return metadata
+
+
 def main() -> None:
     args = parse_args()
     bin_path = workspace_bin()
@@ -2280,6 +2330,7 @@ def main() -> None:
 
     report = {
         "workspace_bin": str(bin_path),
+        "metadata": measurement_metadata(args, bin_path, hybrid_weights),
         "measurements": measurements,
     }
     print(json.dumps(report, indent=2, sort_keys=True))

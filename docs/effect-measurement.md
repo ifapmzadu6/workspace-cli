@@ -25,6 +25,11 @@ python3 tools/measure_effect.py > /tmp/workspace-effect.json
 python3 tools/summarize_effect.py /tmp/workspace-effect.json
 ```
 
+The JSON report includes reproducibility metadata: the workspace commit, dirty
+state, primary cutoff, resampling counts, holdout manifest path/hash, and pinned
+holdout repositories. The Markdown summary renders the same metadata before the
+metric tables.
+
 To add an optional temporal holdout measurement on a real repository, pass a
 repository path:
 

@@ -228,6 +228,51 @@ def short_commit(commit: Any) -> str:
     return str(commit)[:10] if commit else ""
 
 
+def render_metadata_table(report: dict[str, Any]) -> str:
+    metadata = report.get("metadata")
+    if not isinstance(metadata, dict):
+        if "workspace_bin" not in report:
+            return ""
+        metadata = {"workspace_bin": report["workspace_bin"]}
+
+    holdouts = metadata.get("repo_holdouts", [])
+    holdout_text = ""
+    if isinstance(holdouts, list):
+        holdout_parts = []
+        for holdout in holdouts:
+            if not isinstance(holdout, dict):
+                continue
+            repo = holdout.get("repo", "")
+            ref = holdout.get("ref", "")
+            holdout_parts.append(f"{repo}@{short_commit(ref)}")
+        holdout_text = ", ".join(holdout_parts)
+
+    rows = [
+        ["workspace commit", short_commit(metadata.get("workspace_commit"))],
+        ["workspace dirty", "yes" if metadata.get("workspace_dirty") else "no"],
+        ["workspace bin", str(metadata.get("workspace_bin", ""))],
+        ["primary k", str(metadata.get("primary_k", ""))],
+        ["bootstrap samples", str(metadata.get("bootstrap_samples", ""))],
+        ["sign-flip samples", str(metadata.get("sign_flip_samples", ""))],
+        ["repo holdouts", holdout_text or "none"],
+    ]
+    if metadata.get("repo_holdout_manifest"):
+        rows.append(["holdout manifest", str(metadata["repo_holdout_manifest"])])
+    if metadata.get("repo_holdout_manifest_sha256"):
+        rows.append(
+            [
+                "manifest sha256",
+                str(metadata["repo_holdout_manifest_sha256"])[:16],
+            ]
+        )
+    return "\n".join(
+        [
+            "## Reproducibility Metadata",
+            markdown_table(["field", "value"], rows),
+        ]
+    )
+
+
 def render_aggregate_table(measurement: dict[str, Any], title: str) -> str:
     k = measurement["k"]
     aggregate = measurement["aggregate"]
@@ -740,6 +785,9 @@ def render_measurement(
 
 def render_report(report: dict[str, Any]) -> str:
     sections = ["# Effect Measurement Summary"]
+    metadata = render_metadata_table(report)
+    if metadata:
+        sections.append(metadata)
 
     retrieval = measurement_by_name(report, "retrieval_suite")
     if retrieval is not None:

@@ -104,6 +104,9 @@ distributions, and case-level win/loss diagnostics for paper-style
 reproducibility checks, plus leave-one-repo-out hybrid weight selection when
 sweep weights are provided. The fixed-ref cross-repo holdout set used for
 paper-style reproduction is captured in `tools/effect_paper_holdouts.json`.
+Effect reports include reproducibility metadata with the workspace commit,
+dirty state, resampling counts, holdout manifest hash, and pinned repository
+refs.
 
 ### History-Based Related-File Observation
 
