@@ -69,6 +69,11 @@ IMPACT_COMPARISONS = [
     "workspace_impact_hybrid_minus_baseline_global_pagerank",
     "workspace_impact_pagerank_minus_workspace_impact_direct",
 ]
+CASE_DELTA_COMPARISONS = [
+    ("workspace_related_hybrid", "workspace_related_direct"),
+    ("workspace_related_hybrid", "baseline_recent_activity"),
+    ("workspace_related_hybrid", "baseline_global_pagerank"),
+]
 
 
 def load_report(path: str) -> dict[str, Any]:
@@ -158,18 +163,61 @@ def repo_label(repo: str) -> str:
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
     if not rows:
         return "_No rows._"
+    escaped_headers = [table_cell(header) for header in headers]
     lines = [
-        "| " + " | ".join(headers) + " |",
-        "| " + " | ".join("---" for _ in headers) + " |",
+        "| " + " | ".join(escaped_headers) + " |",
+        "| " + " | ".join("---" for _ in escaped_headers) + " |",
     ]
-    lines.extend("| " + " | ".join(row) + " |" for row in rows)
+    lines.extend(
+        "| " + " | ".join(table_cell(cell) for cell in row) + " |"
+        for row in rows
+    )
     return "\n".join(lines)
+
+
+def table_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
 
 
 def present_methods(aggregate: dict[str, Any], preferred: list[str]) -> list[str]:
     preferred_present = [method for method in preferred if method in aggregate]
     extra = sorted(set(aggregate) - set(preferred_present))
     return preferred_present + extra
+
+
+def average_precision_at_k(top: list[str], expected: set[str], k: int) -> float:
+    if not expected:
+        return 1.0
+    seen_hits: set[str] = set()
+    precision_sum = 0.0
+    for index, path in enumerate(top[:k], start=1):
+        if path not in expected or path in seen_hits:
+            continue
+        seen_hits.add(path)
+        precision_sum += len(seen_hits) / index
+    return round(precision_sum / len(expected), 3)
+
+
+def hits_at_k(top: list[str], expected: set[str], k: int) -> list[str]:
+    hits = []
+    seen: set[str] = set()
+    for path in top[:k]:
+        if path in expected and path not in seen:
+            hits.append(path)
+            seen.add(path)
+    return hits
+
+
+def fmt_path_list(paths: list[str], limit: int = 2) -> str:
+    if not paths:
+        return ""
+    visible = paths[:limit]
+    suffix = f", +{len(paths) - limit} more" if len(paths) > limit else ""
+    return ", ".join(visible) + suffix
+
+
+def short_commit(commit: Any) -> str:
+    return str(commit)[:10] if commit else ""
 
 
 def render_aggregate_table(measurement: dict[str, Any], title: str) -> str:
@@ -427,6 +475,130 @@ def render_repo_holdout_table(
     )
 
 
+def case_delta_entries(
+    report: dict[str, Any],
+    *,
+    expected_key: str,
+    left_method: str,
+    right_method: str,
+    k: int,
+) -> list[dict[str, Any]]:
+    entries = []
+    for holdout in report["measurements"]:
+        if holdout.get("metric") != "repo_temporal_holdout":
+            continue
+        for case in holdout.get("cases", []):
+            expected = set(case.get(expected_key, []))
+            methods = case.get("methods", {})
+            if (
+                not expected
+                or left_method not in methods
+                or right_method not in methods
+            ):
+                continue
+            left_top = [str(path) for path in methods[left_method].get("top", [])]
+            right_top = [str(path) for path in methods[right_method].get("top", [])]
+            left_ap = average_precision_at_k(left_top, expected, k)
+            right_ap = average_precision_at_k(right_top, expected, k)
+            entries.append(
+                {
+                    "repo": repo_label(
+                        str(case.get("repo", holdout.get("repo", "")))
+                    ),
+                    "seed": str(case.get("seed", "")),
+                    "commit": short_commit(case.get("heldout_commit")),
+                    "expected": sorted(expected),
+                    "left_ap": left_ap,
+                    "right_ap": right_ap,
+                    "delta": round(left_ap - right_ap, 3),
+                    "left_hits": hits_at_k(left_top, expected, k),
+                    "right_hits": hits_at_k(right_top, expected, k),
+                }
+            )
+    return entries
+
+
+def render_case_delta_table(
+    report: dict[str, Any],
+    title: str,
+    *,
+    expected_key: str = "expected",
+    comparisons: list[tuple[str, str]] = CASE_DELTA_COMPARISONS,
+    limit: int = 2,
+) -> str:
+    holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
+    if holdout is None:
+        return ""
+    k = holdout["k"]
+    rows = []
+    for left_method, right_method in comparisons:
+        entries = case_delta_entries(
+            report,
+            expected_key=expected_key,
+            left_method=left_method,
+            right_method=right_method,
+            k=k,
+        )
+        wins = sorted(
+            [entry for entry in entries if entry["delta"] > 0],
+            key=lambda entry: (
+                -entry["delta"],
+                entry["repo"],
+                entry["seed"],
+                entry["commit"],
+            ),
+        )[:limit]
+        losses = sorted(
+            [entry for entry in entries if entry["delta"] < 0],
+            key=lambda entry: (
+                entry["delta"],
+                entry["repo"],
+                entry["seed"],
+                entry["commit"],
+            ),
+        )[:limit]
+        for direction, selected in [("hybrid win", wins), ("hybrid loss", losses)]:
+            for entry in selected:
+                rows.append(
+                    [
+                        label_comparison(f"{left_method}_minus_{right_method}"),
+                        direction,
+                        entry["repo"],
+                        entry["seed"],
+                        entry["commit"],
+                        fmt_path_list(entry["expected"]),
+                        fmt_number(entry["delta"], signed=True),
+                        fmt_number(entry["left_ap"]),
+                        fmt_number(entry["right_ap"]),
+                        fmt_path_list(entry["left_hits"]),
+                        fmt_path_list(entry["right_hits"]),
+                    ]
+                )
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            f"## {title} Case Deltas @{k}",
+            markdown_table(
+                [
+                    "comparison",
+                    "direction",
+                    "repo",
+                    "seed",
+                    "commit",
+                    "targets",
+                    "delta AP",
+                    "hybrid AP",
+                    "baseline AP",
+                    "hybrid hits",
+                    "baseline hits",
+                ],
+                rows,
+            ),
+        ]
+    )
+
+
 def render_holdout_dataset_table(
     report: dict[str, Any],
     aggregate: dict[str, Any],
@@ -613,6 +785,12 @@ def render_report(report: dict[str, Any]) -> str:
                 ],
             )
         )
+        case_deltas = render_case_delta_table(
+            report,
+            "Cross-Repo Temporal Holdout",
+        )
+        if case_deltas:
+            sections.append(case_deltas)
         macro_average = holdout.get("repo_macro_average")
         if macro_average and macro_average.get("repo_count", 0) > 0:
             sections.append(
@@ -682,6 +860,13 @@ def render_report(report: dict[str, Any]) -> str:
                     ],
                 )
             )
+            predictable_case_deltas = render_case_delta_table(
+                report,
+                "Predictable Cross-Repo Temporal Holdout",
+                expected_key="predictable_expected",
+            )
+            if predictable_case_deltas:
+                sections.append(predictable_case_deltas)
             predictable_macro = predictable.get("repo_macro_average")
             if predictable_macro and predictable_macro.get("repo_count", 0) > 0:
                 sections.append(

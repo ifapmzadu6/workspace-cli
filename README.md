@@ -99,9 +99,9 @@ discovery across multiple history topologies, seed-agnostic recent-activity and
 global-PageRank baselines, temporal-holdout predictable-only slices, and
 audit/rollback evidence instead of only checking that commands run. The
 rendered effect summary also reports holdout dataset composition, skipped
-commit reasons, and target-label distributions for paper-style reproducibility
-checks, plus leave-one-repo-out hybrid weight selection when sweep weights are
-provided.
+commit reasons, target-label distributions, and case-level win/loss diagnostics
+for paper-style reproducibility checks, plus leave-one-repo-out hybrid weight
+selection when sweep weights are provided.
 
 ### History-Based Related-File Observation
 

@@ -392,6 +392,16 @@ cross_repo hybrid - direct average_precision@3: +0.062 (0.024, 0.110), wins/ties
 cross_repo hybrid - pagerank average_precision@3: +0.167 (0.042, 0.312), wins/ties/losses 5/19/0, p_greater=0.0303
 ```
 
+The rendered summary also reports case-level AP deltas for the largest wins and
+losses, which makes aggregate gains auditable at the seed-file level:
+
+```text
+case_delta all-target hybrid - direct win related-cli seed=package.json commit=5cf1f67199 targets=Cargo.lock,Cargo.toml,+1 delta_ap@5=+0.278
+case_delta all-target hybrid - recent_activity loss related-cli seed=src/main.rs commit=97835ef97e targets=src/filters.rs,src/model.rs,+1 delta_ap@5=-0.333
+case_delta predictable hybrid - recent_activity loss related-cli seed=src/main.rs commit=97835ef97e targets=src/filters.rs,src/output.rs delta_ap@5=-0.500
+case_delta predictable hybrid - global_pagerank win workspace-cli seed=docs/effect-measurement.md commit=104bbc9155 targets=tools/measure_effect.py delta_ap@5=+0.750
+```
+
 A representative cross-repo hybrid direct-weight sweep over the same held-out
 cases:
 
