@@ -25,11 +25,19 @@ BOOTSTRAP_SAMPLES = 1000
 SIGN_FLIP_SAMPLES = 10000
 DEFAULT_CUTOFF_SWEEP = [1, 3, 5]
 RECENT_ACTIVITY_MAX_COMMITS = 500
+RELATED_HYBRID_DEFAULT_DIRECT_WEIGHT = 0.5
+RELATED_HYBRID_LORO_METHOD = "workspace_related_hybrid_loro"
 RELATED_COMPARISON_PAIRS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "workspace_related_pagerank"),
     ("workspace_related_hybrid", "baseline_recent_activity"),
     ("workspace_related_pagerank", "workspace_related_direct"),
+]
+RELATED_LORO_COMPARISON_PAIRS = [
+    (RELATED_HYBRID_LORO_METHOD, "workspace_related_direct"),
+    (RELATED_HYBRID_LORO_METHOD, "workspace_related_pagerank"),
+    (RELATED_HYBRID_LORO_METHOD, "baseline_recent_activity"),
+    (RELATED_HYBRID_LORO_METHOD, "workspace_related_hybrid"),
 ]
 IMPACT_COMPARISON_PAIRS = [
     ("workspace_impact_hybrid", "workspace_impact_direct"),
@@ -547,6 +555,159 @@ def repo_holdout_metric_summary(
             RELATED_COMPARISON_PAIRS,
         )
         if base_cases
+        else {},
+    }
+
+
+def repo_holdout_leave_one_repo_out_weight_selection(
+    holdouts: list[dict[str, Any]],
+    k: int,
+    weights: list[float],
+    *,
+    expected_key: str = "expected",
+) -> dict[str, Any]:
+    if len(holdouts) < 2 or not weights:
+        return {
+            "k": k,
+            "case_count": 0,
+            "target_count": 0,
+            "candidate_weights": weights,
+            "selections": [],
+            "aggregate": {},
+            "cutoff_sweep": [],
+            "paired_deltas": {},
+        }
+
+    candidate_methods = [
+        (weight, hybrid_weight_method("workspace_related_hybrid", weight))
+        for weight in weights
+    ]
+    selected_scenarios: list[dict[str, Any]] = []
+    selections: list[dict[str, Any]] = []
+    for test_holdout in holdouts:
+        train_cases = [
+            case
+            for holdout in holdouts
+            if holdout["repo"] != test_holdout["repo"]
+            for case in holdout["cases"]
+        ]
+        train_scenarios = retarget_metric_scenarios(
+            train_cases,
+            k,
+            expected_key,
+            [method for _, method in candidate_methods],
+        )
+        test_scenarios = retarget_metric_scenarios(
+            test_holdout["cases"],
+            k,
+            expected_key,
+        )
+        if not train_scenarios or not test_scenarios:
+            continue
+
+        weight_summaries = []
+        for weight, method in candidate_methods:
+            method_scenarios = selected_metric_scenarios(train_scenarios, [method])
+            if not method_scenarios:
+                continue
+            aggregate = aggregate_metric_sets(method_scenarios, k)
+            summary = aggregate[method]
+            weight_summaries.append(
+                {
+                    "hybrid_direct_weight": weight,
+                    "method": method,
+                    "train_case_count": len(method_scenarios),
+                    f"train_average_precision_at_{k}": summary[
+                        f"mean_average_precision_at_{k}"
+                    ],
+                    f"train_ndcg_at_{k}": summary[f"mean_ndcg_at_{k}"],
+                }
+            )
+        if not weight_summaries:
+            continue
+
+        selected = max(
+            weight_summaries,
+            key=lambda summary: (
+                summary[f"train_average_precision_at_{k}"],
+                summary[f"train_ndcg_at_{k}"],
+                -abs(
+                    summary["hybrid_direct_weight"]
+                    - RELATED_HYBRID_DEFAULT_DIRECT_WEIGHT
+                ),
+                -summary["hybrid_direct_weight"],
+            ),
+        )
+        selected_method = selected["method"]
+        repo_selected_scenarios = []
+        for scenario in test_scenarios:
+            if selected_method not in scenario["methods"]:
+                continue
+            methods = {
+                method: scenario["methods"][method]
+                for method in REPO_HOLDOUT_BASE_METHODS
+                if method in scenario["methods"]
+            }
+            methods[RELATED_HYBRID_LORO_METHOD] = scenario["methods"][selected_method]
+            repo_selected_scenarios.append(
+                {
+                    "expected": scenario["expected"],
+                    "methods": methods,
+                }
+            )
+        if not repo_selected_scenarios:
+            continue
+
+        selected_scenarios.extend(repo_selected_scenarios)
+        test_aggregate = aggregate_metric_sets(repo_selected_scenarios, k)
+        test_summary = test_aggregate[RELATED_HYBRID_LORO_METHOD]
+        selections.append(
+            {
+                "repo": test_holdout["repo"],
+                "selected_hybrid_direct_weight": selected[
+                    "hybrid_direct_weight"
+                ],
+                "train_case_count": selected["train_case_count"],
+                "test_case_count": len(repo_selected_scenarios),
+                "test_target_count": sum(
+                    len(scenario["expected"])
+                    for scenario in repo_selected_scenarios
+                ),
+                f"train_average_precision_at_{k}": selected[
+                    f"train_average_precision_at_{k}"
+                ],
+                f"train_ndcg_at_{k}": selected[f"train_ndcg_at_{k}"],
+                f"test_average_precision_at_{k}": test_summary[
+                    f"mean_average_precision_at_{k}"
+                ],
+                f"test_ndcg_at_{k}": test_summary[f"mean_ndcg_at_{k}"],
+            }
+        )
+
+    return {
+        "k": k,
+        "case_count": len(selected_scenarios),
+        "target_count": sum(
+            len(scenario["expected"]) for scenario in selected_scenarios
+        ),
+        "candidate_weights": weights,
+        "selections": selections,
+        "aggregate": aggregate_metric_sets(selected_scenarios, k)
+        if selected_scenarios
+        else {},
+        "cutoff_sweep": cutoff_sweep_metric_sets(
+            selected_scenarios,
+            default_cutoffs(k),
+            RELATED_LORO_COMPARISON_PAIRS,
+        )
+        if selected_scenarios
+        else [],
+        "paired_deltas": paired_delta_metric_sets(
+            selected_scenarios,
+            k,
+            RELATED_LORO_COMPARISON_PAIRS,
+        )
+        if selected_scenarios
         else {},
     }
 
@@ -1726,6 +1887,14 @@ def aggregate_repo_holdouts(
         RELATED_COMPARISON_PAIRS,
         summary_key="predictable_only",
     )
+    predictable_summary["leave_one_repo_out_weight_selection"] = (
+        repo_holdout_leave_one_repo_out_weight_selection(
+            holdouts,
+            k,
+            hybrid_weights,
+            expected_key="predictable_expected",
+        )
+    )
     candidate_commit_count = sum(
         holdout["candidate_commit_count"] for holdout in holdouts
     )
@@ -1760,6 +1929,13 @@ def aggregate_repo_holdouts(
         ),
         "paired_deltas": all_target_summary["paired_deltas"],
         "predictable_only": predictable_summary,
+        "leave_one_repo_out_weight_selection": (
+            repo_holdout_leave_one_repo_out_weight_selection(
+                holdouts,
+                k,
+                hybrid_weights,
+            )
+        ),
         "dataset": holdout_dataset_summary(
             candidate_commit_count=candidate_commit_count,
             examined_commit_count=examined_commit_count,

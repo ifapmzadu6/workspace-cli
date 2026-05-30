@@ -16,6 +16,7 @@ METHOD_LABELS = {
     "workspace_related_direct": "related direct",
     "workspace_related_pagerank": "related PageRank",
     "workspace_related_hybrid": "related hybrid",
+    "workspace_related_hybrid_loro": "related LORO hybrid",
     "workspace_impact_direct": "impact direct",
     "workspace_impact_pagerank": "impact PageRank",
     "workspace_impact_hybrid": "impact hybrid",
@@ -26,6 +27,7 @@ METHOD_ORDER = [
     "workspace_related_direct",
     "workspace_related_pagerank",
     "workspace_related_hybrid",
+    "workspace_related_hybrid_loro",
     "workspace_impact_direct",
     "workspace_impact_pagerank",
     "workspace_impact_hybrid",
@@ -47,6 +49,12 @@ RELATED_COMPARISONS = [
     "workspace_related_hybrid_minus_workspace_related_pagerank",
     "workspace_related_hybrid_minus_baseline_recent_activity",
     "workspace_related_pagerank_minus_workspace_related_direct",
+]
+RELATED_LORO_COMPARISONS = [
+    "workspace_related_hybrid_loro_minus_workspace_related_direct",
+    "workspace_related_hybrid_loro_minus_workspace_related_pagerank",
+    "workspace_related_hybrid_loro_minus_baseline_recent_activity",
+    "workspace_related_hybrid_loro_minus_workspace_related_hybrid",
 ]
 IMPACT_COMPARISONS = [
     "workspace_impact_hybrid_minus_workspace_impact_direct",
@@ -457,6 +465,47 @@ def render_holdout_dataset_table(
     )
 
 
+def render_loro_weight_selection_table(
+    measurement: dict[str, Any],
+    title: str,
+) -> str:
+    rows = []
+    k = measurement["k"]
+    for selection in measurement.get("selections", []):
+        rows.append(
+            [
+                repo_label(selection["repo"]),
+                fmt_number(selection["selected_hybrid_direct_weight"], 3),
+                str(selection["train_case_count"]),
+                str(selection["test_case_count"]),
+                str(selection["test_target_count"]),
+                fmt_number(selection[f"train_average_precision_at_{k}"]),
+                fmt_number(selection[f"test_average_precision_at_{k}"]),
+                fmt_number(selection[f"test_ndcg_at_{k}"]),
+            ]
+        )
+    if not rows:
+        return ""
+    return "\n".join(
+        [
+            f"## {title} Leave-One-Repo-Out Weight Selection @{k}",
+            markdown_table(
+                [
+                    "test repo",
+                    "selected weight",
+                    "train cases",
+                    "test cases",
+                    "test targets",
+                    "train AP",
+                    "test AP",
+                    "test nDCG",
+                ],
+                rows,
+            ),
+        ]
+    )
+
+
 def render_measurement(
     measurement: dict[str, Any],
     title: str,
@@ -568,6 +617,27 @@ def render_report(report: dict[str, Any]) -> str:
         )
         if weight_sweep_table:
             sections.append(weight_sweep_table)
+        loro = holdout.get("leave_one_repo_out_weight_selection")
+        if loro and loro.get("case_count", 0) > 0:
+            loro_selection = render_loro_weight_selection_table(
+                loro,
+                "Cross-Repo Temporal Holdout",
+            )
+            if loro_selection:
+                sections.append(loro_selection)
+            sections.append(
+                render_aggregate_table(
+                    loro,
+                    "Cross-Repo Temporal Holdout LORO Selected",
+                )
+            )
+            sections.append(
+                render_delta_table(
+                    loro,
+                    "Cross-Repo Temporal Holdout LORO Selected",
+                    RELATED_LORO_COMPARISONS,
+                )
+            )
 
         predictable = holdout.get("predictable_only")
         if predictable and predictable.get("case_count", 0) > 0:
@@ -616,6 +686,29 @@ def render_report(report: dict[str, Any]) -> str:
             )
             if predictable_weight_sweep_table:
                 sections.append(predictable_weight_sweep_table)
+            predictable_loro = predictable.get(
+                "leave_one_repo_out_weight_selection"
+            )
+            if predictable_loro and predictable_loro.get("case_count", 0) > 0:
+                predictable_loro_selection = render_loro_weight_selection_table(
+                    predictable_loro,
+                    "Predictable Cross-Repo Temporal Holdout",
+                )
+                if predictable_loro_selection:
+                    sections.append(predictable_loro_selection)
+                sections.append(
+                    render_aggregate_table(
+                        predictable_loro,
+                        "Predictable Cross-Repo Temporal Holdout LORO Selected",
+                    )
+                )
+                sections.append(
+                    render_delta_table(
+                        predictable_loro,
+                        "Predictable Cross-Repo Temporal Holdout LORO Selected",
+                        RELATED_LORO_COMPARISONS,
+                    )
+                )
 
     return "\n\n".join(sections) + "\n"
 

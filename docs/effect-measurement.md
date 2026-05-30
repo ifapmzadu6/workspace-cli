@@ -131,6 +131,8 @@ cutoff, which defaults to 5:
   p-values
 - a default cutoff sweep at @1, @3, and @5
 - an optional hybrid direct-weight sweep for ablation
+- an optional leave-one-repo-out direct-weight selection check when multiple
+  temporal holdout repositories and sweep weights are provided
 
 The suite compares `git diff --name-only`, a seed-agnostic recent-activity
 baseline, direct co-change ranking, personalized PageRank over the saved
@@ -377,6 +379,27 @@ cross_repo hybrid direct_weight=0.50 average_precision@5: 0.748
 cross_repo hybrid direct_weight=1.00 average_precision@5: 0.689
 cross_repo hybrid direct_weight=0.50 - direct average_precision@5: +0.059 (0.028, 0.093), p_greater=0.0010
 cross_repo hybrid direct_weight=0.50 - pagerank average_precision@5: +0.135 (0.042, 0.240), p_greater=0.0335
+```
+
+To check whether the default hybrid direct weight is just overfit to the same
+cross-repo evaluation, the summary also reports leave-one-repo-out weight
+selection. Each fold chooses the best weight on the other two repositories, then
+evaluates that selected weight on the held-out repository:
+
+```text
+LORO all-target workspace-cli selected_weight=0.50, train AP@5: 0.664, test AP@5: 1.000
+LORO all-target related-cli selected_weight=0.50, train AP@5: 0.876, test AP@5: 0.437
+LORO all-target llm-json-extract selected_weight=0.50, train AP@5: 0.697, test AP@5: 0.809
+LORO all-target aggregate AP@5: 0.748 (0.615, 0.864)
+LORO all-target hybrid - direct average_precision@5: +0.059 (0.029, 0.095), wins/ties/losses 10/14/0, p_greater=0.0016
+LORO all-target hybrid - pagerank average_precision@5: +0.135 (0.042, 0.240), wins/ties/losses 5/19/0, p_greater=0.0339
+LORO all-target hybrid - recent_activity average_precision@5: +0.293 (0.189, 0.392), wins/ties/losses 17/6/1, p_greater=0.0001
+LORO predictable workspace-cli selected_weight=0.50, train AP@5: 0.842, test AP@5: 1.000
+LORO predictable related-cli selected_weight=0.50, train AP@5: 0.931, test AP@5: 0.764
+LORO predictable llm-json-extract selected_weight=0.50, train AP@5: 0.882, test AP@5: 0.889
+LORO predictable aggregate AP@5: 0.885 (0.779, 0.956)
+LORO predictable hybrid - direct average_precision@5: +0.086 (0.040, 0.143), wins/ties/losses 10/12/0, p_greater=0.0013
+LORO predictable hybrid - recent_activity average_precision@5: +0.368 (0.218, 0.501), wins/ties/losses 17/4/1, p_greater=0.0001
 ```
 
 Interpretation: the CLI is not just running; it measurably improves observation
