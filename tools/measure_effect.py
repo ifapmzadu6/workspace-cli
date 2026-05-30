@@ -195,13 +195,18 @@ def macro_average_repo_holdouts(
     holdouts: list[dict[str, Any]],
     k: int,
     pairs: list[tuple[str, str]],
+    summary_key: str | None = None,
 ) -> dict[str, Any]:
-    nonempty_holdouts = [holdout for holdout in holdouts if holdout["case_count"] > 0]
+    summaries = []
+    for holdout in holdouts:
+        summary = holdout[summary_key] if summary_key is not None else holdout
+        if summary["case_count"] > 0:
+            summaries.append(summary)
     return {
         "k": k,
-        "repo_count": len(nonempty_holdouts),
-        "aggregate": macro_average_metric_sets(nonempty_holdouts, k),
-        "paired_deltas": macro_paired_delta_metric_sets(nonempty_holdouts, k, pairs),
+        "repo_count": len(summaries),
+        "aggregate": macro_average_metric_sets(summaries, k),
+        "paired_deltas": macro_paired_delta_metric_sets(summaries, k, pairs),
     }
 
 
@@ -366,6 +371,37 @@ def selected_metric_scenarios(
     return selected
 
 
+def retarget_metric_scenarios(
+    scenarios: list[dict[str, Any]],
+    k: int,
+    expected_key: str,
+    methods: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    retargeted = []
+    for scenario in scenarios:
+        expected = set(scenario.get(expected_key, []))
+        if not expected:
+            continue
+        method_names = methods or sorted(scenario["methods"])
+        scenario_methods = {
+            method: ranking_metrics(
+                scenario["methods"][method]["top"],
+                expected,
+                k,
+            )
+            for method in method_names
+            if method in scenario["methods"]
+        }
+        if scenario_methods:
+            retargeted.append(
+                {
+                    "expected": sorted(expected),
+                    "methods": scenario_methods,
+                }
+            )
+    return retargeted
+
+
 def hybrid_weight_sweep_metric_sets(
     scenarios: list[dict[str, Any]],
     k: int,
@@ -416,6 +452,44 @@ def hybrid_weight_sweep_metric_sets(
             }
         sweep.append(entry)
     return sweep
+
+
+def repo_holdout_metric_summary(
+    cases: list[dict[str, Any]],
+    k: int,
+    hybrid_weights: list[float],
+    *,
+    expected_key: str = "expected",
+) -> dict[str, Any]:
+    scenarios = retarget_metric_scenarios(cases, k, expected_key)
+    base_cases = selected_metric_scenarios(scenarios, REPO_HOLDOUT_BASE_METHODS)
+    return {
+        "k": k,
+        "case_count": len(scenarios),
+        "target_count": sum(len(scenario["expected"]) for scenario in scenarios),
+        "aggregate": aggregate_metric_sets(base_cases, k) if base_cases else {},
+        "cutoff_sweep": cutoff_sweep_metric_sets(
+            base_cases,
+            default_cutoffs(k),
+            RELATED_COMPARISON_PAIRS,
+        )
+        if base_cases
+        else [],
+        "hybrid_weight_sweep": hybrid_weight_sweep_metric_sets(
+            scenarios,
+            k,
+            hybrid_weights,
+        )
+        if scenarios
+        else [],
+        "paired_deltas": paired_delta_metric_sets(
+            base_cases,
+            k,
+            RELATED_COMPARISON_PAIRS,
+        )
+        if base_cases
+        else {},
+    }
 
 
 def paired_delta_metric_sets(
@@ -1380,6 +1454,7 @@ def measure_repo_holdout(
                 str(max_files_per_commit),
                 "--json",
             )
+            parent_paths = tracked_repo_paths(clone)
 
             heldout_commits += 1
             for seed in files:
@@ -1393,6 +1468,7 @@ def measure_repo_holdout(
                     continue
 
                 expected = set(files) - {seed}
+                predictable_expected = expected & parent_paths
                 recent_activity = recent_activity_paths(clone, {seed})
                 direct = workspace_json(
                     bin_path,
@@ -1476,6 +1552,10 @@ def measure_repo_holdout(
                         "parent": parent[:12],
                         "seed": seed,
                         "expected": sorted(expected),
+                        "predictable_expected": sorted(predictable_expected),
+                        "unpredictable_expected": sorted(
+                            expected - predictable_expected
+                        ),
                         "index": {
                             "commits_indexed": index["data"]["commits_indexed"],
                             "ignored_large_commits": index["data"][
@@ -1490,7 +1570,13 @@ def measure_repo_holdout(
             if heldout_commits >= max_heldout_commits:
                 break
 
-    base_cases = selected_metric_scenarios(cases, REPO_HOLDOUT_BASE_METHODS)
+    all_target_summary = repo_holdout_metric_summary(cases, k, hybrid_weights)
+    predictable_summary = repo_holdout_metric_summary(
+        cases,
+        k,
+        hybrid_weights,
+        expected_key="predictable_expected",
+    )
     return {
         "metric": "repo_temporal_holdout",
         "repo": str(repo),
@@ -1502,28 +1588,12 @@ def measure_repo_holdout(
         "case_count": len(cases),
         "skipped": skipped,
         "cases": cases,
-        "aggregate": aggregate_metric_sets(base_cases, k) if base_cases else {},
-        "cutoff_sweep": cutoff_sweep_metric_sets(
-            base_cases,
-            default_cutoffs(k),
-            RELATED_COMPARISON_PAIRS,
-        )
-        if base_cases
-        else [],
-        "hybrid_weight_sweep": hybrid_weight_sweep_metric_sets(
-            cases,
-            k,
-            hybrid_weights,
-        )
-        if cases
-        else [],
-        "paired_deltas": paired_delta_metric_sets(
-            base_cases,
-            k,
-            RELATED_COMPARISON_PAIRS,
-        )
-        if base_cases
-        else {},
+        "aggregate": all_target_summary["aggregate"],
+        "cutoff_sweep": all_target_summary["cutoff_sweep"],
+        "hybrid_weight_sweep": all_target_summary["hybrid_weight_sweep"],
+        "paired_deltas": all_target_summary["paired_deltas"],
+        "target_count": all_target_summary["target_count"],
+        "predictable_only": predictable_summary,
     }
 
 
@@ -1542,7 +1612,19 @@ def aggregate_repo_holdouts(
         for key, value in holdout["skipped"].items():
             skipped[key] = skipped.get(key, 0) + value
 
-    base_cases = selected_metric_scenarios(cases, REPO_HOLDOUT_BASE_METHODS)
+    all_target_summary = repo_holdout_metric_summary(cases, k, hybrid_weights)
+    predictable_summary = repo_holdout_metric_summary(
+        cases,
+        k,
+        hybrid_weights,
+        expected_key="predictable_expected",
+    )
+    predictable_summary["repo_macro_average"] = macro_average_repo_holdouts(
+        holdouts,
+        k,
+        RELATED_COMPARISON_PAIRS,
+        summary_key="predictable_only",
+    )
     return {
         "metric": "repo_temporal_holdout_aggregate",
         "repo_count": len(holdouts),
@@ -1557,34 +1639,18 @@ def aggregate_repo_holdouts(
             holdout["heldout_commit_count"] for holdout in holdouts
         ),
         "case_count": len(cases),
+        "target_count": all_target_summary["target_count"],
         "skipped": skipped,
-        "aggregate": aggregate_metric_sets(base_cases, k) if base_cases else {},
-        "cutoff_sweep": cutoff_sweep_metric_sets(
-            base_cases,
-            default_cutoffs(k),
-            RELATED_COMPARISON_PAIRS,
-        )
-        if base_cases
-        else [],
-        "hybrid_weight_sweep": hybrid_weight_sweep_metric_sets(
-            cases,
-            k,
-            hybrid_weights,
-        )
-        if cases
-        else [],
+        "aggregate": all_target_summary["aggregate"],
+        "cutoff_sweep": all_target_summary["cutoff_sweep"],
+        "hybrid_weight_sweep": all_target_summary["hybrid_weight_sweep"],
         "repo_macro_average": macro_average_repo_holdouts(
             holdouts,
             k,
             RELATED_COMPARISON_PAIRS,
         ),
-        "paired_deltas": paired_delta_metric_sets(
-            base_cases,
-            k,
-            RELATED_COMPARISON_PAIRS,
-        )
-        if base_cases
-        else {},
+        "paired_deltas": all_target_summary["paired_deltas"],
+        "predictable_only": predictable_summary,
     }
 
 

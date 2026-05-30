@@ -152,6 +152,11 @@ prediction task.
 When several repositories are provided, the script keeps the per-repository
 measurements and also reports a `repo_temporal_holdout_aggregate` metric over
 all held-out seed cases.
+The temporal holdout report also includes `predictable_only`, which re-scores
+the same rankings against expected target files that already existed at the
+held-out commit's parent. This separates ordinary related-file prediction from
+new-file creation targets that no history-based method can name before they
+exist.
 
 ### Transaction Audit Signal Recall
 
@@ -251,8 +256,9 @@ python3 tools/measure_effect.py \
   --max-candidate-commits 20
 ```
 
-Representative aggregate over 9 held-out commits and 24 seed cases. Parentheses
-show deterministic bootstrap 95% confidence intervals for the mean:
+Representative all-target aggregate over 9 held-out commits, 24 seed cases, and
+72 target file labels. Parentheses show deterministic bootstrap 95% confidence
+intervals for the mean:
 
 ```text
 cross_repo recent_activity recall@5: 0.646 (0.493, 0.778)
@@ -280,9 +286,29 @@ cross_repo pagerank - direct ndcg@5: -0.049 (-0.153, 0.039), wins/ties/losses 10
 Per-repository means show where the aggregate gain comes from:
 
 ```text
-workspace-cli cases: 6, recent AP@5: 0.792, direct AP@5: 1.000, pagerank AP@5: 0.458, hybrid AP@5: 1.000
-related-cli cases: 7, recent AP@5: 0.135, direct AP@5: 0.302, pagerank AP@5: 0.437, hybrid AP@5: 0.437
-llm-json-extract cases: 11, recent AP@5: 0.475, direct AP@5: 0.765, pagerank AP@5: 0.809, hybrid AP@5: 0.809
+workspace-cli cases: 6, targets: 6, recent AP@5: 0.792, direct AP@5: 1.000, pagerank AP@5: 0.458, hybrid AP@5: 1.000
+related-cli cases: 7, targets: 23, recent AP@5: 0.135, direct AP@5: 0.302, pagerank AP@5: 0.437, hybrid AP@5: 0.437
+llm-json-extract cases: 11, targets: 43, recent AP@5: 0.475, direct AP@5: 0.765, pagerank AP@5: 0.809, hybrid AP@5: 0.809
+```
+
+For predictable-only targets, 22 seed cases and 58 target labels remain:
+
+```text
+predictable cross_repo recent_activity average_precision@5: 0.518 (0.398, 0.636)
+predictable cross_repo direct average_precision@5: 0.799 (0.697, 0.899)
+predictable cross_repo pagerank average_precision@5: 0.738 (0.595, 0.856)
+predictable cross_repo hybrid average_precision@5: 0.885 (0.781, 0.957)
+predictable cross_repo hybrid - direct average_precision@5: +0.086 (0.035, 0.142), wins/ties/losses 10/12/0, p_greater=0.0011
+predictable cross_repo hybrid - pagerank average_precision@5: +0.148 (0.045, 0.273), wins/ties/losses 5/17/0, p_greater=0.0305
+predictable cross_repo hybrid - recent_activity average_precision@5: +0.368 (0.214, 0.512), wins/ties/losses 17/4/1, p_greater=0.0001
+```
+
+Predictable-only per-repository means:
+
+```text
+workspace-cli predictable cases: 6, targets: 6, recent AP@5: 0.792, direct AP@5: 1.000, pagerank AP@5: 0.458, hybrid AP@5: 1.000
+related-cli predictable cases: 6, targets: 12, recent AP@5: 0.236, direct AP@5: 0.528, pagerank AP@5: 0.764, hybrid AP@5: 0.764
+llm-json-extract predictable cases: 10, targets: 40, recent AP@5: 0.522, direct AP@5: 0.842, pagerank AP@5: 0.889, hybrid AP@5: 0.889
 ```
 
 The report also includes `repo_macro_average`, which treats each repository as
@@ -296,6 +322,17 @@ repo_macro hybrid average_precision@5: 0.749 (0.437, 1.000)
 repo_macro hybrid - direct average_precision@5: +0.059 (0.000, 0.135), wins/ties/losses 2/1/0
 repo_macro hybrid - pagerank average_precision@5: +0.181 (0.000, 0.542), wins/ties/losses 1/2/0
 repo_macro hybrid - recent_activity average_precision@5: +0.281 (0.208, 0.334), wins/ties/losses 3/0/0
+```
+
+Predictable-only repo macro average:
+
+```text
+predictable repo_macro recent_activity average_precision@5: 0.517 (0.236, 0.792)
+predictable repo_macro direct average_precision@5: 0.790 (0.528, 1.000)
+predictable repo_macro pagerank average_precision@5: 0.704 (0.458, 0.889)
+predictable repo_macro hybrid average_precision@5: 0.884 (0.764, 1.000)
+predictable repo_macro hybrid - direct average_precision@5: +0.095 (0.000, 0.236), wins/ties/losses 2/1/0
+predictable repo_macro hybrid - recent_activity average_precision@5: +0.368 (0.208, 0.528), wins/ties/losses 3/0/0
 ```
 
 The report also includes a `cutoff_sweep` array for the same held-out cases.

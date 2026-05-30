@@ -309,7 +309,11 @@ def render_hybrid_weight_sweep_table(
     )
 
 
-def render_repo_holdout_table(report: dict[str, Any]) -> str:
+def render_repo_holdout_table(
+    report: dict[str, Any],
+    title: str,
+    summary_key: str | None = None,
+) -> str:
     holdouts = [
         measurement
         for measurement in report["measurements"]
@@ -317,9 +321,12 @@ def render_repo_holdout_table(report: dict[str, Any]) -> str:
     ]
     rows = []
     for holdout in holdouts:
-        k = holdout["k"]
-        aggregate = holdout.get("aggregate", {})
-        deltas = holdout.get("paired_deltas", {})
+        summary = holdout.get(summary_key, {}) if summary_key else holdout
+        if not summary:
+            continue
+        k = summary["k"]
+        aggregate = summary.get("aggregate", {})
+        deltas = summary.get("paired_deltas", {})
         if not all(method in aggregate for method in RELATED_METHODS):
             continue
         ap_metric = f"average_precision_at_{k}"
@@ -330,7 +337,8 @@ def render_repo_holdout_table(report: dict[str, Any]) -> str:
         rows.append(
             [
                 repo_label(holdout["repo"]),
-                str(holdout["case_count"]),
+                str(summary["case_count"]),
+                str(summary.get("target_count", "")),
                 fmt_mean(aggregate["baseline_recent_activity"], ap_metric),
                 fmt_mean(aggregate["workspace_related_direct"], ap_metric),
                 fmt_mean(aggregate["workspace_related_pagerank"], ap_metric),
@@ -352,11 +360,12 @@ def render_repo_holdout_table(report: dict[str, Any]) -> str:
         return ""
     return "\n".join(
         [
-            "## Per-Repo Temporal Holdout",
+            f"## {title}",
             markdown_table(
                 [
                     "repo",
                     "cases",
+                    "targets",
                     "recent AP",
                     "direct AP",
                     "PageRank AP",
@@ -439,7 +448,7 @@ def render_report(report: dict[str, Any]) -> str:
 
     holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
     if holdout is not None:
-        per_repo = render_repo_holdout_table(report)
+        per_repo = render_repo_holdout_table(report, "Per-Repo Temporal Holdout")
         if per_repo:
             sections.append(per_repo)
         sections.extend(
@@ -480,6 +489,54 @@ def render_report(report: dict[str, Any]) -> str:
         )
         if weight_sweep_table:
             sections.append(weight_sweep_table)
+
+        predictable = holdout.get("predictable_only")
+        if predictable and predictable.get("case_count", 0) > 0:
+            predictable_per_repo = render_repo_holdout_table(
+                report,
+                "Per-Repo Predictable Temporal Holdout",
+                summary_key="predictable_only",
+            )
+            if predictable_per_repo:
+                sections.append(predictable_per_repo)
+            sections.extend(
+                render_measurement(
+                    predictable,
+                    "Predictable Cross-Repo Temporal Holdout",
+                    RELATED_COMPARISONS,
+                    [
+                        (
+                            "Predictable Cross-Repo Temporal Holdout",
+                            RELATED_METHODS,
+                            RELATED_COMPARISONS[:2],
+                        )
+                    ],
+                )
+            )
+            predictable_macro = predictable.get("repo_macro_average")
+            if predictable_macro and predictable_macro.get("repo_count", 0) > 0:
+                sections.append(
+                    render_aggregate_table(
+                        predictable_macro,
+                        "Predictable Repo-Macro Temporal Holdout",
+                    )
+                )
+                sections.append(
+                    render_delta_table(
+                        predictable_macro,
+                        "Predictable Repo-Macro Temporal Holdout",
+                        RELATED_COMPARISONS,
+                    )
+                )
+            predictable_weight_sweep_table = render_hybrid_weight_sweep_table(
+                predictable,
+                "Predictable Cross-Repo Temporal Holdout",
+                "related",
+                "workspace_related_direct",
+                "workspace_related_pagerank",
+            )
+            if predictable_weight_sweep_table:
+                sections.append(predictable_weight_sweep_table)
 
     return "\n\n".join(sections) + "\n"
 
