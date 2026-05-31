@@ -206,6 +206,52 @@ class CodexWorkspacePilotTests(unittest.TestCase):
             ["./bin/workspace status --json", "python3 -m unittest"],
         )
 
+    def test_collect_condition_result_marks_expected_diff_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo = Path(tmp_dir) / "fixture"
+            repo.mkdir()
+            run_codex_workspace_pilot.init_repo(repo)
+            run_codex_workspace_pilot.write_text(repo / "src" / "__init__.py", "")
+            run_codex_workspace_pilot.write_text(
+                repo / "src" / "example.py",
+                "VALUE = 1\n",
+            )
+            run_codex_workspace_pilot.write_text(
+                repo / "tests" / "test_example.py",
+                """\
+import unittest
+
+from src.example import VALUE
+
+
+class ExampleTests(unittest.TestCase):
+    def test_value(self):
+        self.assertEqual(VALUE, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
+""",
+            )
+            run_codex_workspace_pilot.commit_all(repo, "initial fixture")
+            (repo / "src" / "example.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+            result = run_codex_workspace_pilot.collect_condition_result(
+                {
+                    "condition": "shell_only",
+                    "elapsed_seconds": 1.0,
+                    "codex_exit_code": 0,
+                    "codex_stdout": "",
+                    "codex_stderr": "",
+                },
+                repo,
+                expected_changed_files=("src/example.py",),
+            )
+
+            self.assertTrue(result["test_passed"])
+            self.assertEqual(result["changed_files"], ["src/example.py"])
+            self.assertTrue(result["changed_files_match_expected"])
+
     def test_render_markdown_calls_out_tiny_task_overhead(self) -> None:
         summary = {
             "task": "discounted_tax_bug",

@@ -19,7 +19,7 @@ from typing import Any, Callable, NamedTuple
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = ROOT / "target" / "codex-workspace-pilot"
 DEFAULT_TASK = "discounted_tax_bug"
-TEST_COMMAND = "python3 -m unittest discover -s tests"
+TEST_COMMAND = "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests"
 
 
 class Condition(NamedTuple):
@@ -32,6 +32,7 @@ class TaskSpec(NamedTuple):
     prompt: str
     workspace_extra: str
     create_repo: Callable[[Path, Path], None]
+    expected_changed_files: tuple[str, ...]
 
 
 def write_text(path: Path, content: str) -> None:
@@ -422,11 +423,12 @@ def task_specs() -> dict[str, TaskSpec]:
                 "Use `./bin/workspace` for workspace observation and "
                 "verification whenever possible. Start with "
                 "`./bin/workspace status --json`, use `read`, `search`, `diff`, "
-                "and run tests with `./bin/workspace run \"python3 -m unittest "
-                "discover -s tests\" --json`. If you edit files, prefer creating "
-                "a patch and applying it with `./bin/workspace patch`."
+                f"and run tests with `./bin/workspace run \"{TEST_COMMAND}\" "
+                "--json`. If you edit files, prefer creating a patch and "
+                "applying it with `./bin/workspace patch`."
             ),
             create_repo=create_checkout_fixture_repo,
+            expected_changed_files=("src/checkout.py",),
         ),
         "policy_threshold_sync": TaskSpec(
             name="policy_threshold_sync",
@@ -438,14 +440,18 @@ def task_specs() -> dict[str, TaskSpec]:
                 "`./bin/workspace index cochange --json`, use "
                 "`./bin/workspace related tests/test_discounts.py --by cochange "
                 "--use-index --rank hybrid --json` to find related files, and "
-                "run tests with `./bin/workspace run \"python3 -m unittest "
-                "discover -s tests\" --json`. After editing, use "
+                f"run tests with `./bin/workspace run \"{TEST_COMMAND}\" --json`. "
+                "After editing, use "
                 "`./bin/workspace impact --diff --by cochange --use-index "
                 "--rank hybrid --json` and `./bin/workspace diff --json`. If "
                 "you edit files, prefer creating a patch and applying it with "
                 "`./bin/workspace patch`."
             ),
             create_repo=create_policy_fixture_repo,
+            expected_changed_files=(
+                "config/discount_policy.json",
+                "docs/discount_policy.md",
+            ),
         ),
         "rollback_recovery": TaskSpec(
             name="rollback_recovery",
@@ -457,8 +463,8 @@ def task_specs() -> dict[str, TaskSpec]:
                 "`./bin/workspace patch --description \"Validate proposed "
                 "late-fee patch\" docs/proposed_late_fee_fix.patch --json`, "
                 "then run "
-                "`./bin/workspace run \"python3 -m unittest discover -s tests\" "
-                "--json`. If the tests fail, read the patch response's "
+                f"`./bin/workspace run \"{TEST_COMMAND}\" --json`. If the tests "
+                "fail, read the patch response's "
                 "`data.transaction_id` and roll it back with "
                 "`./bin/workspace rollback <transaction_id> --json` before "
                 "creating and applying the correct patch with "
@@ -466,6 +472,7 @@ def task_specs() -> dict[str, TaskSpec]:
                 "`workspace run` and `./bin/workspace diff --json`."
             ),
             create_repo=create_rollback_fixture_repo,
+            expected_changed_files=("docs/billing.md", "src/billing.py"),
         ),
     }
 
@@ -608,12 +615,17 @@ def workspace_operation_counts(repo: Path) -> dict[str, int]:
     return counts
 
 
-def collect_condition_result(raw: dict[str, Any], repo: Path) -> dict[str, Any]:
+def collect_condition_result(
+    raw: dict[str, Any],
+    repo: Path,
+    *,
+    expected_changed_files: tuple[str, ...] = (),
+) -> dict[str, Any]:
     events = load_jsonl_events(str(raw.get("codex_stdout", "")))
     commands = command_like_values(events)
     operation_counts = workspace_operation_counts(repo)
     test = run_command(
-        ["python3", "-m", "unittest", "discover", "-s", "tests"],
+        ["sh", "-c", TEST_COMMAND],
         cwd=repo,
         timeout_seconds=60,
     )
@@ -628,6 +640,7 @@ def collect_condition_result(raw: dict[str, Any], repo: Path) -> dict[str, Any]:
             if isinstance(text, str):
                 final_message = text
 
+    changed_files = [line for line in diff_name_only.stdout.splitlines() if line.strip()]
     return {
         **{key: value for key, value in raw.items() if not key.startswith("codex_")},
         "codex_exit_code": raw.get("codex_exit_code"),
@@ -645,9 +658,13 @@ def collect_condition_result(raw: dict[str, Any], repo: Path) -> dict[str, Any]:
         "test_passed": test.returncode == 0,
         "test_stdout": test.stdout,
         "test_stderr": test.stderr,
-        "changed_files": [
-            line for line in diff_name_only.stdout.splitlines() if line.strip()
-        ],
+        "changed_files": changed_files,
+        "expected_changed_files": list(expected_changed_files),
+        "changed_files_match_expected": (
+            sorted(changed_files) == sorted(expected_changed_files)
+            if expected_changed_files
+            else None
+        ),
         "diff_stat": diff_stat.stdout.strip(),
         "diff_patch": diff_patch.stdout,
         "final_message": final_message,
@@ -785,7 +802,11 @@ def run_pilot(args: argparse.Namespace) -> dict[str, Any]:
                 str(raw.get("codex_stderr", "")),
                 encoding="utf-8",
             )
-            result = collect_condition_result(raw, repo)
+            result = collect_condition_result(
+                raw,
+                repo,
+                expected_changed_files=task.expected_changed_files,
+            )
             write_condition_artifacts(output_dir, condition.name, result, repo)
             results.append(result)
 

@@ -132,7 +132,9 @@ Codex-in-the-loop evaluation is documented in
 [docs/codex-agent-evaluation.md](docs/codex-agent-evaluation.md). The pilot
 runner creates controlled temporary tasks and runs real `codex exec` conditions
 with and without `workspace-cli` instructions, recording success, time, command
-use, final diffs, and workspace operation logs.
+use, final diffs, and workspace operation logs. The suite runner repeats those
+pilots across tasks and repetitions, then reports pass rate, expected-diff-scope
+correctness, timing intervals, command counts, and rollback usage.
 
 Effect measurement is documented in
 [docs/effect-measurement.md](docs/effect-measurement.md) and implemented by
