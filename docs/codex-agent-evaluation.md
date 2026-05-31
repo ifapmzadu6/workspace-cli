@@ -298,6 +298,30 @@ workspaces at the optimized task-specific commits rather than one single commit,
 so this should be cited as a merged evidence artifact; the same-commit two-run
 cross-task suite above is the cleaner commit-local result.
 
+The next optimization removed `workspace impact` from the small two-file policy
+task and tightened the stdin-patch instruction to include complete JSON
+closing-brace context. A fresh policy-only four-run suite on commit
+`c61dd07df5bf` moved the policy task from elapsed-time parity to a small
+workspace advantage: `workspace_cli - shell_only = -1.198s` with interval
+`(-2.365, -0.031)`, while using 1.750 fewer commands on average.
+
+With that policy prompt trim, the same current commit produced the strongest
+same-commit cross-task result so far:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 12 | 1.000 | 1.000 | 46.652 (39.882, 52.605) | 9.000 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 12 | 1.000 | 1.000 | 40.726 (36.424, 45.373) | 5.000 | 5.000 | 5.333 | 0.333 |
+
+Across the twelve paired passing runs, the timing delta was `-5.926s` with
+bootstrap interval `(-9.277, -3.012)`. `workspace_cli` was faster in ten of
+twelve pairs. The paired command-count delta was `-4.000` commands with
+interval `(-5.250, -2.750)`. By task, the timing deltas were
+`invoice_tax_sync = -10.733s`, `policy_threshold_sync = -0.365s`, and
+`rollback_recovery = -6.679s`; invoice and rollback had non-zero-crossing
+task-level intervals, while policy remained close to parity but used fewer
+commands.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -314,23 +338,23 @@ entries and no `operation log unreadable` status.
   choice, final diffs, and workspace audit logs.
 - The timing evidence is now task-dependent rather than uniformly negative:
   simple checkout and the initial co-change prompts were slower with
-  `workspace-cli`, the optimized policy task moved to elapsed-time parity, and
-  the larger invoice task used far fewer commands while showing a promising but
-  still statistically weak timing improvement. The optimized rollback suite is
+  `workspace-cli`, the optimized policy task now uses fewer commands and is near
+  elapsed-time parity, and the larger invoice task uses far fewer commands with
+  a same-commit non-zero-crossing timing improvement. The optimized rollback suite is
   the first repeated single-task Codex-in-the-loop result where `workspace_cli`
   was faster in every paired run and the paired timing interval did not cross
-  zero. The latest three-task suites also show aggregate timing improvements
-  with non-zero-crossing intervals and substantially fewer commands across both
-  the same-commit two-run suite and the merged twelve-pair evidence artifact.
-  The paper can now make controlled-task speedup claims for transactional
-  recovery and small-suite aggregate behavior, while still treating broader
-  generalization as early pilot evidence.
+  zero. The latest three-task suite shows a same-commit twelve-pair aggregate
+  timing improvement with a non-zero-crossing interval and substantially fewer
+  commands, and the merged twelve-pair evidence artifact independently points in
+  the same direction. The paper can now make controlled-task speedup claims for
+  transactional recovery, invoice-style multi-file synchronization, and
+  small-suite aggregate behavior, while still treating broader generalization as
+  early pilot evidence.
 
 ## Next Required Step
 
-The next evaluation should rerun the three-task suite with four repetitions on a
-single current commit and add at least one larger repository-like task where the
-audit log, related-file discovery, impact checks, rollback, stdin patching, and
-batched observations remove enough wasted search or recovery work to pay for the
-tool overhead. The report should keep separating single-task claims, merged
+The next evaluation should add at least one larger repository-like task where
+the audit log, related-file discovery, impact checks, rollback, stdin patching,
+and batched observations remove enough wasted search or recovery work to pay for
+the tool overhead. The report should keep separating single-task claims, merged
 artifact claims, and same-commit cross-task aggregate claims.
