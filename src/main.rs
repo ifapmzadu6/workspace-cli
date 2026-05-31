@@ -104,6 +104,7 @@ const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
 const RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER: f64 = 60.0;
 const RELATED_HYBRID_EVAL_SCRIPT_DOC_SCORE_MULTIPLIER: f64 = 1.15;
 const RELATED_HYBRID_EVAL_DOC_SCRIPT_SCORE_MULTIPLIER: f64 = 3.1;
+const RELATED_HYBRID_SKILL_EVAL_DOC_SCORE_MULTIPLIER: f64 = 3.0;
 const RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER: f64 = 1.5;
 const RELATED_HYBRID_SOURCE_CHANGELOG_SCORE_MULTIPLIER: f64 = 1.4;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
@@ -4701,6 +4702,9 @@ fn related_hybrid_path_score_multiplier(
     if direct_edge_weight > 0.0 && is_evaluation_documentation_script_pair(target, candidate) {
         multiplier *= RELATED_HYBRID_EVAL_DOC_SCRIPT_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0 && is_skill_evaluation_document_pair(target, candidate) {
+        multiplier *= RELATED_HYBRID_SKILL_EVAL_DOC_SCORE_MULTIPLIER;
+    }
     if direct_edge_weight > 0.0 && shares_parent_and_name_token(target, candidate) {
         multiplier *= RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER;
     }
@@ -4862,6 +4866,14 @@ fn is_root_evaluation_document(path: &str) -> bool {
             path.to_ascii_lowercase().as_str(),
             "comparison.md" | "measurements.md"
         )
+}
+
+fn is_skill_evaluation_document_pair(target: &str, candidate: &str) -> bool {
+    is_skill_document_file(target) && is_root_evaluation_document(candidate)
+}
+
+fn is_skill_document_file(path: &str) -> bool {
+    path.starts_with("skills/") && path.ends_with("/SKILL.md")
 }
 
 fn is_root_markdown_document(path: &str) -> bool {
@@ -12050,6 +12062,25 @@ src/b.rs
         assert_eq!(
             related_hybrid_path_score_multiplier("scripts/compare.sh", "docs/compare.md", 1.0, 0.1),
             1.0
+        );
+        assert!(
+            related_hybrid_path_score_multiplier(
+                "skills/find-related-files/SKILL.md",
+                "MEASUREMENTS.md",
+                1.0,
+                0.1
+            ) >= related_path_score_multiplier(
+                "skills/find-related-files/SKILL.md",
+                "MEASUREMENTS.md"
+            ) * RELATED_HYBRID_SKILL_EVAL_DOC_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("src/lib.rs", "COMPARISON.md", 1.0, 0.1),
+            related_path_score_multiplier("src/lib.rs", "COMPARISON.md")
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("src/main.rs", "COMPARISON.md", 1.0, 0.1),
+            related_path_score_multiplier("src/main.rs", "COMPARISON.md")
         );
         assert_eq!(
             related_hybrid_path_score_multiplier("tools/measure_effect.py", ".gitignore", 1.0, 1.0),
