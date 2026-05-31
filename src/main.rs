@@ -100,6 +100,8 @@ const RELATED_HYBRID_LOW_SIGNAL_METADATA_SCORE_MULTIPLIER: f64 = 0.3;
 const RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER: f64 = 0.25;
 const RELATED_HYBRID_CI_WORKFLOW_METADATA_SCORE_MULTIPLIER: f64 = 0.25;
 const RELATED_HYBRID_CROSS_ECOSYSTEM_PACKAGE_METADATA_SCORE_MULTIPLIER: f64 = 0.25;
+const RELATED_HYBRID_CARGO_SATURATED_METADATA_SCORE_MULTIPLIER: f64 = 0.55;
+const RELATED_HYBRID_CARGO_SATURATED_METADATA_MIN_DIRECT_SCORE: f64 = 0.999;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER: f64 = 6.0;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
 const RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER: f64 = 60.0;
@@ -4478,7 +4480,7 @@ fn rank_cochanges_hybrid_from_index(
             direct_edge_weight,
             direct_score,
         );
-        hit.score *= related_hybrid_repo_score_multiplier(index, &target, &hit.path);
+        hit.score *= related_hybrid_repo_score_multiplier(index, &target, &hit.path, direct_score);
     }
     normalize_pagerank_hit_scores(&mut hits);
     hits.sort_by(compare_pagerank_hit_by_score);
@@ -4994,12 +4996,18 @@ fn related_hybrid_repo_score_multiplier(
     index: &CochangeIndex,
     target: &str,
     candidate: &str,
+    direct_score: f64,
 ) -> f64 {
+    let mut multiplier = 1.0;
     if is_cross_ecosystem_package_metadata_candidate(index, target, candidate) {
-        RELATED_HYBRID_CROSS_ECOSYSTEM_PACKAGE_METADATA_SCORE_MULTIPLIER
-    } else {
-        1.0
+        multiplier *= RELATED_HYBRID_CROSS_ECOSYSTEM_PACKAGE_METADATA_SCORE_MULTIPLIER;
     }
+    if direct_score >= RELATED_HYBRID_CARGO_SATURATED_METADATA_MIN_DIRECT_SCORE
+        && is_cargo_saturated_metadata_candidate(index, target, candidate)
+    {
+        multiplier *= RELATED_HYBRID_CARGO_SATURATED_METADATA_SCORE_MULTIPLIER;
+    }
+    multiplier
 }
 
 fn is_cross_ecosystem_package_metadata_candidate(
@@ -5015,6 +5023,21 @@ fn is_cross_ecosystem_package_metadata_candidate(
         && !is_javascript_source_code_file(target)
         && !is_javascript_toolchain_config(target)
         && !is_project_changelog(target)
+}
+
+fn is_cargo_saturated_metadata_candidate(
+    index: &CochangeIndex,
+    target: &str,
+    candidate: &str,
+) -> bool {
+    is_cargo_manifest_or_lock(target)
+        && index_contains_file(index, "Cargo.toml")
+        && index_contains_file(index, "package.json")
+        && (candidate == "package.json" || is_release_workflow_file(candidate))
+}
+
+fn is_cargo_manifest_or_lock(path: &str) -> bool {
+    matches!(path, "Cargo.toml" | "Cargo.lock")
 }
 
 fn index_contains_file(index: &CochangeIndex, path: &str) -> bool {
@@ -12188,6 +12211,7 @@ src/b.rs
                 hash: "aaaaaaaaaaaa".to_string(),
                 files: vec![
                     "Cargo.toml".to_string(),
+                    ".github/workflows/release.yml".to_string(),
                     "package.json".to_string(),
                     "src/main.rs".to_string(),
                 ],
@@ -12197,12 +12221,25 @@ src/b.rs
             None,
         );
         assert_eq!(
-            related_hybrid_repo_score_multiplier(&mixed_index, "src/main.rs", "package.json"),
+            related_hybrid_repo_score_multiplier(&mixed_index, "src/main.rs", "package.json", 1.0),
             RELATED_HYBRID_CROSS_ECOSYSTEM_PACKAGE_METADATA_SCORE_MULTIPLIER
         );
         assert_eq!(
-            related_hybrid_repo_score_multiplier(&mixed_index, "Cargo.toml", "package.json"),
+            related_hybrid_repo_score_multiplier(&mixed_index, "Cargo.toml", "package.json", 0.5),
             1.0
+        );
+        assert_eq!(
+            related_hybrid_repo_score_multiplier(&mixed_index, "Cargo.toml", "package.json", 1.0),
+            RELATED_HYBRID_CARGO_SATURATED_METADATA_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_repo_score_multiplier(
+                &mixed_index,
+                "Cargo.lock",
+                ".github/workflows/release.yml",
+                1.0,
+            ),
+            RELATED_HYBRID_CARGO_SATURATED_METADATA_SCORE_MULTIPLIER
         );
         let package_only_index = cochange_index_from_commits(
             &[GitCommitFiles {
@@ -12218,6 +12255,7 @@ src/b.rs
                 &package_only_index,
                 "src/index.ts",
                 "package.json",
+                1.0,
             ),
             1.0
         );
