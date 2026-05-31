@@ -137,8 +137,8 @@ shipping and promotion decoys, and its history co-changes
 `tests/test_invoice_pipeline.py` with the four target files. The workspace run
 uses `workspace related tests/test_invoice_pipeline.py --by cochange
 --ensure-index --max-commits 1000 --rank hybrid --include-content`,
-`workspace patch`, `workspace run`, `workspace impact --diff --ensure-index`,
-and `workspace diff`.
+`workspace patch --stdin`, `workspace run`,
+`workspace impact --diff --ensure-index`, and `workspace diff`.
 
 An initial single run solved the task in both conditions but showed avoidable
 workspace overhead: `workspace_cli` took 122.310 seconds and 15 commands versus
@@ -198,6 +198,26 @@ therefore neutral, not a statistically supported speedup. The command-count
 result is stronger: `workspace_cli` used 5.5 fewer commands on average while
 maintaining perfect pass rate and expected diff scope.
 
+The final fixed overhead in this workflow was creating a temporary patch file,
+running `workspace patch <patch-file>`, then deleting that file. The CLI now
+supports `workspace patch --stdin`, which stores the stdin unified diff as the
+transaction patch and applies it without a user-visible temporary patch file.
+With `related --ensure-index --include-content` plus `patch --stdin`, the
+four-run invoice suite was:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 4 | 1.000 | 1.000 | 57.236 (44.699, 69.773) | 10.500 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 4 | 1.000 | 1.000 | 47.878 (44.143, 50.774) | 5.000 | 5.000 | 5.000 | 0.000 |
+
+The paired timing delta was `workspace_cli - shell_only = -9.358s` with a
+bootstrap interval of `(-19.542, 1.188)`. `workspace_cli` was faster in three
+paired runs and `shell_only` was faster in one. This is the strongest pilot so
+far: workspace-assisted Codex maintained perfect pass rate and expected
+multi-file diff scope, cut mean command count by 5.5, and was faster on average.
+The interval still crosses zero, so this remains pilot evidence rather than a
+statistically powered elapsed-time claim.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -215,17 +235,19 @@ entries and no `operation log unreadable` status.
 - The timing evidence is currently negative or mixed: simple checkout and
   co-change tasks were slower with `workspace-cli`, a single rollback run was
   faster, and the bytecode-off two-run rollback suites were slower. Tightening
-  prompts plus adding `related --include-content` and `--ensure-index` cut
-  avoidable workspace overhead substantially. On the larger invoice task,
-  `workspace_cli` reached elapsed-time parity while using far fewer commands and
-  preserving multi-file diff-scope correctness, but the paper should not claim a
-  statistically supported elapsed-time speedup from these pilots yet.
+  prompts plus adding `related --include-content`, `--ensure-index`, and
+  `patch --stdin` cut avoidable workspace overhead substantially. On the larger
+  invoice task, `workspace_cli` used far fewer commands, preserved multi-file
+  diff-scope correctness, and was faster on average in the latest four-run
+  pilot. Because the paired timing interval still crosses zero, the paper should
+  frame this as promising pilot evidence rather than a statistically supported
+  elapsed-time speedup.
 
 ## Next Required Step
 
 The next evaluation should use larger repository-like tasks where the audit log,
-related-file discovery, impact checks, rollback, and batched observations remove
-enough wasted search or recovery work to pay for the tool overhead. The suite
-runner should then be run across more repetitions and tasks, reporting pass
-rate, elapsed time, command counts, rollback usage, and final diff correctness
-with bootstrap intervals.
+related-file discovery, impact checks, rollback, stdin patching, and batched
+observations remove enough wasted search or recovery work to pay for the tool
+overhead. The suite runner should then be run across more repetitions and tasks,
+reporting pass rate, elapsed time, command counts, rollback usage, and final
+diff correctness with bootstrap intervals.

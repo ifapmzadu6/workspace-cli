@@ -1,7 +1,8 @@
 use serde_json::Value;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 fn workspace_bin() -> &'static str {
@@ -44,6 +45,37 @@ fn run_workspace_failure(cwd: &Path, args: &[&str]) -> String {
     );
 
     String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+fn run_workspace_with_stdin(cwd: &Path, args: &[&str], stdin: &str) -> Value {
+    let mut child = Command::new(workspace_bin())
+        .current_dir(cwd)
+        .args(args)
+        .env("WORKSPACE_RELATED_DISABLE", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("workspace command should start");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be piped")
+        .write_all(stdin.as_bytes())
+        .expect("stdin should be written");
+    let output = child
+        .wait_with_output()
+        .expect("workspace command should run");
+
+    assert!(
+        output.status.success(),
+        "workspace {:?} failed\nstdout:\n{}\nstderr:\n{}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    serde_json::from_slice(&output.stdout).expect("workspace output should be JSON")
 }
 
 fn run_workspace_with_related_bin(cwd: &Path, args: &[&str], related_bin: &Path) -> Value {
@@ -1201,6 +1233,52 @@ diff --git a/note.txt b/note.txt
             .as_array()
             .expect("diff files should be an array")
             .is_empty()
+    );
+}
+
+#[test]
+fn patch_can_apply_unified_diff_from_stdin() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+    let patch_content = "\
+diff --git a/note.txt b/note.txt
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-hello
++hello stdin
+";
+
+    let patch = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch_content);
+
+    assert_eq!(patch["kind"], "workspace_patch");
+    assert_eq!(patch["scope"], "<stdin>");
+    assert_eq!(patch["data"]["patch_file"], "<stdin>");
+    assert_eq!(patch["data"]["files_changed"][0], "note.txt");
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello stdin\n"
+    );
+    let transaction_id = patch["data"]["transaction_id"]
+        .as_str()
+        .expect("transaction id should be a string")
+        .to_string();
+    let stored_patch = patch["data"]["stored_patch"]
+        .as_str()
+        .expect("stored patch should be a string");
+    assert_eq!(
+        fs::read_to_string(root.join(stored_patch)).expect("stored patch should be readable"),
+        patch_content
+    );
+
+    let rollback = run_workspace(root, &["rollback", &transaction_id, "--json"]);
+    assert_eq!(rollback["kind"], "workspace_rollback");
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello\n"
     );
 }
 

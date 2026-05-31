@@ -459,10 +459,13 @@ Applies a patch as a transaction:
 
 ```sh
 workspace patch fix.diff
+git diff --no-index old.txt new.txt | workspace patch --stdin
 ```
 
 Patch-first mutation is easier to review, track, and roll back than direct file
 writes.
+Use `--stdin` when an agent already has a standard unified git diff and should
+avoid creating a temporary patch file just to apply a transaction.
 Large changed-file lists are bounded in patch and rollback observations. The
 total count remains available as `file_count`, with omitted files reported
 separately.

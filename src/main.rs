@@ -413,8 +413,11 @@ struct PatchArgs {
     /// Optional human-readable transaction description.
     #[arg(long)]
     description: Option<String>,
+    /// Read a standard unified git diff from stdin.
+    #[arg(long)]
+    stdin: bool,
     /// Patch file to apply with git apply.
-    patch_file: PathBuf,
+    patch_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -1531,7 +1534,7 @@ fn cmd_diff(workspace: &Workspace, args: DiffArgs) -> Result<()> {
 }
 
 fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
-    let patch = apply_patch_transaction(workspace, &args.patch_file)?;
+    let patch = observed_patch_transaction(workspace, &args)?;
     let observation = patch_transaction_observation(workspace, &patch);
     let log_summary = patch_log_summary(args.description, &observation);
 
@@ -1546,11 +1549,39 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
     )
 }
 
+fn observed_patch_transaction(
+    workspace: &Workspace,
+    args: &PatchArgs,
+) -> Result<AppliedPatchTransaction> {
+    match (args.stdin, args.patch_file.as_deref()) {
+        (true, None) => apply_stdin_patch_transaction(workspace),
+        (false, Some(patch_file)) => apply_patch_transaction(workspace, patch_file),
+        (true, Some(_)) => bail!("--stdin cannot be used with PATCH_FILE"),
+        (false, None) => bail!("workspace patch requires PATCH_FILE or --stdin"),
+    }
+}
+
 fn apply_patch_transaction(
     workspace: &Workspace,
     patch_file: &Path,
 ) -> Result<AppliedPatchTransaction> {
     let patch_path = workspace.resolve_existing_workspace_path(patch_file)?;
+    let patch_file = workspace.relative(&patch_path);
+    apply_patch_transaction_from_path(workspace, &patch_path, patch_file)
+}
+
+fn apply_stdin_patch_transaction(workspace: &Workspace) -> Result<AppliedPatchTransaction> {
+    let patch_path = read_stdin_patch_to_temp()?;
+    let result = apply_patch_transaction_from_path(workspace, &patch_path, "<stdin>".to_string());
+    let _ = fs::remove_file(&patch_path);
+    result
+}
+
+fn apply_patch_transaction_from_path(
+    workspace: &Workspace,
+    patch_path: &Path,
+    patch_file: String,
+) -> Result<AppliedPatchTransaction> {
     let files_changed = extract_patch_files_from_path(&patch_path)
         .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
     validate_patch_targets(&files_changed)?;
@@ -1559,14 +1590,14 @@ fn apply_patch_transaction(
 
     let transaction_id = new_id("tx");
     let stored_patch = store_transaction_patch_for_id(workspace, &transaction_id, &patch_path)?;
-    if let Err(error) = run_git_apply(workspace, &patch_path, []) {
+    if let Err(error) = run_git_apply(workspace, &stored_patch, []) {
         let _ = fs::remove_file(&stored_patch);
         return Err(error);
     }
 
     Ok(AppliedPatchTransaction {
         transaction_id,
-        patch_path,
+        patch_file,
         stored_patch,
         files_changed,
     })
@@ -1636,6 +1667,45 @@ fn copy_file_contents(source_file: fs::File, temp_file: fs::File, temp_path: &Pa
         .with_context(|| format!("failed to finish stored patch {}", temp_path.display()))?;
     file.sync_all()
         .with_context(|| format!("failed to sync stored patch {}", temp_path.display()))?;
+    Ok(bytes_copied)
+}
+
+fn read_stdin_patch_to_temp() -> Result<PathBuf> {
+    let path = std::env::temp_dir().join(format!("workspace-{}.patch", new_id("patch-stdin")));
+    let file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to create temporary stdin patch {}", path.display())
+            });
+        }
+    };
+
+    let result = copy_stdin_to_temp_patch(file, &path);
+    if result.is_err() {
+        let _ = fs::remove_file(&path);
+    }
+    result.map(|_| path)
+}
+
+fn copy_stdin_to_temp_patch(temp_file: fs::File, temp_path: &Path) -> Result<u64> {
+    let stdin = std::io::stdin();
+    let mut reader = stdin.lock();
+    let mut writer = BufWriter::new(temp_file);
+    let bytes_copied = std::io::copy(&mut reader, &mut writer)
+        .with_context(|| format!("failed to write stdin patch {}", temp_path.display()))?;
+    writer
+        .flush()
+        .with_context(|| format!("failed to flush stdin patch {}", temp_path.display()))?;
+    let file = writer
+        .into_inner()
+        .with_context(|| format!("failed to finish stdin patch {}", temp_path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync stdin patch {}", temp_path.display()))?;
     Ok(bytes_copied)
 }
 
@@ -1727,7 +1797,7 @@ struct ObservedChangedFiles {
 
 struct AppliedPatchTransaction {
     transaction_id: String,
-    patch_path: PathBuf,
+    patch_file: String,
     stored_patch: PathBuf,
     files_changed: Vec<String>,
 }
@@ -1745,7 +1815,7 @@ fn patch_transaction_observation(
     let data = patch_data(
         workspace,
         &patch.transaction_id,
-        &patch.patch_path,
+        &patch.patch_file,
         &patch.stored_patch,
         &patch.files_changed,
     );
@@ -1784,14 +1854,14 @@ fn observed_changed_files(files_changed: &[String]) -> ObservedChangedFiles {
 fn patch_data(
     workspace: &Workspace,
     transaction_id: &str,
-    patch_path: &Path,
+    patch_file: &str,
     stored_patch: &Path,
     files_changed: &[String],
 ) -> PatchData {
     let observed_files = observed_changed_files(files_changed);
     PatchData {
         transaction_id: transaction_id.to_string(),
-        patch_file: workspace.relative(patch_path),
+        patch_file: patch_file.to_string(),
         stored_patch: workspace.relative(stored_patch),
         file_count: observed_files.file_count,
         files_changed: observed_files.files,
@@ -8185,13 +8255,12 @@ rename to new name.txt
             root: temp.path().to_path_buf(),
             is_git_repo: true,
         };
-        let patch_path = temp.path().join("change.patch");
         let stored_patch = temp.path().join(TRANSACTION_DIR).join("tx-1.patch");
         let files = (0..(MAX_CHANGED_FILES + 1))
             .map(|index| format!("file_{index:03}.txt"))
             .collect::<Vec<_>>();
 
-        let data = patch_data(&workspace, "tx-1", &patch_path, &stored_patch, &files);
+        let data = patch_data(&workspace, "tx-1", "change.patch", &stored_patch, &files);
         assert_eq!(data.transaction_id, "tx-1");
         assert_eq!(data.patch_file, "change.patch");
         assert_eq!(data.stored_patch, ".workspace/transactions/tx-1.patch");
@@ -8216,13 +8285,12 @@ rename to new name.txt
             root: temp.path().to_path_buf(),
             is_git_repo: true,
         };
-        let patch_path = temp.path().join("change.patch");
         let stored_patch = temp.path().join(TRANSACTION_DIR).join("tx-1.patch");
         let files = (0..(MAX_CHANGED_FILES + 1))
             .map(|index| format!("file_{index:03}.txt"))
             .collect::<Vec<_>>();
 
-        let data = patch_data(&workspace, "tx-1", &patch_path, &stored_patch, &files);
+        let data = patch_data(&workspace, "tx-1", "change.patch", &stored_patch, &files);
         let observation = patch_observation(data, &files);
         assert_eq!(observation.kind, WORKSPACE_PATCH_KIND);
         assert_eq!(observation.scope, "change.patch");
@@ -8274,12 +8342,11 @@ rename to new name.txt
             root: temp.path().to_path_buf(),
             is_git_repo: false,
         };
-        let patch_path = temp.path().join("change.patch");
         let stored_patch = temp.path().join(TRANSACTION_DIR).join("tx-1.patch");
         let files = vec!["src/main.rs".to_string(), "README.md".to_string()];
         let patch = AppliedPatchTransaction {
             transaction_id: "tx-1".to_string(),
-            patch_path,
+            patch_file: "change.patch".to_string(),
             stored_patch: stored_patch.clone(),
             files_changed: files.clone(),
         };

@@ -421,6 +421,8 @@ if __name__ == "__main__":
         self.assertIn("related tests/test_invoice_pipeline.py", workspace_prompt)
         self.assertIn("--include-content", workspace_prompt)
         self.assertIn("data.included_content", workspace_prompt)
+        self.assertIn("patch --stdin --json", workspace_prompt)
+        self.assertIn("do not create or delete a temporary patch file", workspace_prompt)
         self.assertIn("impact --diff", workspace_prompt)
         self.assertIn("do not spend time running", workspace_prompt)
         self.assertIn("standard unified git diff", workspace_prompt)
