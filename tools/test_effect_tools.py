@@ -31,6 +31,7 @@ summarize_effect = load_tool("summarize_effect")
 check_effect_thresholds = load_tool("check_effect_thresholds")
 run_effect_artifacts = load_tool("run_effect_artifacts")
 extract_effect_summary = load_tool("extract_effect_summary")
+compare_effect_summaries = load_tool("compare_effect_summaries")
 verify_effect_artifacts = load_tool("verify_effect_artifacts")
 prepare_effect_holdouts = load_tool("prepare_effect_holdouts")
 
@@ -1216,6 +1217,100 @@ class EffectSummaryExtractionTests(unittest.TestCase):
             holdout["weight_sweep"][1]["delta_vs_direct"]["p_greater"],
             1.86265e-9,
         )
+
+
+class EffectSummaryComparisonTests(unittest.TestCase):
+    def summary_fixture(
+        self,
+        *,
+        hybrid_ap: float,
+        direct_holm: float,
+        threshold_statuses: list[str],
+    ) -> dict:
+        return {
+            "repo_temporal_holdout": {
+                "case_count": 53,
+                "target_count": 216,
+                "methods": {
+                    "workspace_related_hybrid": {
+                        "average_precision_at_5": {"mean": hybrid_ap},
+                    },
+                    "workspace_related_direct": {
+                        "average_precision_at_5": {"mean": 0.626},
+                    },
+                    "workspace_related_pagerank": {
+                        "average_precision_at_5": {"mean": 0.577},
+                    },
+                },
+                "predictable_only": {
+                    "methods": {
+                        "workspace_related_hybrid": {
+                            "average_precision_at_5": {"mean": hybrid_ap + 0.04},
+                        },
+                    },
+                },
+                "oracle_normalized": {
+                    "workspace_related_hybrid": {
+                        "oracle_normalized_average_precision_at_5": 0.941383,
+                    },
+                },
+                "key_deltas": {
+                    "workspace_related_hybrid_minus_workspace_related_direct": {
+                        "mean_delta": hybrid_ap - 0.626,
+                        "p_greater_holm": direct_holm,
+                    },
+                    "workspace_related_hybrid_minus_workspace_related_pagerank": {
+                        "p_greater_holm": 0.000000000240107,
+                    },
+                },
+                "residual_gap_clusters": [
+                    {"oracle_gap_average_precision_at_5": 0.87},
+                ],
+            },
+            "threshold_margins": [
+                {"label": f"threshold-{index}", "status": status}
+                for index, status in enumerate(threshold_statuses)
+            ],
+        }
+
+    def test_compare_summaries_reports_metric_and_threshold_deltas(self) -> None:
+        old = self.summary_fixture(
+            hybrid_ap=0.803,
+            direct_holm=0.00000000372529,
+            threshold_statuses=["pass", "pass"],
+        )
+        new = self.summary_fixture(
+            hybrid_ap=0.768,
+            direct_holm=0.000583861,
+            threshold_statuses=["pass", "fail", "fail"],
+        )
+
+        rows = compare_effect_summaries.compare_summaries(old, new)
+        by_metric = {row["metric"]: row for row in rows}
+
+        self.assertAlmostEqual(by_metric["hybrid AP@5"]["delta"], -0.035)
+        self.assertAlmostEqual(
+            by_metric["hybrid-direct Holm p"]["new"],
+            0.000583861,
+        )
+        self.assertEqual(by_metric["threshold failures"]["old"], 0)
+        self.assertEqual(by_metric["threshold failures"]["new"], 2)
+        self.assertEqual(by_metric["threshold failures"]["delta"], 2)
+
+    def test_compare_summaries_renders_markdown_table(self) -> None:
+        rows = [
+            {
+                "metric": "hybrid AP@5",
+                "old": 0.803,
+                "new": 0.768,
+                "delta": -0.035,
+            }
+        ]
+
+        table = compare_effect_summaries.render_markdown(rows)
+
+        self.assertIn("| metric | old | new | delta |", table)
+        self.assertIn("| hybrid AP@5 | 0.803 | 0.768 | -0.035 |", table)
 
 
 class EffectThresholdTests(unittest.TestCase):

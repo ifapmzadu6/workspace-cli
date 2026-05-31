@@ -32,6 +32,15 @@ summary, and run manifest in one artifact directory:
 python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
 ```
 
+To compare a candidate artifact against a previous result summary while tuning
+ranking changes:
+
+```sh
+python3 tools/compare_effect_summaries.py \
+  /path/to/baseline/result_summary.json \
+  /path/to/candidate/result_summary.json
+```
+
 The `Paper Effect Artifacts` GitHub workflow runs the clean-machine path on
 demand and weekly. It prepares the public holdout remotes, generates
 `target/effect-paper` with `--require-clean-workspace`, verifies the artifact
