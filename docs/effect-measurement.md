@@ -59,10 +59,11 @@ renders the same metadata before the metric tables and residual gap clusters,
 while
 `result_summary.json` extracts the headline metrics, full weight sweep, best
 weight result, per-repository holdout results, oracle-normalized AP gaps, and
-residual gap clusters, including predictable-only clusters retargeted from
-case-level ranking lists, into a compact machine-readable form. Paper artifact
-directories also include copies of the local holdout manifest and source
-holdout manifest when available. The run manifest records the exact
+residual gap clusters with missing targets split into parent-present predictable
+targets and parent-absent new targets, including predictable-only clusters
+retargeted from case-level ranking lists, into a compact machine-readable form.
+Paper artifact directories also include copies of the local holdout manifest and
+source holdout manifest when available. The run manifest records the exact
 generation commands,
 verifier command, and SHA-256 checksums for each generated artifact and copied
 manifest. The verifier checks required files, JSON parseability, a passing
@@ -683,9 +684,9 @@ CI-workflow manifest prior is therefore intentionally one-way
 `package.json -> workflow` boost fixes one remaining case but degrades ordinary
 package release cases where lockfiles, changelogs, source, and tests are the
 stronger historical neighbors. `effect.md` and `result_summary.json` now emit
-the same repo/commit residual gap clusters, plus the predictable-only
-retargeted clusters, so this diagnosis is reproducible directly from the paper
-artifact.
+the same repo/commit residual gap clusters with missing predictable/new target
+splits, plus the predictable-only retargeted clusters, so this diagnosis is
+reproducible directly from the paper artifact.
 
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and

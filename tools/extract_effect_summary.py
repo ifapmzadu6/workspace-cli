@@ -276,6 +276,22 @@ def residual_gap_clusters(
                 predictable_target_count = len(predictable_expected)
                 unpredictable_target_count = len(unpredictable_expected)
             hit_set = set(hits)
+            missing_expected = [path for path in expected if path not in hit_set]
+            if expected_key == "predictable_expected":
+                missing_predictable_expected = missing_expected
+                missing_unpredictable_expected = []
+            elif expected_key == "unpredictable_expected":
+                missing_predictable_expected = []
+                missing_unpredictable_expected = missing_expected
+            else:
+                predictable_expected_set = set(predictable_expected)
+                unpredictable_expected_set = set(unpredictable_expected)
+                missing_predictable_expected = [
+                    path for path in missing_expected if path in predictable_expected_set
+                ]
+                missing_unpredictable_expected = [
+                    path for path in missing_expected if path in unpredictable_expected_set
+                ]
             seed = case.get("seed")
             if isinstance(seed, str):
                 cluster["_seed_set"].add(seed)
@@ -293,9 +309,9 @@ def residual_gap_clusters(
                     f"method_{metric}": rounded(method_ap),
                     f"oracle_{metric}": rounded(oracle_ap),
                     "expected_count": len(expected),
-                    "missing_expected": [
-                        path for path in expected if path not in hit_set
-                    ],
+                    "missing_expected": missing_expected,
+                    "missing_predictable_expected": missing_predictable_expected,
+                    "missing_unpredictable_expected": missing_unpredictable_expected,
                     "method_hits": hits,
                     "method_top": method_top,
                 },

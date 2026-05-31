@@ -615,8 +615,13 @@ class SummaryFormattingTests(unittest.TestCase):
                             "repo": "/tmp/example",
                             "heldout_commit": "abcdef123456",
                             "seed": "package.json",
-                            "expected": ["README.md", ".github/workflows/ci.yml"],
+                            "expected": [
+                                "README.md",
+                                ".github/workflows/ci.yml",
+                                "tests/smoke.mjs",
+                            ],
                             "predictable_expected": [".github/workflows/ci.yml"],
+                            "unpredictable_expected": ["tests/smoke.mjs"],
                             "methods": {
                                 "workspace_related_hybrid": {
                                     "average_precision_at_5": 0.25,
@@ -658,8 +663,11 @@ class SummaryFormattingTests(unittest.TestCase):
             "Holdout",
         )
         self.assertIn("Holdout Residual Gap Clusters @5", table)
-        self.assertIn("| example | abcdef1234 | 1 | 1 | 2 | 0.750 |", table)
+        self.assertIn("| example | abcdef1234 | 1 | 1 | 3 | 0.750 |", table)
+        self.assertIn("missing predictable", table)
+        self.assertIn("missing new", table)
         self.assertIn(".github/workflows/ci.yml", table)
+        self.assertIn("tests/smoke.mjs", table)
 
         predictable_table = summarize_effect.render_residual_gap_cluster_table(
             report,
@@ -1032,6 +1040,24 @@ class EffectSummaryExtractionTests(unittest.TestCase):
         self.assertEqual(
             residual_clusters[0]["top_residual_cases"][0]["missing_expected"],
             ["src/main.rs"],
+        )
+        self.assertEqual(
+            residual_clusters[0]["top_residual_cases"][0][
+                "missing_predictable_expected"
+            ],
+            ["src/main.rs"],
+        )
+        self.assertEqual(
+            residual_clusters[0]["top_residual_cases"][0][
+                "missing_unpredictable_expected"
+            ],
+            [],
+        )
+        self.assertEqual(
+            residual_clusters[1]["top_residual_cases"][0][
+                "missing_unpredictable_expected"
+            ],
+            ["tests/cli.rs"],
         )
         predictable_clusters = holdout["predictable_only"]["residual_gap_clusters"]
         self.assertEqual(len(predictable_clusters), 1)
