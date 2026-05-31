@@ -334,7 +334,7 @@ the repository. The first single pilot solved the task in both conditions:
 `shell_only` took 59.346 seconds and 13 commands, while `workspace_cli` took
 50.810 seconds and 5 commands with the exact six-file diff.
 
-The repeated four-run subscription suite gave a more mixed timing result but a
+The first repeated four-run subscription suite gave a mixed timing result but a
 strong safety and command-count result:
 
 | condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
@@ -343,12 +343,32 @@ strong safety and command-count result:
 | `workspace_cli` | 4 | 1.000 | 1.000 | 81.844 (66.233, 97.574) | 5.500 | 5.500 | 5.000 | 0.000 |
 
 The paired timing delta was `+13.075s` with interval `(-10.508, 34.911)`, so
-the larger task does not support a speedup claim yet. However, `workspace_cli`
-used 7.250 fewer commands on average with interval `(-10.006, -4.250)` and
-kept the final diff exactly scoped in every run. `shell_only` passed every run
-but edited the support-policy decoy in two of four runs. This is evidence that
-the related-file workflow can reduce over-editing on larger tasks even when
-elapsed time remains dominated by Codex reasoning variance.
+this first larger-task suite did not support a speedup claim. However,
+`workspace_cli` used 7.250 fewer commands on average with interval
+`(-10.006, -4.250)` and kept the final diff exactly scoped in every run.
+`shell_only` passed every run but edited the support-policy decoy in two of four
+runs. This is evidence that the related-file workflow can reduce over-editing on
+larger tasks even when elapsed time remains dominated by Codex reasoning
+variance.
+
+The subscription protocol was then shortened to ask Codex to edit only the six
+target files, avoid support/trial decoys, and finish with `workspace diff --json`
+instead of an impact analysis. The follow-up four-run suite at commit
+`968819fb0f2dfe137b2beaf9717fe37306cc37e2` improved both timing and command
+count while preserving the safety result:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 4 | 1.000 | 0.750 | 71.058 (63.207, 82.372) | 15.500 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 4 | 1.000 | 1.000 | 62.432 (48.130, 76.735) | 4.500 | 4.500 | 4.250 | 0.000 |
+
+The shortened-protocol paired timing delta was `-8.626s` with interval
+`(-19.542, 12.027)`. `workspace_cli` was faster in three of four pairs, but the
+interval still crosses zero, so this remains pilot evidence rather than a
+standalone larger-task speedup claim. The command-count delta strengthened to
+`-11.000` commands with interval `(-12.500, -9.500)`, and `workspace_cli` again
+kept the exact six-file diff in every run while `shell_only` over-edited the
+support-policy decoy in one run.
 
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
@@ -374,17 +394,21 @@ entries and no `operation log unreadable` status.
   zero. The latest three-task suite shows a same-commit twelve-pair aggregate
   timing improvement with a non-zero-crossing interval and substantially fewer
   commands, and the merged twelve-pair evidence artifact independently points in
-  the same direction. The new subscription rollout task is larger and shows
-  perfect workspace diff-scope correctness versus shell over-editing, but not an
-  elapsed-time win. The paper can now make controlled-task speedup claims for
+  the same direction. The subscription rollout task is larger; after protocol
+  shortening it shows lower mean elapsed time and three of four paired wins, but
+  its timing interval still crosses zero. It does show perfect workspace
+  diff-scope correctness versus shell over-editing and a large command-count
+  reduction. The paper can now make controlled-task speedup claims for
   transactional recovery, invoice-style multi-file synchronization, and
-  small-suite aggregate behavior, while separately presenting larger-task
-  safety evidence and treating broader generalization as early pilot evidence.
+  small-suite aggregate behavior, while separately presenting larger-task safety
+  and command-count evidence and treating broader generalization as early pilot
+  evidence.
 
 ## Next Required Step
 
-The next evaluation should optimize the subscription rollout protocol so Codex
-does not spend extra reasoning turns drafting alternate large patches, then run
-a cross-task suite that includes the subscription task. The report should keep
-separating single-task speed claims, larger-task safety claims, merged artifact
-claims, and same-commit cross-task aggregate claims.
+The next evaluation should run a same-commit cross-task suite that includes the
+shortened subscription rollout task, then increase repetitions or add another
+larger task to test whether the larger-task timing interval can move away from
+zero. The report should keep separating single-task speed claims, larger-task
+safety claims, merged artifact claims, and same-commit cross-task aggregate
+claims.
