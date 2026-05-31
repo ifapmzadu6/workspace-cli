@@ -663,15 +663,17 @@ release-workflow files as strongly related even though that held-out commit
 does not edit them. The next largest cluster is an `llm-json-extract`
 dependency bump (`6a2977eb724e`), where `tsconfig.json` is the remaining third
 expected label but historical package/changelog evidence dominates the top
-five. One `related-cli` source split has zero history-oracle AP because every
-expected source sibling is new at the parent revision. The implemented
+five. One `related-cli` source split (`97835ef97e8d`) is capped below perfect
+oracle AP because `src/model.rs` is new at the parent revision while the older
+source siblings have broad, tied historical evidence. The implemented
 CI-workflow manifest prior is therefore intentionally one-way
 (`workflow -> manifest`) and direct-edge gated: a symmetric
 `package.json -> workflow` boost fixes one remaining case but degrades ordinary
 package release cases where lockfiles, changelogs, source, and tests are the
-stronger historical neighbors. `result_summary.json` now emits the same
-repo/commit residual gap clusters, plus the predictable-only retargeted
-clusters, so this diagnosis is reproducible directly from the paper artifact.
+stronger historical neighbors. `effect.md` and `result_summary.json` now emit
+the same repo/commit residual gap clusters, plus the predictable-only
+retargeted clusters, so this diagnosis is reproducible directly from the paper
+artifact.
 
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and
