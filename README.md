@@ -229,8 +229,10 @@ that were not directly changed with the seed file, but are connected through
 related history. Related PageRank applies a small path prior for close file
 siblings. `hybrid` combines that PageRank reachability with a direct co-change
 boost, preserving indirect discovery while improving temporal holdout ranking
-quality. Use `--hybrid-direct-weight` with values from `0.0` to `1.0` for
-ablation runs; the default is `0.9` for `related`.
+quality, and down-weights low-signal repository metadata such as `.gitignore`
+when it competes with source or test neighbors. Use `--hybrid-direct-weight`
+with values from `0.0` to `1.0` for ablation runs; the default is `0.9` for
+`related`.
 
 `workspace impact --diff --by cochange` uses the current Git diff as seed files
 and returns nearby files from history. This helps decide what to read next and

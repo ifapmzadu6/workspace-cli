@@ -96,6 +96,7 @@ const RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER: f64 = 3.5;
 const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.4;
+const RELATED_HYBRID_LOW_SIGNAL_METADATA_SCORE_MULTIPLIER: f64 = 0.3;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER: f64 = 6.0;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
 const RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER: f64 = 30.0;
@@ -4700,6 +4701,9 @@ fn related_hybrid_path_score_multiplier(
     if direct_edge_weight > 0.0 && shares_parent_and_name_token(target, candidate) {
         multiplier *= RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER;
     }
+    if is_low_signal_repo_metadata_file(candidate) {
+        multiplier *= RELATED_HYBRID_LOW_SIGNAL_METADATA_SCORE_MULTIPLIER;
+    }
     multiplier
 }
 
@@ -4901,6 +4905,10 @@ fn is_script_like_file(path: &str) -> bool {
         path_extension(path),
         Some("sh" | "bash" | "zsh" | "fish" | "py" | "js" | "mjs" | "cjs" | "ts")
     )
+}
+
+fn is_low_signal_repo_metadata_file(path: &str) -> bool {
+    matches!(path, ".gitignore")
 }
 
 fn path_name_tokens(path: &str) -> BTreeSet<String> {
@@ -11975,6 +11983,16 @@ src/b.rs
             related_hybrid_path_score_multiplier("scripts/compare.sh", "docs/compare.md", 1.0, 0.1),
             1.0
         );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("tools/measure_effect.py", ".gitignore", 1.0, 1.0),
+            RELATED_HYBRID_LOW_SIGNAL_METADATA_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("tools/measure_effect.py", "README.md", 1.0, 1.0),
+            related_path_score_multiplier("tools/measure_effect.py", "README.md")
+        );
+        assert!(is_low_signal_repo_metadata_file(".gitignore"));
+        assert!(!is_low_signal_repo_metadata_file(".gitattributes"));
         assert!(is_manifest_lock_pair("package.json", "package-lock.json"));
         assert!(!is_same_source_sibling("main.rs", "lib.rs"));
         assert!(!is_source_code_file("README.md"));
