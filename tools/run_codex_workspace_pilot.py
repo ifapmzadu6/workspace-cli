@@ -390,6 +390,181 @@ def create_rollback_fixture_repo(repo: Path, workspace_binary: Path) -> None:
     commit_all(repo, "Add late fee cap tests and proposed patch")
 
 
+def write_invoice_tax_files(
+    repo: Path,
+    *,
+    vat_bps: int,
+    test_expected_bps: int,
+) -> None:
+    write_text(
+        repo / "src" / "invoice.py",
+        """\
+import json
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+TAX_POLICY_PATH = ROOT / "config" / "tax_regions.json"
+LABELS_PATH = ROOT / "config" / "invoice_labels.json"
+
+
+def load_tax_policy():
+    return json.loads(TAX_POLICY_PATH.read_text(encoding="utf-8"))
+
+
+def load_invoice_labels():
+    return json.loads(LABELS_PATH.read_text(encoding="utf-8"))
+
+
+def digital_vat_cents(amount_cents):
+    rate_bps = load_tax_policy()["eu"]["digital_vat_bps"]
+    return round(amount_cents * rate_bps / 10_000)
+
+
+def digital_vat_label():
+    return load_invoice_labels()["tax_lines"]["eu_digital_vat"]
+""",
+    )
+    write_text(repo / "src" / "__init__.py", "")
+    write_text(
+        repo / "config" / "tax_regions.json",
+        json.dumps(
+            {
+                "eu": {
+                    "digital_vat_bps": vat_bps,
+                    "reverse_charge_enabled": False,
+                },
+                "us": {"digital_vat_bps": 0},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    vat_percent = vat_bps / 100
+    write_text(
+        repo / "config" / "invoice_labels.json",
+        json.dumps(
+            {"tax_lines": {"eu_digital_vat": f"EU digital VAT {vat_percent:.0f}%"}},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    expected_percent = test_expected_bps / 100
+    write_text(
+        repo / "docs" / "tax_policy.md",
+        f"""\
+# Tax Policy
+
+EU digital invoices use a {vat_percent:.0f}% VAT rate.
+""",
+    )
+    write_text(
+        repo / "docs" / "invoice_templates.md",
+        f"""\
+# Invoice Templates
+
+The EU digital VAT line is rendered as "EU digital VAT {vat_percent:.0f}%".
+""",
+    )
+    write_text(
+        repo / "tests" / "test_invoice_pipeline.py",
+        f"""\
+import json
+import unittest
+from pathlib import Path
+
+from src.invoice import digital_vat_cents, digital_vat_label
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class InvoicePipelineTests(unittest.TestCase):
+    def test_eu_digital_vat_rate_matches_current_policy(self):
+        policy = json.loads((ROOT / "config" / "tax_regions.json").read_text())
+        self.assertEqual(policy["eu"]["digital_vat_bps"], {test_expected_bps})
+        self.assertEqual(digital_vat_cents(10_000), {test_expected_bps})
+
+    def test_invoice_label_matches_current_policy(self):
+        labels = json.loads((ROOT / "config" / "invoice_labels.json").read_text())
+        self.assertEqual(labels["tax_lines"]["eu_digital_vat"], "EU digital VAT {expected_percent:.0f}%")
+        self.assertEqual(digital_vat_label(), "EU digital VAT {expected_percent:.0f}%")
+
+    def test_docs_match_current_policy(self):
+        tax_docs = (ROOT / "docs" / "tax_policy.md").read_text()
+        template_docs = (ROOT / "docs" / "invoice_templates.md").read_text()
+        self.assertIn("{expected_percent:.0f}% VAT", tax_docs)
+        self.assertIn("EU digital VAT {expected_percent:.0f}%", template_docs)
+
+
+if __name__ == "__main__":
+    unittest.main()
+""",
+    )
+    write_text(
+        repo / "README.md",
+        f"""\
+# Invoice Fixture
+
+Run tests with:
+
+```sh
+{TEST_COMMAND}
+```
+""",
+    )
+
+
+def write_invoice_decoy_files(repo: Path) -> None:
+    write_text(
+        repo / "src" / "shipping.py",
+        """\
+def shipping_zone(country):
+    return "domestic" if country == "US" else "international"
+""",
+    )
+    write_text(
+        repo / "src" / "promotions.py",
+        """\
+def promotion_label(code):
+    return code.upper()
+""",
+    )
+    write_text(
+        repo / "config" / "shipping_zones.json",
+        json.dumps({"US": "domestic", "DE": "international"}, indent=2) + "\n",
+    )
+    write_text(
+        repo / "config" / "promotion_rules.json",
+        json.dumps({"welcome": {"percent_off": 10}}, indent=2) + "\n",
+    )
+    write_text(
+        repo / "docs" / "shipping_policy.md",
+        "# Shipping Policy\n\nInternational shipping uses zone-based pricing.\n",
+    )
+    write_text(
+        repo / "docs" / "promotion_policy.md",
+        "# Promotion Policy\n\nPromotion labels are uppercase codes.\n",
+    )
+
+
+def create_invoice_tax_fixture_repo(repo: Path, workspace_binary: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    install_workspace_binary(repo, workspace_binary)
+    init_repo(repo)
+    write_invoice_tax_files(repo, vat_bps=1_900, test_expected_bps=1_900)
+    write_invoice_decoy_files(repo)
+    commit_all(repo, "Initial invoice tax policy")
+    write_invoice_tax_files(repo, vat_bps=2_100, test_expected_bps=2_100)
+    write_invoice_decoy_files(repo)
+    commit_all(repo, "Raise EU digital VAT to 21 percent")
+    write_invoice_tax_files(repo, vat_bps=2_100, test_expected_bps=2_200)
+    write_invoice_decoy_files(repo)
+    commit_all(repo, "Add tests for 22 percent EU digital VAT")
+
+
 def create_fixture_repo(repo: Path, workspace_binary: Path) -> None:
     create_checkout_fixture_repo(repo, workspace_binary)
 
@@ -414,6 +589,12 @@ def task_specs() -> dict[str, TaskSpec]:
         "patch before implementing the correct production and documentation "
         f"fix. Run `{TEST_COMMAND}`, leave the working tree with the correct "
         "fix applied, and do not edit tests."
+    )
+    invoice_tax_prompt = (
+        "The repository has failing invoice pipeline tests. EU digital VAT has "
+        "changed to 22%. Synchronize the production tax configuration, invoice "
+        f"label configuration, and documentation, run `{TEST_COMMAND}`, and "
+        "leave the working tree with the fix applied. Do not edit tests."
     )
     return {
         "discounted_tax_bug": TaskSpec(
@@ -477,6 +658,39 @@ def task_specs() -> dict[str, TaskSpec]:
             ),
             create_repo=create_rollback_fixture_repo,
             expected_changed_files=("docs/billing.md", "src/billing.py"),
+        ),
+        "invoice_tax_sync": TaskSpec(
+            name="invoice_tax_sync",
+            prompt=invoice_tax_prompt,
+            workspace_extra=(
+                "Use `./bin/workspace` for workspace observation and verification. "
+                "The command syntax below is complete; do not spend time running "
+                "`workspace --help`, command-specific `--help`, or inspecting "
+                "`.workspace` metadata. Start with "
+                "`./bin/workspace status --json`, build the co-change index with "
+                "`./bin/workspace index cochange --json`, and use "
+                "`./bin/workspace related tests/test_invoice_pipeline.py --by "
+                "cochange --use-index --rank hybrid --json` to find the policy, "
+                "label, and documentation files that usually change with this "
+                "test. Read only the relevant returned files, apply the fix with "
+                "`./bin/workspace patch`. `workspace patch` accepts a file path "
+                "to a standard unified git diff only; do not pipe a patch to "
+                "stdin and do not use Codex apply_patch format. Create a normal "
+                "git diff patch file in the repository, run "
+                "`./bin/workspace patch <patch-file> --json`, then delete the "
+                "temporary patch file after it applies. Run the test command "
+                f"exactly as `./bin/workspace run \"{TEST_COMMAND}\" --json`; "
+                "do not use a `--` separator for `workspace run`. Then finish with "
+                "`./bin/workspace impact --diff --by cochange --use-index --rank "
+                "hybrid --json` and `./bin/workspace diff --json`."
+            ),
+            create_repo=create_invoice_tax_fixture_repo,
+            expected_changed_files=(
+                "config/invoice_labels.json",
+                "config/tax_regions.json",
+                "docs/invoice_templates.md",
+                "docs/tax_policy.md",
+            ),
         ),
     }
 

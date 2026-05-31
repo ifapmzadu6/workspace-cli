@@ -30,6 +30,10 @@ python3 tools/run_codex_workspace_suite.py \
   --tasks rollback_recovery \
   --repetitions 2 \
   --output-dir target/codex-workspace-suite-rollback
+python3 tools/run_codex_workspace_suite.py \
+  --tasks invoice_tax_sync \
+  --repetitions 2 \
+  --output-dir target/codex-workspace-suite-invoice-tax
 ```
 
 The pilot writes `summary.json`, `summary.md`, raw Codex JSONL, stderr logs,
@@ -126,6 +130,35 @@ seconds and mean command count from 13.000 to 8.000, while preserving pass rate,
 diff-scope correctness, and rollback usage. The paired timing delta was still
 positive at `+20.267s`, so the result is an overhead reduction, not a speedup.
 
+The first larger multi-file synchronization task, `invoice_tax_sync`, requires
+Codex to update tax configuration, invoice-label configuration, and two
+documentation files after an EU digital VAT policy change. The fixture includes
+shipping and promotion decoys, and its history co-changes
+`tests/test_invoice_pipeline.py` with the four target files. The workspace run
+uses `workspace index cochange`, `workspace related
+tests/test_invoice_pipeline.py --by cochange --use-index --rank hybrid`,
+`workspace patch`, `workspace run`, `workspace impact --diff`, and
+`workspace diff`.
+
+An initial single run solved the task in both conditions but showed avoidable
+workspace overhead: `workspace_cli` took 122.310 seconds and 15 commands versus
+66.634 seconds and 11 commands for `shell_only`. Tightening the workspace prompt
+to state that `workspace patch` requires a standard unified git diff file, and
+that `workspace run` should use the quoted-command form rather than a `--`
+separator, reduced the single-run workspace result to 78.729 seconds and 12
+commands. The final two-run invoice suite still favored `shell_only` on time:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 2 | 1.000 | 1.000 | 49.153 (48.234, 50.071) | 10.500 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 2 | 1.000 | 1.000 | 75.674 (72.056, 79.293) | 12.000 | 11.000 | 11.000 | 0.000 |
+
+The paired timing delta was `workspace_cli - shell_only = +26.522s` with a
+bootstrap interval of `(21.985, 31.059)`. This task is useful evidence that
+co-change discovery can steer Codex to the correct multi-file scope with perfect
+diff-scope correctness in the observed runs, but it still does not show an
+elapsed-time win.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -143,8 +176,9 @@ entries and no `operation log unreadable` status.
 - The timing evidence is currently negative or mixed: simple checkout and
   co-change tasks were slower with `workspace-cli`, a single rollback run was
   faster, and the bytecode-off two-run rollback suites were slower. Tightening
-  the workspace prompt cut avoidable workspace overhead substantially, but the
-  paper should not claim speedups from these pilots.
+  the workspace prompt cut avoidable workspace overhead substantially, and the
+  larger invoice task confirmed multi-file scope correctness, but the paper
+  should not claim speedups from these pilots.
 
 ## Next Required Step
 

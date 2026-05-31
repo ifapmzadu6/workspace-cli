@@ -174,6 +174,62 @@ class CodexWorkspacePilotTests(unittest.TestCase):
                 {"patch": 1, "rollback": 1},
             )
 
+    def test_invoice_tax_fixture_exposes_related_policy_label_and_docs(self) -> None:
+        workspace_binary = ROOT / "target" / "debug" / "workspace"
+        if not workspace_binary.is_file():
+            self.skipTest("workspace binary has not been built")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo = Path(tmp_dir) / "fixture"
+            run_codex_workspace_pilot.create_invoice_tax_fixture_repo(
+                repo,
+                workspace_binary,
+            )
+
+            test_result = subprocess.run(
+                ["sh", "-c", run_codex_workspace_pilot.TEST_COMMAND],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            index_result = subprocess.run(
+                ["./bin/workspace", "index", "cochange", "--json"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            related_result = subprocess.run(
+                [
+                    "./bin/workspace",
+                    "related",
+                    "tests/test_invoice_pipeline.py",
+                    "--by",
+                    "cochange",
+                    "--use-index",
+                    "--rank",
+                    "hybrid",
+                    "--json",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(test_result.returncode, 0)
+            self.assertIn("2100 != 2200", test_result.stderr)
+            self.assertEqual(index_result.returncode, 0, index_result.stderr)
+            self.assertEqual(related_result.returncode, 0, related_result.stderr)
+            for path in [
+                "config/tax_regions.json",
+                "config/invoice_labels.json",
+                "docs/tax_policy.md",
+                "docs/invoice_templates.md",
+            ]:
+                self.assertIn(path, related_result.stdout)
+
     def test_command_like_values_extracts_codex_command_events(self) -> None:
         events = [
             {
@@ -345,6 +401,20 @@ if __name__ == "__main__":
         self.assertIn("rollback <transaction_id>", workspace_prompt)
         self.assertIn("do not spend time running", workspace_prompt)
         self.assertIn("keeps the daily rate at 150 cents", workspace_prompt)
+
+    def test_invoice_tax_prompt_requests_cochange_related_and_impact(self) -> None:
+        task = run_codex_workspace_pilot.task_specs()["invoice_tax_sync"]
+        prompts = run_codex_workspace_pilot.condition_prompts(task)
+        workspace_prompt = next(
+            prompt.prompt for prompt in prompts if prompt.name == "workspace_cli"
+        )
+
+        self.assertIn("index cochange", workspace_prompt)
+        self.assertIn("related tests/test_invoice_pipeline.py", workspace_prompt)
+        self.assertIn("impact --diff", workspace_prompt)
+        self.assertIn("do not spend time running", workspace_prompt)
+        self.assertIn("standard unified git diff", workspace_prompt)
+        self.assertIn("do not use a `--` separator", workspace_prompt)
 
 
 if __name__ == "__main__":
