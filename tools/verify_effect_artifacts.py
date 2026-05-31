@@ -199,6 +199,53 @@ def verify_result_summary_schema(
         )
 
 
+def verify_residual_gap_clusters(
+    result_summary: dict[str, Any],
+    failures: list[str],
+) -> None:
+    holdout = result_summary.get("repo_temporal_holdout")
+    if not isinstance(holdout, dict):
+        return
+    verify_holdout_residual_gap_clusters(
+        holdout,
+        "repo_temporal_holdout",
+        failures,
+    )
+    predictable = holdout.get("predictable_only")
+    if isinstance(predictable, dict):
+        verify_holdout_residual_gap_clusters(
+            predictable,
+            "repo_temporal_holdout.predictable_only",
+            failures,
+        )
+
+
+def verify_holdout_residual_gap_clusters(
+    holdout: dict[str, Any],
+    label: str,
+    failures: list[str],
+) -> None:
+    k = holdout.get("k", 5)
+    metric = f"oracle_gap_average_precision_at_{k}"
+    hybrid = (
+        holdout.get("oracle_normalized", {})
+        .get("workspace_related_hybrid", {})
+        if isinstance(holdout.get("oracle_normalized"), dict)
+        else {}
+    )
+    if not isinstance(hybrid, dict):
+        return
+    gap = hybrid.get(metric)
+    if gap is None or float(gap) <= 0.0:
+        return
+    clusters = holdout.get("residual_gap_clusters")
+    if not isinstance(clusters, list) or not clusters:
+        failures.append(
+            f"result_summary.json {label} missing residual_gap_clusters "
+            f"despite positive {metric}"
+        )
+
+
 def verify_result_summary_matches_report(
     effect_report: dict[str, Any],
     result_summary: dict[str, Any],
@@ -256,6 +303,7 @@ def verify_artifact_directory(artifact_dir: Path) -> list[str]:
     if "measurements" not in effect_report:
         failures.append("effect.json missing measurements")
     verify_result_summary_schema(result_summary, failures)
+    verify_residual_gap_clusters(result_summary, failures)
     verify_result_summary_matches_report(effect_report, result_summary, failures)
     verify_manifest_shape(manifest, failures)
     verify_checksums(artifact_dir, manifest, failures)

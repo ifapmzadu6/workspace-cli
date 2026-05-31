@@ -1654,6 +1654,65 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures,
         )
 
+    def test_artifact_verifier_rejects_missing_residual_gap_clusters(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            summary = {
+                "schema_version": 1,
+                "repo_temporal_holdout": {
+                    "k": 5,
+                    "oracle_normalized": {
+                        "workspace_related_hybrid": {
+                            "oracle_gap_average_precision_at_5": 0.123,
+                        },
+                    },
+                    "predictable_only": {
+                        "k": 5,
+                        "oracle_normalized": {
+                            "workspace_related_hybrid": {
+                                "oracle_gap_average_precision_at_5": 0.456,
+                            },
+                        },
+                    },
+                },
+            }
+            (output_dir / "result_summary.json").write_text(
+                json.dumps(summary) + "\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["result_summary"] = (
+                verify_effect_artifacts.file_sha256(
+                    output_dir / "result_summary.json"
+                )
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+            )
+
+        self.assertTrue(
+            any(
+                "repo_temporal_holdout missing residual_gap_clusters" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "repo_temporal_holdout.predictable_only missing residual_gap_clusters"
+                in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
     def test_artifact_verifier_rejects_recomputed_threshold_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "artifacts"
