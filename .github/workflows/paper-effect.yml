@@ -7,7 +7,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   contents: read
@@ -45,7 +44,7 @@ jobs:
           python3 tools/verify_effect_artifacts.py target/effect-paper
 
       - name: Upload paper artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: effect-paper-artifacts
           path: target/effect-paper

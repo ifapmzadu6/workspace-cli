@@ -35,6 +35,17 @@ verify_effect_artifacts = load_tool("verify_effect_artifacts")
 prepare_effect_holdouts = load_tool("prepare_effect_holdouts")
 
 
+class WorkflowConfigurationTests(unittest.TestCase):
+    def test_paper_workflow_uses_node24_artifact_upload(self) -> None:
+        workflow = (
+            TOOLS_DIR.parent / ".github" / "workflows" / "paper-effect.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("actions/upload-artifact@v7", workflow)
+        self.assertNotIn("actions/upload-artifact@v5", workflow)
+        self.assertNotIn("FORCE_JAVASCRIPT_ACTIONS_TO_NODE24", workflow)
+
+
 class ExactSignFlipTests(unittest.TestCase):
     def brute_force_p_values(self, values: list[float]) -> tuple[float, float]:
         observed = sum(values) / len(values)
