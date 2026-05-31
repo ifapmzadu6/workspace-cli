@@ -16,7 +16,7 @@ from typing import Any
 PASS_MARKER = "effect threshold check passed"
 EXPECTED_RUN_MANIFEST_SCHEMA_VERSION = 1
 EXPECTED_EFFECT_METADATA_SCHEMA_VERSION = 2
-EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 5
+EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 6
 FLOAT_TOLERANCE = 1e-9
 
 ARTIFACT_FILES = {
@@ -756,7 +756,12 @@ def verify_residual_gap_cluster_schema(
                 "missing top_residual_cases"
             )
             continue
-        for field in ("missing_expected_counts", "method_false_positive_counts"):
+        for field in (
+            "missing_expected_counts",
+            "missing_predictable_expected_counts",
+            "missing_unpredictable_expected_counts",
+            "method_false_positive_counts",
+        ):
             verify_path_count_rows(
                 cluster.get(field),
                 f"{label}.residual_gap_clusters[{cluster_index}].{field}",
@@ -996,13 +1001,24 @@ def verify_holdout_markdown_residual_count_table(
         return
     if "missing counts" not in markdown:
         failures.append(f"effect.md missing missing counts column for {label}")
+    if "predictable miss counts" not in markdown:
+        failures.append(
+            f"effect.md missing predictable miss counts column for {label}"
+        )
+    if "new miss counts" not in markdown:
+        failures.append(f"effect.md missing new miss counts column for {label}")
     if "false-positive counts" not in markdown:
         failures.append(f"effect.md missing false-positive counts column for {label}")
     for cluster_index, cluster in enumerate(clusters):
         if not isinstance(cluster, dict):
             continue
         cluster_label = f"{label}.residual_gap_clusters[{cluster_index}]"
-        for field in ("missing_expected_counts", "method_false_positive_counts"):
+        for field in (
+            "missing_expected_counts",
+            "missing_predictable_expected_counts",
+            "missing_unpredictable_expected_counts",
+            "method_false_positive_counts",
+        ):
             text = format_residual_path_counts(cluster.get(field))
             if text and text not in markdown:
                 failures.append(f"effect.md missing {cluster_label}.{field}: {text}")

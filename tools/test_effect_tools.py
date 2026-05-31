@@ -716,11 +716,13 @@ class SummaryFormattingTests(unittest.TestCase):
             "Holdout",
         )
         self.assertIn("Holdout Residual Gap Clusters @5", table)
-        self.assertIn("| example | abcdef1234 | 1 | 1 | 3 | 0.750 |", table)
+        self.assertIn("| example | abcdef1234 | 1 | 1 | 3 | 1 | 1 | 0.750 |", table)
         self.assertIn("missing predictable", table)
         self.assertIn("missing new", table)
         self.assertIn("top non-targets", table)
         self.assertIn("missing counts", table)
+        self.assertIn("predictable miss counts", table)
+        self.assertIn("new miss counts", table)
         self.assertIn("false-positive counts", table)
         self.assertIn("Cargo.toml", table)
         self.assertIn("Cargo.toml x1", table)
@@ -736,7 +738,10 @@ class SummaryFormattingTests(unittest.TestCase):
             retarget_metrics=True,
         )
         self.assertIn("Predictable Holdout Residual Gap Clusters @5", predictable_table)
-        self.assertIn("| example | abcdef1234 | 1 | 1 | 1 | 1.000 |", predictable_table)
+        self.assertIn(
+            "| example | abcdef1234 | 1 | 1 | 1 | 1 | 0 | 1.000 |",
+            predictable_table,
+        )
 
     def test_per_repo_holdout_table_includes_static_baselines(self) -> None:
         def method(ap: float) -> dict:
@@ -1085,7 +1090,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
 
         summary = extract_effect_summary.extract_summary(report)
 
-        self.assertEqual(summary["schema_version"], 5)
+        self.assertEqual(summary["schema_version"], 6)
         self.assertEqual(summary["observation_recall"]["map_fact_recall"], 1.0)
         holdout = summary["repo_temporal_holdout"]
         self.assertEqual(holdout["temporal_leakage_audit"]["failure_count"], 0)
@@ -1191,6 +1196,14 @@ class EffectSummaryExtractionTests(unittest.TestCase):
             [{"path": "src/main.rs", "count": 1}],
         )
         self.assertEqual(
+            residual_clusters[0]["missing_predictable_expected_counts"],
+            [{"path": "src/main.rs", "count": 1}],
+        )
+        self.assertEqual(
+            residual_clusters[0]["missing_unpredictable_expected_counts"],
+            [],
+        )
+        self.assertEqual(
             residual_clusters[0]["method_false_positive_counts"],
             [
                 {"path": ".gitignore", "count": 1},
@@ -1204,6 +1217,14 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                 "missing_unpredictable_expected"
             ],
             ["tests/cli.rs"],
+        )
+        self.assertEqual(
+            residual_clusters[1]["missing_predictable_expected_counts"],
+            [],
+        )
+        self.assertEqual(
+            residual_clusters[1]["missing_unpredictable_expected_counts"],
+            [{"path": "tests/cli.rs", "count": 1}],
         )
         predictable_clusters = holdout["predictable_only"]["residual_gap_clusters"]
         self.assertEqual(len(predictable_clusters), 1)
@@ -1751,7 +1772,7 @@ class EffectThresholdTests(unittest.TestCase):
         summary = extract_effect_summary.extract_summary(self.passing_report())
 
         by_label = {entry["label"]: entry for entry in summary["threshold_margins"]}
-        self.assertEqual(summary["schema_version"], 5)
+        self.assertEqual(summary["schema_version"], 6)
         self.assertEqual(
             by_label[
                 "repo_temporal_holdout_aggregate.workspace_related_hybrid"
@@ -2092,7 +2113,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
 
 class EffectArtifactVerifierTests(unittest.TestCase):
     SUMMARY_FIXTURE = {
-        "schema_version": 5,
+        "schema_version": 6,
         "repo_temporal_holdout": {},
         "threshold_margins": [],
     }
@@ -2233,7 +2254,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         effect_report = {"metadata": merged_metadata, "measurements": []}
         summary = {
             "metadata": merged_metadata,
-            "schema_version": 5,
+            "schema_version": 6,
             "threshold_margins": [],
         }
         (output_dir / "effect.json").write_text(
@@ -2484,7 +2505,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 5,
+                "schema_version": 6,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2529,7 +2550,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 5,
+                "schema_version": 6,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2793,7 +2814,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures = self.verify_with_patched_semantics(
                 output_dir,
                 extracted_summary={
-                    "schema_version": 5,
+                    "schema_version": 6,
                     "changed": True,
                     "threshold_margins": [],
                 },
@@ -2833,7 +2854,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 5,
+                "schema_version": 6,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -2893,7 +2914,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 5,
+                "schema_version": 6,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -2906,22 +2927,38 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                         {
                             "missing_expected_counts": [
                                 {"path": "src/main.rs", "count": 2},
+                                {"path": "tests/smoke.mjs", "count": 1},
+                            ],
+                            "missing_predictable_expected_counts": [
+                                {"path": "src/main.rs", "count": 2},
+                            ],
+                            "missing_unpredictable_expected_counts": [
+                                {"path": "tests/smoke.mjs", "count": 1},
                             ],
                             "method_false_positive_counts": [
                                 {"path": "README.md", "count": 3},
                             ],
                             "top_residual_cases": [
                                 {
-                                    "missing_expected": ["src/main.rs"],
+                                    "missing_expected": [
+                                        "src/main.rs",
+                                        "tests/smoke.mjs",
+                                    ],
                                     "missing_expected_ranks": [
                                         {
                                             "path": "src/main.rs",
                                             "rank": 2,
                                             "score": 0.5,
                                         },
+                                        {
+                                            "path": "tests/smoke.mjs",
+                                            "rank": None,
+                                        },
                                     ],
                                     "missing_predictable_expected": ["src/main.rs"],
-                                    "missing_unpredictable_expected": [],
+                                    "missing_unpredictable_expected": [
+                                        "tests/smoke.mjs",
+                                    ],
                                     "method_hits": ["Cargo.toml"],
                                     "method_false_positives": ["README.md"],
                                     "method_top": ["README.md", "Cargo.toml"],
@@ -2945,9 +2982,9 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             }
             stale_markdown = (
                 "# Effect Report\n\n"
-                "| missing counts | false-positive counts |\n"
-                "| --- | --- |\n"
-                "| stale | stale |\n"
+                "| missing counts | predictable miss counts | new miss counts | false-positive counts |\n"
+                "| --- | --- | --- | --- |\n"
+                "| stale | stale | stale | stale |\n"
             )
             (output_dir / "result_summary.json").write_text(
                 json.dumps(summary) + "\n",
@@ -2991,6 +3028,13 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             ),
             failures,
         )
+        self.assertTrue(
+            any(
+                "effect.md missing" in failure and "tests/smoke.mjs x1" in failure
+                for failure in failures
+            ),
+            failures,
+        )
 
     def test_artifact_verifier_rejects_effect_schema_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3026,7 +3070,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 5,
+                "schema_version": 6,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -3101,7 +3145,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 5,
+                "schema_version": 6,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,

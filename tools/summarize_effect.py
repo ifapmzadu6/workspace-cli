@@ -985,6 +985,8 @@ def residual_gap_cluster_entries(
                     "case_count": 0,
                     "seeds": set(),
                     "target_count": 0,
+                    "predictable_target_count": 0,
+                    "unpredictable_target_count": 0,
                     "gap": 0.0,
                     "method_ap_sum": 0.0,
                     "oracle_ap_sum": 0.0,
@@ -1004,9 +1006,13 @@ def residual_gap_cluster_entries(
             if expected_key == "predictable_expected":
                 missing_predictable = missing
                 missing_unpredictable = []
+                predictable_target_count = len(expected)
+                unpredictable_target_count = 0
             elif expected_key == "unpredictable_expected":
                 missing_predictable = []
                 missing_unpredictable = missing
+                predictable_target_count = 0
+                unpredictable_target_count = len(expected)
             else:
                 missing_predictable = sorted(
                     path for path in missing if path in predictable_expected
@@ -1014,9 +1020,13 @@ def residual_gap_cluster_entries(
                 missing_unpredictable = sorted(
                     path for path in missing if path in unpredictable_expected
                 )
+                predictable_target_count = len(predictable_expected)
+                unpredictable_target_count = len(unpredictable_expected)
             cluster["case_count"] += 1
             cluster["seeds"].add(str(case.get("seed", "")))
             cluster["target_count"] += len(expected)
+            cluster["predictable_target_count"] += predictable_target_count
+            cluster["unpredictable_target_count"] += unpredictable_target_count
             cluster["gap"] += gap
             cluster["method_ap_sum"] += method_ap
             cluster["oracle_ap_sum"] += oracle_ap
@@ -1054,6 +1064,8 @@ def residual_gap_cluster_entries(
                 "case_count": case_count,
                 "seed_count": len(cluster["seeds"]),
                 "target_count": cluster["target_count"],
+                "predictable_target_count": cluster["predictable_target_count"],
+                "unpredictable_target_count": cluster["unpredictable_target_count"],
                 "gap": round(cluster["gap"], 3),
                 "mean_gap": round(cluster["gap"] / case_count, 3),
                 "mean_method_ap": round(cluster["method_ap_sum"] / case_count, 3),
@@ -1065,6 +1077,14 @@ def residual_gap_cluster_entries(
                 "top_missing_unpredictable": top_case["missing_unpredictable"],
                 "top_false_positives": top_case["false_positives"],
                 "missing_counts": path_count_rows(cases, "missing"),
+                "missing_predictable_counts": path_count_rows(
+                    cases,
+                    "missing_predictable",
+                ),
+                "missing_unpredictable_counts": path_count_rows(
+                    cases,
+                    "missing_unpredictable",
+                ),
                 "false_positive_counts": path_count_rows(cases, "false_positives"),
                 "top_method_top": top_case["method_top"],
                 "top_method_ranked": top_case["method_top_ranked"],
@@ -1103,6 +1123,8 @@ def render_residual_gap_cluster_table(
             str(entry["case_count"]),
             str(entry["seed_count"]),
             str(entry["target_count"]),
+            str(entry["predictable_target_count"]),
+            str(entry["unpredictable_target_count"]),
             fmt_number(entry["gap"]),
             fmt_number(entry["mean_gap"]),
             fmt_number(entry["mean_method_ap"]),
@@ -1114,6 +1136,8 @@ def render_residual_gap_cluster_table(
             fmt_path_list(entry["top_missing_unpredictable"], limit=3),
             fmt_path_list(entry["top_false_positives"], limit=3),
             fmt_path_count_list(entry["missing_counts"], limit=4),
+            fmt_path_count_list(entry["missing_predictable_counts"], limit=4),
+            fmt_path_count_list(entry["missing_unpredictable_counts"], limit=4),
             fmt_path_count_list(entry["false_positive_counts"], limit=4),
             fmt_path_list(entry["top_method_top"], limit=3),
             fmt_ranked_path_list(entry["top_method_ranked"], limit=3),
@@ -1130,6 +1154,8 @@ def render_residual_gap_cluster_table(
                     "cases",
                     "seeds",
                     "targets",
+                    "predictable targets",
+                    "new targets",
                     "oracle gap",
                     "mean gap",
                     "hybrid AP",
@@ -1141,6 +1167,8 @@ def render_residual_gap_cluster_table(
                     "missing new",
                     "top non-targets",
                     "missing counts",
+                    "predictable miss counts",
+                    "new miss counts",
                     "false-positive counts",
                     "hybrid top",
                     "hybrid top scores",

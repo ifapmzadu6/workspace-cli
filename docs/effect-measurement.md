@@ -71,8 +71,9 @@ weight result, per-repository holdout results, oracle-normalized AP gaps, and
 residual gap clusters with missing targets split into parent-present predictable
 targets and parent-absent new targets, the rank of missed targets when they
 appear in a wider diagnostic hybrid ranking, scores for ranked top-k candidates
-and ranked missed targets, aggregated missing-target and false-positive counts,
-and top non-targets occupying the method's top-k list. It preserves paired
+and ranked missed targets, aggregated missing-target counts split by
+predictable/new target provenance, false-positive counts, and top non-targets
+occupying the method's top-k list. It preserves paired
 sign-flip p-values with significant digits instead of rounding very small
 p-values to zero, includes predictable-only clusters retargeted from case-level
 ranking lists, and emits structured threshold margin entries in a compact
@@ -239,8 +240,9 @@ cutoff, which defaults to 5:
   include the history-only oracle ceiling
 - residual gap clusters that group remaining hybrid-vs-oracle AP gaps by
   repository and held-out commit in both Markdown and result-summary JSON,
-  including predictable-only retargeted gaps and missed-target ranks from a
-  wider diagnostic hybrid query
+  including predictable-only retargeted gaps, predictable/new missing-target
+  aggregate counts, and missed-target ranks from a wider diagnostic hybrid
+  query
 - a default cutoff sweep at @1, @3, and @5
 - an optional hybrid direct-weight sweep for ablation
 - an optional leave-one-repo-out direct-weight selection check when multiple
@@ -760,7 +762,8 @@ the same failure mode: it recovers the predictable CI target for the
 `result_summary.json` now emit
 the same repo/commit residual gap clusters with missing predictable/new target
 splits, missed-target diagnostic ranks/scores, score-ranked top-k candidates,
-top non-targets, and aggregate missing/false-positive counts, plus the
+top non-targets, and aggregate missing/false-positive counts split by
+predictable/new target provenance, plus the
 predictable-only retargeted clusters, so this diagnosis is reproducible
 directly from the paper artifact.
 

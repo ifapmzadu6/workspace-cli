@@ -17,7 +17,7 @@ if str(TOOLS_DIR) not in sys.path:
 import check_effect_thresholds  # noqa: E402
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 P_VALUE_SIGNIFICANT_DIGITS = 6
 
 
@@ -460,6 +460,14 @@ def residual_gap_clusters(
                 cluster["_oracle_ap_sum"] / case_count
             ),
             "missing_expected_counts": path_count_rows(cases, "missing_expected"),
+            "missing_predictable_expected_counts": path_count_rows(
+                cases,
+                "missing_predictable_expected",
+            ),
+            "missing_unpredictable_expected_counts": path_count_rows(
+                cases,
+                "missing_unpredictable_expected",
+            ),
             "method_false_positive_counts": path_count_rows(
                 cases,
                 "method_false_positives",
