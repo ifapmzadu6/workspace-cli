@@ -83,6 +83,11 @@ def verify_required_files(artifact_dir: Path, failures: list[str]) -> None:
 
 
 def verify_manifest_shape(manifest: dict[str, Any], failures: list[str]) -> None:
+    verify_manifest_artifact_paths(manifest, failures)
+    for key in ("workspace_repo", "output_dir"):
+        if not is_nonempty_string(manifest.get(key)):
+            failures.append(f"run_manifest.json {key} must be a non-empty string")
+
     sha256 = manifest.get("sha256")
     if not isinstance(sha256, dict):
         failures.append("run_manifest.json missing sha256 map")
@@ -115,6 +120,16 @@ def verify_manifest_shape(manifest: dict[str, Any], failures: list[str]) -> None
         failures.append(
             "run_manifest.json require_clean_workspace_verifier must be boolean"
         )
+    paper_manifest = manifest.get("paper_manifest")
+    if paper_manifest is not None and not is_nonempty_string(paper_manifest):
+        failures.append("run_manifest.json paper_manifest must be a string or null")
+    if manifest.get("require_holdout_thresholds") is True and not is_nonempty_string(
+        paper_manifest
+    ):
+        failures.append(
+            "run_manifest.json paper_manifest must be a non-empty string when "
+            "require_holdout_thresholds is true"
+        )
 
     for key in OPTIONAL_ARTIFACT_FILES:
         value = manifest.get(key)
@@ -122,6 +137,37 @@ def verify_manifest_shape(manifest: dict[str, Any], failures: list[str]) -> None
             failures.append(f"run_manifest.json {key} must be a string or null")
         if value is not None and isinstance(sha256, dict) and key not in sha256:
             failures.append(f"run_manifest.json sha256 map missing key: {key}")
+
+
+def verify_manifest_artifact_paths(
+    manifest: dict[str, Any],
+    failures: list[str],
+) -> None:
+    for key, filename in ARTIFACT_FILES.items():
+        verify_manifest_artifact_path(manifest, key, filename, failures, required=True)
+    for key, filename in OPTIONAL_ARTIFACT_FILES.items():
+        verify_manifest_artifact_path(manifest, key, filename, failures, required=False)
+
+
+def verify_manifest_artifact_path(
+    manifest: dict[str, Any],
+    key: str,
+    filename: str,
+    failures: list[str],
+    *,
+    required: bool,
+) -> None:
+    value = manifest.get(key)
+    if value is None:
+        if required:
+            failures.append(f"run_manifest.json {key} must be a string path")
+        return
+    if not is_nonempty_string(value):
+        expected_type = "a string path" if required else "a string path or null"
+        failures.append(f"run_manifest.json {key} must be {expected_type}")
+        return
+    if Path(value).name != filename:
+        failures.append(f"run_manifest.json {key} must point to {filename}")
 
 
 def verify_manifest_commands(
@@ -191,6 +237,10 @@ def require_command_arg(
 
 def is_string_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(part, str) for part in value)
+
+
+def is_nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def command_contains_basename(command: list[str], expected_basename: str) -> bool:

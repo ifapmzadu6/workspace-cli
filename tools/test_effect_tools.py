@@ -1831,6 +1831,13 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             (output_dir / filename).write_text(content, encoding="utf-8")
 
         run_manifest = {
+            "json": str(output_dir / "effect.json"),
+            "markdown": str(output_dir / "effect.md"),
+            "result_summary": str(output_dir / "result_summary.json"),
+            "thresholds": str(output_dir / "thresholds.txt"),
+            "paper_manifest": "holdouts.json",
+            "workspace_repo": str(Path.cwd()),
+            "output_dir": str(output_dir),
             "commands": {
                 "measure": [
                     "python3",
@@ -1962,6 +1969,65 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "commands map missing keys: verify_artifacts" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_requires_manifest_artifact_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            del run_manifest["markdown"]
+            run_manifest["json"] = str(output_dir / "wrong.json")
+            run_manifest["output_dir"] = ""
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "run_manifest.json markdown must be a string path" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "run_manifest.json json must point to effect.json" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "run_manifest.json output_dir must be a non-empty string" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_requires_paper_manifest_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["paper_manifest"] = None
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "paper_manifest must be a non-empty string when "
+                "require_holdout_thresholds is true" in failure
                 for failure in failures
             ),
             failures,

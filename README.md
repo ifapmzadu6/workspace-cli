@@ -153,11 +153,12 @@ clusters including predictable-only retargeted gaps, structured threshold
 margin entries, plus the leakage audit.
 Paper artifact directories include copies of the local holdout manifest and
 source holdout manifest when available.
-`run_manifest.json` records the exact commands and SHA-256 checksums for each
-generated artifact and copied manifest. `tools/verify_effect_artifacts.py`
-checks that the artifact directory has all required files, parseable JSON
-outputs, expected generation and verification commands, SHA-256 hashes that
-match the run manifest,
+`run_manifest.json` records the exact commands, artifact paths, and SHA-256
+checksums for each generated artifact and copied manifest.
+`tools/verify_effect_artifacts.py` checks that the artifact directory has all
+required files, parseable JSON outputs, expected generation and verification
+commands, expected manifest artifact paths, SHA-256 hashes that match the run
+manifest,
 holdout manifest hashes that match `effect.json` metadata, a recomputed
 threshold pass, a Markdown summary that re-renders from `effect.json`, and a
 result summary that matches `effect.json`. The manifest also records the
