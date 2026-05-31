@@ -93,6 +93,7 @@ const RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER: f64 = 4.25;
 const RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT: f64 = 0.3;
 const RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER: f64 = 1.2;
 const RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER: f64 = 3.5;
+const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
@@ -4650,6 +4651,9 @@ fn related_hybrid_path_score_multiplier(
     if direct_edge_weight > 0.0 && is_ci_workflow_manifest_pair(target, candidate) {
         multiplier *= RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0 && is_changelog_manifest_pair(target, candidate) {
+        multiplier *= RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER;
+    }
     multiplier
 }
 
@@ -4734,6 +4738,15 @@ fn is_root_project_manifest(path: &str) -> bool {
         path,
         "Cargo.toml" | "package.json" | "pyproject.toml" | "go.mod" | "Gemfile" | "pom.xml"
     )
+}
+
+fn is_changelog_manifest_pair(target: &str, candidate: &str) -> bool {
+    (is_project_changelog(target) && is_root_project_manifest(candidate))
+        || (is_root_project_manifest(target) && is_project_changelog(candidate))
+}
+
+fn is_project_changelog(path: &str) -> bool {
+    path_parent(path).is_empty() && path.eq_ignore_ascii_case("CHANGELOG.md")
 }
 
 fn path_parent(path: &str) -> &str {
@@ -11623,6 +11636,20 @@ src/b.rs
             ".github/workflows/test.yml",
             "Cargo.toml"
         ));
+        assert!(
+            related_hybrid_path_score_multiplier("package.json", "CHANGELOG.md", 1.0)
+                >= related_path_score_multiplier("package.json", "CHANGELOG.md")
+                    * RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER
+        );
+        assert!(
+            related_hybrid_path_score_multiplier("CHANGELOG.md", "package.json", 1.0)
+                >= related_path_score_multiplier("CHANGELOG.md", "package.json")
+                    * RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("docs/CHANGELOG.md", "package.json", 1.0),
+            related_path_score_multiplier("docs/CHANGELOG.md", "package.json")
+        );
         assert!(is_manifest_lock_pair("package.json", "package-lock.json"));
         assert!(!is_same_source_sibling("main.rs", "lib.rs"));
         assert!(!is_source_code_file("README.md"));

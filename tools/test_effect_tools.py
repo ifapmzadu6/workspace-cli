@@ -934,14 +934,14 @@ class EffectThresholdTests(unittest.TestCase):
 
     def repo_macro_average(self, *, predictable: bool) -> dict:
         if predictable:
-            hybrid_ap = 0.77
+            hybrid_ap = 0.80
             direct_ap = 0.67
             pagerank_ap = 0.62
             content_ap = 0.42
             recent_ap = 0.52
             global_ap = 0.53
         else:
-            hybrid_ap = 0.74
+            hybrid_ap = 0.768
             direct_ap = 0.62
             pagerank_ap = 0.56
             content_ap = 0.38
@@ -999,15 +999,15 @@ class EffectThresholdTests(unittest.TestCase):
                         "mean_average_precision_at_5": 0.61,
                     },
                     "workspace_related_hybrid": {
-                        "mean_average_precision_at_5": 0.749,
+                        "mean_average_precision_at_5": 0.770,
                     },
                     "history_oracle_ceiling": {
                         "mean_average_precision_at_5": 0.90,
                     },
                 },
-                "hybrid_weight_sweep": self.weight_sweep(0.749),
+                "hybrid_weight_sweep": self.weight_sweep(0.770),
                 "leave_one_repo_out_weight_selection": self.loro_selection(
-                    ap=0.749,
+                    ap=0.770,
                     direct_ap=0.64,
                     pagerank_ap=0.61,
                     lexical_ap=0.20,
@@ -1043,15 +1043,15 @@ class EffectThresholdTests(unittest.TestCase):
                     "mean_average_precision_at_5": 0.577,
                 },
                 "workspace_related_hybrid": {
-                    "mean_average_precision_at_5": 0.709,
+                    "mean_average_precision_at_5": 0.730,
                 },
                 "history_oracle_ceiling": {
                     "mean_average_precision_at_5": 0.853,
                 },
             },
-            "hybrid_weight_sweep": self.weight_sweep(0.709),
+            "hybrid_weight_sweep": self.weight_sweep(0.730),
             "leave_one_repo_out_weight_selection": self.loro_selection(
-                ap=0.709,
+                ap=0.730,
                 direct_ap=0.626,
                 pagerank_ap=0.577,
                 lexical_ap=0.20,
@@ -1160,7 +1160,7 @@ class EffectThresholdTests(unittest.TestCase):
         report = self.passing_report()
         report["measurements"][-1]["aggregate"]["baseline_content_similarity"][
             "mean_average_precision_at_5"
-        ] = 0.51
+        ] = 0.56
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any("baseline_content_similarity" in item for item in failures),
@@ -1171,7 +1171,7 @@ class EffectThresholdTests(unittest.TestCase):
         report = self.passing_report()
         report["measurements"][-1]["aggregate"]["history_oracle_ceiling"][
             "mean_average_precision_at_5"
-        ] = 0.90
+        ] = 0.95
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any(
@@ -1186,7 +1186,7 @@ class EffectThresholdTests(unittest.TestCase):
         report = self.passing_report()
         report["measurements"][-1]["aggregate"]["baseline_recent_activity"][
             "mean_average_precision_at_5"
-        ] = 0.56
+        ] = 0.60
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any("baseline_recent_activity" in item for item in failures),
@@ -1262,7 +1262,7 @@ class EffectThresholdTests(unittest.TestCase):
                 method = entry["related"]["method"]
                 entry["related"]["aggregate"][method][
                     "mean_average_precision_at_5"
-                ] = 0.72
+                ] = 0.74
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any("is below weight 0.8" in item for item in failures),
