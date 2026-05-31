@@ -277,6 +277,9 @@ def residual_gap_clusters(
                 unpredictable_target_count = len(unpredictable_expected)
             hit_set = set(hits)
             missing_expected = [path for path in expected if path not in hit_set]
+            method_false_positives = [
+                path for path in method_top[:k] if path not in expected_set
+            ]
             if expected_key == "predictable_expected":
                 missing_predictable_expected = missing_expected
                 missing_unpredictable_expected = []
@@ -313,6 +316,7 @@ def residual_gap_clusters(
                     "missing_predictable_expected": missing_predictable_expected,
                     "missing_unpredictable_expected": missing_unpredictable_expected,
                     "method_hits": hits,
+                    "method_false_positives": method_false_positives,
                     "method_top": method_top,
                 },
             )

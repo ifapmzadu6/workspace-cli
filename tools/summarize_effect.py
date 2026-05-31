@@ -857,6 +857,7 @@ def residual_gap_cluster_entries(
             )
             hits = set(hits_at_k(method_top, expected, k))
             missing = sorted(expected - hits)
+            false_positives = [path for path in method_top[:k] if path not in expected]
             predictable_expected = set(case.get("predictable_expected", []))
             unpredictable_expected = set(case.get("unpredictable_expected", []))
             if expected_key == "predictable_expected":
@@ -885,6 +886,7 @@ def residual_gap_cluster_entries(
                     "missing": missing,
                     "missing_predictable": missing_predictable,
                     "missing_unpredictable": missing_unpredictable,
+                    "false_positives": false_positives,
                     "method_top": method_top[:k],
                 }
             )
@@ -914,6 +916,7 @@ def residual_gap_cluster_entries(
                 "top_missing": top_case["missing"],
                 "top_missing_predictable": top_case["missing_predictable"],
                 "top_missing_unpredictable": top_case["missing_unpredictable"],
+                "top_false_positives": top_case["false_positives"],
                 "top_method_top": top_case["method_top"],
             }
         )
@@ -958,6 +961,7 @@ def render_residual_gap_cluster_table(
             fmt_path_list(entry["top_missing"], limit=3),
             fmt_path_list(entry["top_missing_predictable"], limit=3),
             fmt_path_list(entry["top_missing_unpredictable"], limit=3),
+            fmt_path_list(entry["top_false_positives"], limit=3),
             fmt_path_list(entry["top_method_top"], limit=3),
         ]
         for entry in entries
@@ -980,6 +984,7 @@ def render_residual_gap_cluster_table(
                     "missing targets",
                     "missing predictable",
                     "missing new",
+                    "top non-targets",
                     "hybrid top",
                 ],
                 rows,

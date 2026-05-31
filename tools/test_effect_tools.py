@@ -666,6 +666,8 @@ class SummaryFormattingTests(unittest.TestCase):
         self.assertIn("| example | abcdef1234 | 1 | 1 | 3 | 0.750 |", table)
         self.assertIn("missing predictable", table)
         self.assertIn("missing new", table)
+        self.assertIn("top non-targets", table)
+        self.assertIn("Cargo.toml", table)
         self.assertIn(".github/workflows/ci.yml", table)
         self.assertIn("tests/smoke.mjs", table)
 
@@ -1052,6 +1054,10 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                 "missing_unpredictable_expected"
             ],
             [],
+        )
+        self.assertEqual(
+            residual_clusters[0]["top_residual_cases"][0]["method_false_positives"],
+            ["README.md", "Cargo.lock", "tests/cli.rs", ".gitignore"],
         )
         self.assertEqual(
             residual_clusters[1]["top_residual_cases"][0][
