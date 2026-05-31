@@ -1832,8 +1832,17 @@ class EffectArtifactVerifierTests(unittest.TestCase):
 
         run_manifest = {
             "commands": {
-                "measure": ["python3", "tools/measure_effect.py"],
-                "check_thresholds": ["python3", "tools/check_effect_thresholds.py"],
+                "measure": [
+                    "python3",
+                    "tools/measure_effect.py",
+                    "--repo-holdout-manifest",
+                    "holdouts.json",
+                ],
+                "check_thresholds": [
+                    "python3",
+                    "tools/check_effect_thresholds.py",
+                    "--require-holdout",
+                ],
                 "summarize": ["python3", "tools/summarize_effect.py"],
                 "extract_result_summary": [
                     "python3",
@@ -1846,6 +1855,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 ],
             },
             "require_holdout_thresholds": True,
+            "require_clean_workspace_verifier": False,
             "sha256": {
                 key: verify_effect_artifacts.file_sha256(output_dir / filename)
                 for key, filename in verify_effect_artifacts.ARTIFACT_FILES.items()
@@ -1935,6 +1945,122 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 self.verify_with_patched_semantics(output_dir),
                 [],
             )
+
+    def test_artifact_verifier_requires_recorded_verify_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            del run_manifest["commands"]["verify_artifacts"]
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "commands map missing keys: verify_artifacts" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_requires_expected_command_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["commands"]["measure"] = [
+                "python3",
+                "tools/summarize_effect.py",
+                "--repo-holdout-manifest",
+                "holdouts.json",
+            ]
+            run_manifest["commands"]["verify_artifacts"] = [
+                "python3",
+                "tools/check_effect_thresholds.py",
+                str(output_dir),
+            ]
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "commands.measure must invoke measure_effect.py" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "commands.verify_artifacts must invoke verify_effect_artifacts.py"
+                in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_requires_holdout_command_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["commands"]["measure"] = [
+                "python3",
+                "tools/measure_effect.py",
+            ]
+            run_manifest["commands"]["check_thresholds"] = [
+                "python3",
+                "tools/check_effect_thresholds.py",
+            ]
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "commands.measure must include --repo-holdout-manifest" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "commands.check_thresholds must include --require-holdout" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_requires_clean_verifier_flag_boolean(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["require_clean_workspace_verifier"] = "false"
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "require_clean_workspace_verifier must be boolean" in failure
+                for failure in failures
+            ),
+            failures,
+        )
 
     def test_artifact_verifier_rejects_incomplete_threshold_margin_schema(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

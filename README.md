@@ -156,7 +156,8 @@ source holdout manifest when available.
 `run_manifest.json` records the exact commands and SHA-256 checksums for each
 generated artifact and copied manifest. `tools/verify_effect_artifacts.py`
 checks that the artifact directory has all required files, parseable JSON
-outputs, a passing threshold log, SHA-256 hashes that match the run manifest,
+outputs, expected generation and verification commands, SHA-256 hashes that
+match the run manifest,
 holdout manifest hashes that match `effect.json` metadata, a recomputed
 threshold pass, a Markdown summary that re-renders from `effect.json`, and a
 result summary that matches `effect.json`. The manifest also records the

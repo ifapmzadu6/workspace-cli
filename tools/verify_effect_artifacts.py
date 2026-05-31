@@ -33,6 +33,7 @@ REQUIRED_COMMANDS = {
     "check_thresholds",
     "summarize",
     "extract_result_summary",
+    "verify_artifacts",
 }
 
 
@@ -106,9 +107,14 @@ def verify_manifest_shape(manifest: dict[str, Any], failures: list[str]) -> None
                 "run_manifest.json commands map missing keys: "
                 + ", ".join(missing_commands)
             )
+        verify_manifest_commands(manifest, commands, failures)
 
     if not isinstance(manifest.get("require_holdout_thresholds"), bool):
         failures.append("run_manifest.json require_holdout_thresholds must be boolean")
+    if not isinstance(manifest.get("require_clean_workspace_verifier"), bool):
+        failures.append(
+            "run_manifest.json require_clean_workspace_verifier must be boolean"
+        )
 
     for key in OPTIONAL_ARTIFACT_FILES:
         value = manifest.get(key)
@@ -116,6 +122,79 @@ def verify_manifest_shape(manifest: dict[str, Any], failures: list[str]) -> None
             failures.append(f"run_manifest.json {key} must be a string or null")
         if value is not None and isinstance(sha256, dict) and key not in sha256:
             failures.append(f"run_manifest.json sha256 map missing key: {key}")
+
+
+def verify_manifest_commands(
+    manifest: dict[str, Any],
+    commands: dict[str, Any],
+    failures: list[str],
+) -> None:
+    expected_tools = {
+        "measure": "measure_effect.py",
+        "check_thresholds": "check_effect_thresholds.py",
+        "summarize": "summarize_effect.py",
+        "extract_result_summary": "extract_effect_summary.py",
+        "verify_artifacts": "verify_effect_artifacts.py",
+    }
+    for key in sorted(REQUIRED_COMMANDS & set(commands)):
+        command = commands.get(key)
+        if not is_string_list(command):
+            failures.append(f"run_manifest.json commands.{key} must be a string list")
+            continue
+        expected_tool = expected_tools[key]
+        if not command_contains_basename(command, expected_tool):
+            failures.append(
+                f"run_manifest.json commands.{key} must invoke {expected_tool}"
+            )
+
+    if manifest.get("require_holdout_thresholds") is True:
+        require_command_arg(
+            commands,
+            "measure",
+            "--repo-holdout-manifest",
+            failures,
+            "require_holdout_thresholds",
+        )
+        require_command_arg(
+            commands,
+            "check_thresholds",
+            "--require-holdout",
+            failures,
+            "require_holdout_thresholds",
+        )
+    if manifest.get("require_clean_workspace_verifier") is True:
+        require_command_arg(
+            commands,
+            "verify_artifacts",
+            "--require-clean-workspace",
+            failures,
+            "require_clean_workspace_verifier",
+        )
+
+
+def require_command_arg(
+    commands: dict[str, Any],
+    key: str,
+    arg: str,
+    failures: list[str],
+    flag_name: str,
+) -> None:
+    command = commands.get(key)
+    if not is_string_list(command):
+        return
+    if arg not in command:
+        failures.append(
+            f"run_manifest.json commands.{key} must include {arg} when "
+            f"{flag_name} is true"
+        )
+
+
+def is_string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(part, str) for part in value)
+
+
+def command_contains_basename(command: list[str], expected_basename: str) -> bool:
+    return any(Path(part).name == expected_basename for part in command)
 
 
 def verify_checksums(
