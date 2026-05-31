@@ -80,6 +80,22 @@ patch`, `workspace impact --diff --by cochange --use-index --rank hybrid`, and
 pilot is evidence that the current tool protocol can guide Codex through
 co-change and impact-aware work, not evidence of an elapsed-time win.
 
+After the same protocol improvements used for the invoice task
+(`related --ensure-index --include-content` and `patch --stdin`), the
+co-change-oriented policy task improved substantially. The optimized four-run
+suite was:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 4 | 1.000 | 1.000 | 38.630 (33.642, 44.239) | 6.250 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 4 | 1.000 | 1.000 | 36.876 (33.203, 40.399) | 5.000 | 5.000 | 5.000 | 0.000 |
+
+The paired timing delta was `workspace_cli - shell_only = -1.754s` with a
+bootstrap interval of `(-10.914, 6.756)`. `workspace_cli` was faster in two
+paired runs and `shell_only` was faster in two. This smaller task no longer
+shows the large overhead of the initial policy pilot, but the elapsed-time
+result remains neutral rather than statistically supported.
+
 The first rollback-oriented pilot solved the task in both conditions:
 
 | condition | passed | seconds | commands | workspace commands | workspace log entries | rollback ops | changed files |
@@ -239,9 +255,10 @@ entries and no `operation log unreadable` status.
   `patch --stdin` cut avoidable workspace overhead substantially. On the larger
   invoice task, `workspace_cli` used far fewer commands, preserved multi-file
   diff-scope correctness, and was faster on average in the latest four-run
-  pilot. Because the paired timing interval still crosses zero, the paper should
-  frame this as promising pilot evidence rather than a statistically supported
-  elapsed-time speedup.
+  pilot. The optimized policy task also moved from large overhead to
+  elapsed-time parity. Because the paired timing intervals still cross zero, the
+  paper should frame this as promising pilot evidence rather than a
+  statistically supported elapsed-time speedup.
 
 ## Next Required Step
 

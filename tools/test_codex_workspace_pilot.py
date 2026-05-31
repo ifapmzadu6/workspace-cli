@@ -68,13 +68,6 @@ class CodexWorkspacePilotTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-            index_result = subprocess.run(
-                ["./bin/workspace", "index", "cochange", "--json"],
-                cwd=repo,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
             related_result = subprocess.run(
                 [
                     "./bin/workspace",
@@ -82,9 +75,16 @@ class CodexWorkspacePilotTests(unittest.TestCase):
                     "tests/test_discounts.py",
                     "--by",
                     "cochange",
-                    "--use-index",
+                    "--ensure-index",
+                    "--max-commits",
+                    "1000",
                     "--rank",
                     "hybrid",
+                    "--max-results",
+                    "2",
+                    "--include-content",
+                    "--max-content-files",
+                    "2",
                     "--json",
                 ],
                 cwd=repo,
@@ -95,10 +95,19 @@ class CodexWorkspacePilotTests(unittest.TestCase):
 
             self.assertNotEqual(test_result.returncode, 0)
             self.assertIn("2000 != 2500", test_result.stderr)
-            self.assertEqual(index_result.returncode, 0, index_result.stderr)
             self.assertEqual(related_result.returncode, 0, related_result.stderr)
-            self.assertIn("config/discount_policy.json", related_result.stdout)
-            self.assertIn("docs/discount_policy.md", related_result.stdout)
+            self.assertTrue((repo / ".workspace" / "index" / "cochange.json").is_file())
+            related = json.loads(related_result.stdout)
+            included_content = {
+                item["path"]: item["content"]
+                for item in related["data"]["included_content"]
+            }
+            for path in [
+                "config/discount_policy.json",
+                "docs/discount_policy.md",
+            ]:
+                self.assertIn(path, related_result.stdout)
+                self.assertIn(path, included_content)
 
     def test_rollback_fixture_recovers_from_bad_proposed_patch(self) -> None:
         workspace_binary = ROOT / "target" / "debug" / "workspace"
@@ -391,8 +400,15 @@ if __name__ == "__main__":
             prompt.prompt for prompt in prompts if prompt.name == "workspace_cli"
         )
 
-        self.assertIn("index cochange", workspace_prompt)
+        self.assertIn("--ensure-index", workspace_prompt)
+        self.assertNotIn("`./bin/workspace status --json`", workspace_prompt)
+        self.assertNotIn("`./bin/workspace index cochange --json`", workspace_prompt)
         self.assertIn("related tests/test_discounts.py", workspace_prompt)
+        self.assertIn("--include-content", workspace_prompt)
+        self.assertIn("data.included_content", workspace_prompt)
+        self.assertIn("patch --stdin --json", workspace_prompt)
+        self.assertIn("do not create or delete a temporary patch file", workspace_prompt)
+        self.assertIn("do not shell-escape `$` values", workspace_prompt)
         self.assertIn("impact --diff", workspace_prompt)
 
     def test_rollback_prompt_requests_patch_transaction_rollback(self) -> None:
@@ -423,6 +439,7 @@ if __name__ == "__main__":
         self.assertIn("data.included_content", workspace_prompt)
         self.assertIn("patch --stdin --json", workspace_prompt)
         self.assertIn("do not create or delete a temporary patch file", workspace_prompt)
+        self.assertIn("put the diff content literally", workspace_prompt)
         self.assertIn("impact --diff", workspace_prompt)
         self.assertIn("do not spend time running", workspace_prompt)
         self.assertIn("standard unified git diff", workspace_prompt)
