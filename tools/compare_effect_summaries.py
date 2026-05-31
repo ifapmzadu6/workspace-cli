@@ -155,6 +155,32 @@ def predictable_residual_clusters(summary: dict[str, Any]) -> list[dict[str, Any
     return [cluster for cluster in clusters if isinstance(cluster, dict)]
 
 
+def residual_pair_conflicts(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    conflicts = nested_get(
+        summary,
+        ("repo_temporal_holdout", "residual_pair_conflicts"),
+    )
+    if not isinstance(conflicts, list):
+        return []
+    return [conflict for conflict in conflicts if isinstance(conflict, dict)]
+
+
+def predictable_residual_pair_conflicts(
+    summary: dict[str, Any],
+) -> list[dict[str, Any]]:
+    conflicts = nested_get(
+        summary,
+        (
+            "repo_temporal_holdout",
+            "predictable_only",
+            "residual_pair_conflicts",
+        ),
+    )
+    if not isinstance(conflicts, list):
+        return []
+    return [conflict for conflict in conflicts if isinstance(conflict, dict)]
+
+
 def residual_cluster_count(summary: dict[str, Any]) -> int:
     return len(residual_clusters(summary))
 
@@ -163,12 +189,30 @@ def predictable_residual_cluster_count(summary: dict[str, Any]) -> int:
     return len(predictable_residual_clusters(summary))
 
 
+def residual_pair_conflict_count(summary: dict[str, Any]) -> int:
+    return len(residual_pair_conflicts(summary))
+
+
+def predictable_residual_pair_conflict_count(summary: dict[str, Any]) -> int:
+    return len(predictable_residual_pair_conflicts(summary))
+
+
 def top_residual_id(summary: dict[str, Any]) -> str | None:
     return cluster_id(first_cluster(residual_clusters(summary)))
 
 
 def top_predictable_residual_id(summary: dict[str, Any]) -> str | None:
     return cluster_id(first_cluster(predictable_residual_clusters(summary)))
+
+
+def top_residual_pair_conflict_id(summary: dict[str, Any]) -> str | None:
+    return pair_conflict_id(first_cluster(residual_pair_conflicts(summary)))
+
+
+def top_predictable_residual_pair_conflict_id(summary: dict[str, Any]) -> str | None:
+    return pair_conflict_id(
+        first_cluster(predictable_residual_pair_conflicts(summary))
+    )
 
 
 def top_residual_missing(summary: dict[str, Any]) -> str | None:
@@ -199,6 +243,30 @@ def cluster_id(cluster: dict[str, Any] | None) -> str | None:
     return f"{repo_name}@{commit}"
 
 
+def pair_conflict_id(conflict: dict[str, Any] | None) -> str | None:
+    if conflict is None:
+        return None
+    repo_name = conflict.get("repo_name")
+    seed = conflict.get("seed")
+    candidate = conflict.get("candidate")
+    true_count = conflict.get("true_target_count")
+    false_count = conflict.get("residual_false_positive_count")
+    if (
+        not isinstance(repo_name, str)
+        or not isinstance(seed, str)
+        or not isinstance(candidate, str)
+        or not isinstance(true_count, int)
+        or isinstance(true_count, bool)
+        or not isinstance(false_count, int)
+        or isinstance(false_count, bool)
+    ):
+        return None
+    return (
+        f"{repo_name} {seed}->{candidate} "
+        f"true={true_count} false={false_count}"
+    )
+
+
 def path_counts_text(cluster: dict[str, Any] | None, field: str) -> str | None:
     if cluster is None:
         return None
@@ -222,8 +290,18 @@ def path_counts_text(cluster: dict[str, Any] | None, field: str) -> str | None:
 CUSTOM_METRICS = [
     ("residual cluster count", residual_cluster_count),
     ("predictable residual cluster count", predictable_residual_cluster_count),
+    ("residual pair conflict count", residual_pair_conflict_count),
+    (
+        "predictable residual pair conflict count",
+        predictable_residual_pair_conflict_count,
+    ),
     ("top residual cluster", top_residual_id),
     ("predictable top residual cluster", top_predictable_residual_id),
+    ("top residual pair conflict", top_residual_pair_conflict_id),
+    (
+        "predictable top residual pair conflict",
+        top_predictable_residual_pair_conflict_id,
+    ),
     ("top residual missing", top_residual_missing),
     ("top residual false positives", top_residual_false_positive),
 ]

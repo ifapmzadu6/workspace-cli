@@ -33,7 +33,8 @@ python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
 ```
 
 To compare a candidate artifact against a previous result summary while tuning
-ranking changes:
+ranking changes, including residual cluster and residual pair-conflict
+diagnostic stability:
 
 ```sh
 python3 tools/compare_effect_summaries.py \

@@ -1444,6 +1444,22 @@ class EffectSummaryComparisonTests(unittest.TestCase):
                         ],
                     },
                 ],
+                "residual_pair_conflicts": [
+                    {
+                        "repo_name": "llm-json-extract",
+                        "seed": "package.json",
+                        "candidate": "package-lock.json",
+                        "true_target_count": 2,
+                        "residual_false_positive_count": 2,
+                    },
+                    {
+                        "repo_name": "llm-json-extract",
+                        "seed": "CHANGELOG.md",
+                        "candidate": "package-lock.json",
+                        "true_target_count": 2,
+                        "residual_false_positive_count": 1,
+                    },
+                ],
                 "predictable_only": {
                     "methods": {
                         "workspace_related_hybrid": {
@@ -1454,6 +1470,15 @@ class EffectSummaryComparisonTests(unittest.TestCase):
                         {
                             "repo_name": "llm-json-extract",
                             "heldout_commit": "9631a65ab479",
+                        },
+                    ],
+                    "residual_pair_conflicts": [
+                        {
+                            "repo_name": "llm-json-extract",
+                            "seed": "package.json",
+                            "candidate": "package-lock.json",
+                            "true_target_count": 2,
+                            "residual_false_positive_count": 2,
                         },
                     ],
                 },
@@ -1488,6 +1513,11 @@ class EffectSummaryComparisonTests(unittest.TestCase):
         self.assertEqual(by_metric["threshold failures"]["new"], 2)
         self.assertEqual(by_metric["threshold failures"]["delta"], 2)
         self.assertEqual(by_metric["residual cluster count"]["old"], 1)
+        self.assertEqual(by_metric["residual pair conflict count"]["old"], 2)
+        self.assertEqual(
+            by_metric["predictable residual pair conflict count"]["old"],
+            1,
+        )
         self.assertEqual(
             by_metric["top residual cluster"]["new"],
             "related-cli@6447d4333c23",
@@ -1495,6 +1525,14 @@ class EffectSummaryComparisonTests(unittest.TestCase):
         self.assertEqual(
             by_metric["predictable top residual cluster"]["new"],
             "llm-json-extract@9631a65ab479",
+        )
+        self.assertEqual(
+            by_metric["top residual pair conflict"]["new"],
+            "llm-json-extract package.json->package-lock.json true=2 false=2",
+        )
+        self.assertEqual(
+            by_metric["predictable top residual pair conflict"]["new"],
+            "llm-json-extract package.json->package-lock.json true=2 false=2",
         )
         self.assertEqual(
             by_metric["top residual missing"]["new"],
