@@ -146,6 +146,23 @@ seconds and mean command count from 13.000 to 8.000, while preserving pass rate,
 diff-scope correctness, and rollback usage. The paired timing delta was still
 positive at `+20.267s`, so the result is an overhead reduction, not a speedup.
 
+After removing the installed `bin/workspace` binary from fixture Git history,
+skipping the initial `workspace status`, reading only the proposed patch after
+rollback, and applying the correct fix through `workspace patch --stdin`, the
+rollback suite produced the first repeated positive timing result:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 4 | 1.000 | 1.000 | 61.097 (56.721, 66.228) | 11.750 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 4 | 1.000 | 1.000 | 51.947 (49.312, 55.840) | 6.000 | 6.000 | 7.000 | 1.000 |
+
+The paired timing delta was `workspace_cli - shell_only = -9.150s` with a
+bootstrap interval of `(-12.249, -5.653)`. `workspace_cli` was faster in all
+four paired runs, used 5.750 fewer commands on average, preserved expected
+diff scope, and used exactly one rollback per run. This is still a controlled
+pilot task, but unlike the earlier timing results its interval does not cross
+zero.
+
 The first larger multi-file synchronization task, `invoice_tax_sync`, requires
 Codex to update tax configuration, invoice-label configuration, and two
 documentation files after an EU digital VAT policy change. The fixture includes
@@ -248,17 +265,15 @@ entries and no `operation log unreadable` status.
   verification, patch, rollback, related-file, and impact operations.
 - The harness records enough evidence to compare success, overhead, command
   choice, final diffs, and workspace audit logs.
-- The timing evidence is currently negative or mixed: simple checkout and
-  co-change tasks were slower with `workspace-cli`, a single rollback run was
-  faster, and the bytecode-off two-run rollback suites were slower. Tightening
-  prompts plus adding `related --include-content`, `--ensure-index`, and
-  `patch --stdin` cut avoidable workspace overhead substantially. On the larger
-  invoice task, `workspace_cli` used far fewer commands, preserved multi-file
-  diff-scope correctness, and was faster on average in the latest four-run
-  pilot. The optimized policy task also moved from large overhead to
-  elapsed-time parity. Because the paired timing intervals still cross zero, the
-  paper should frame this as promising pilot evidence rather than a
-  statistically supported elapsed-time speedup.
+- The timing evidence is now task-dependent rather than uniformly negative:
+  simple checkout and the initial co-change prompts were slower with
+  `workspace-cli`, the optimized policy task moved to elapsed-time parity, and
+  the larger invoice task used far fewer commands while showing a promising but
+  still statistically weak timing improvement. The optimized rollback suite is
+  the first repeated Codex-in-the-loop result where `workspace_cli` was faster
+  in every paired run and the paired timing interval did not cross zero. The
+  paper can make a controlled-task speedup claim for transactional recovery,
+  while still framing broader elapsed-time claims as early pilot evidence.
 
 ## Next Required Step
 
