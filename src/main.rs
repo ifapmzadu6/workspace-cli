@@ -97,6 +97,7 @@ const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.4;
 const RELATED_HYBRID_LOW_SIGNAL_METADATA_SCORE_MULTIPLIER: f64 = 0.3;
+const RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER: f64 = 0.3;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER: f64 = 6.0;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
 const RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER: f64 = 30.0;
@@ -4704,6 +4705,9 @@ fn related_hybrid_path_score_multiplier(
     if is_low_signal_repo_metadata_file(candidate) {
         multiplier *= RELATED_HYBRID_LOW_SIGNAL_METADATA_SCORE_MULTIPLIER;
     }
+    if is_release_workflow_metadata_candidate(target, candidate) {
+        multiplier *= RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER;
+    }
     multiplier
 }
 
@@ -4909,6 +4913,37 @@ fn is_script_like_file(path: &str) -> bool {
 
 fn is_low_signal_repo_metadata_file(path: &str) -> bool {
     matches!(path, ".gitignore")
+}
+
+fn is_release_workflow_metadata_candidate(target: &str, candidate: &str) -> bool {
+    is_release_workflow_file(candidate)
+        && !is_release_workflow_file(target)
+        && !is_project_manifest_or_lock(target)
+}
+
+fn is_release_workflow_file(path: &str) -> bool {
+    if path_parent(path) != ".github/workflows" {
+        return false;
+    }
+    if !matches!(path_extension(path), Some("yml" | "yaml")) {
+        return false;
+    }
+    let file_name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    file_name.contains("release") || file_name.contains("publish")
+}
+
+fn is_project_manifest_or_lock(path: &str) -> bool {
+    is_root_project_manifest(path)
+        || matches!(
+            path,
+            "Cargo.lock"
+                | "package-lock.json"
+                | "pnpm-lock.yaml"
+                | "yarn.lock"
+                | "uv.lock"
+                | "poetry.lock"
+                | "Gemfile.lock"
+        )
 }
 
 fn path_name_tokens(path: &str) -> BTreeSet<String> {
@@ -11987,6 +12022,36 @@ src/b.rs
             related_hybrid_path_score_multiplier("tools/measure_effect.py", ".gitignore", 1.0, 1.0),
             RELATED_HYBRID_LOW_SIGNAL_METADATA_SCORE_MULTIPLIER
         );
+        assert_eq!(
+            related_hybrid_path_score_multiplier(
+                "src/main.rs",
+                ".github/workflows/release.yml",
+                1.0,
+                1.0
+            ),
+            RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier(
+                "Cargo.toml",
+                ".github/workflows/release.yml",
+                1.0,
+                1.0
+            ),
+            1.0
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier(
+                "Cargo.lock",
+                ".github/workflows/release.yml",
+                1.0,
+                1.0
+            ),
+            1.0
+        );
+        assert!(is_release_workflow_file(".github/workflows/release.yml"));
+        assert!(is_release_workflow_file(".github/workflows/publish.yaml"));
+        assert!(!is_release_workflow_file(".github/workflows/ci.yml"));
         assert_eq!(
             related_hybrid_path_score_multiplier("tools/measure_effect.py", "README.md", 1.0, 1.0),
             related_path_score_multiplier("tools/measure_effect.py", "README.md")
