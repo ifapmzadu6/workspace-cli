@@ -188,6 +188,37 @@ def verify_threshold_log(path: Path, failures: list[str]) -> None:
         failures.append(f"thresholds.txt does not contain {PASS_MARKER!r}")
 
 
+def verify_clean_workspace_metadata(
+    effect_report: dict[str, Any],
+    result_summary: dict[str, Any],
+    failures: list[str],
+) -> None:
+    for label, report in (
+        ("effect.json", effect_report),
+        ("result_summary.json", result_summary),
+    ):
+        metadata = report.get("metadata")
+        if not isinstance(metadata, dict):
+            failures.append(f"{label} metadata must be present for clean verification")
+            continue
+        workspace_commit = metadata.get("workspace_commit")
+        if not isinstance(workspace_commit, str) or not workspace_commit.strip():
+            failures.append(
+                f"{label} metadata.workspace_commit must be a non-empty string"
+            )
+        if metadata.get("workspace_dirty") is not False:
+            failures.append(f"{label} metadata.workspace_dirty must be false")
+        status_line_count = metadata.get("workspace_status_line_count")
+        if (
+            not isinstance(status_line_count, int)
+            or isinstance(status_line_count, bool)
+            or status_line_count != 0
+        ):
+            failures.append(
+                f"{label} metadata.workspace_status_line_count must be integer 0"
+            )
+
+
 def verify_result_summary_schema(
     result_summary: dict[str, Any],
     failures: list[str],
@@ -342,7 +373,11 @@ def verify_threshold_recheck(
         failures.append(f"threshold recheck failed: {failure}")
 
 
-def verify_artifact_directory(artifact_dir: Path) -> list[str]:
+def verify_artifact_directory(
+    artifact_dir: Path,
+    *,
+    require_clean_workspace: bool = False,
+) -> list[str]:
     artifact_dir = artifact_dir.resolve()
     failures: list[str] = []
     if not artifact_dir.is_dir():
@@ -371,6 +406,8 @@ def verify_artifact_directory(artifact_dir: Path) -> list[str]:
     if "measurements" not in effect_report:
         failures.append("effect.json missing measurements")
     verify_result_summary_schema(result_summary, failures)
+    if require_clean_workspace:
+        verify_clean_workspace_metadata(effect_report, result_summary, failures)
     verify_residual_gap_clusters(result_summary, failures)
     verify_result_summary_matches_report(effect_report, result_summary, failures)
     verify_markdown_matches_report(effect_report, artifact_dir / "effect.md", failures)
@@ -384,13 +421,21 @@ def verify_artifact_directory(artifact_dir: Path) -> list[str]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--require-clean-workspace",
+        action="store_true",
+        help="fail unless artifact metadata records a clean workspace commit",
+    )
     parser.add_argument("artifact_dir", type=Path, help="effect artifact directory")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    failures = verify_artifact_directory(args.artifact_dir)
+    failures = verify_artifact_directory(
+        args.artifact_dir,
+        require_clean_workspace=args.require_clean_workspace,
+    )
     if failures:
         print("effect artifact verification failed:", file=sys.stderr)
         for failure in failures:

@@ -47,6 +47,7 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertIn("id: upload-paper-artifacts", workflow)
         self.assertIn("artifact-digest", workflow)
         self.assertIn("GITHUB_STEP_SUMMARY", workflow)
+        self.assertIn("--require-clean-workspace", workflow)
 
 
 class ExactSignFlipTests(unittest.TestCase):
@@ -1701,6 +1702,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         threshold_failures: list[str] | None = None,
         extracted_summary: dict | None = None,
         rendered_markdown: str | None = None,
+        require_clean_workspace: bool = False,
     ) -> list[str]:
         threshold_failures = threshold_failures or []
         extracted_summary = extracted_summary or self.SUMMARY_FIXTURE
@@ -1718,7 +1720,38 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             "render_report",
             return_value=rendered_markdown,
         ):
-            return verify_effect_artifacts.verify_artifact_directory(output_dir)
+            return verify_effect_artifacts.verify_artifact_directory(
+                output_dir,
+                require_clean_workspace=require_clean_workspace,
+            )
+
+    def rewrite_artifact_metadata(
+        self,
+        output_dir: Path,
+        metadata: dict,
+    ) -> dict:
+        effect_report = {"metadata": metadata, "measurements": []}
+        summary = {"metadata": metadata, "schema_version": 1}
+        (output_dir / "effect.json").write_text(
+            json.dumps(effect_report) + "\n",
+            encoding="utf-8",
+        )
+        (output_dir / "result_summary.json").write_text(
+            json.dumps(summary) + "\n",
+            encoding="utf-8",
+        )
+        run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+        run_manifest["sha256"]["json"] = verify_effect_artifacts.file_sha256(
+            output_dir / "effect.json"
+        )
+        run_manifest["sha256"]["result_summary"] = (
+            verify_effect_artifacts.file_sha256(output_dir / "result_summary.json")
+        )
+        (output_dir / "run_manifest.json").write_text(
+            json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return summary
 
     def test_artifact_verifier_accepts_complete_artifact_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1729,6 +1762,65 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 self.verify_with_patched_semantics(output_dir),
                 [],
             )
+
+    def test_artifact_verifier_rejects_dirty_metadata_when_clean_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            dirty_metadata = {
+                "workspace_commit": "abc123",
+                "workspace_dirty": True,
+                "workspace_status_line_count": 2,
+            }
+            summary = self.rewrite_artifact_metadata(output_dir, dirty_metadata)
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+                require_clean_workspace=True,
+            )
+
+        self.assertTrue(
+            any(
+                "metadata.workspace_dirty must be false" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "metadata.workspace_status_line_count must be integer 0" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_boolean_status_count_when_clean_required(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            metadata = {
+                "workspace_commit": "abc123",
+                "workspace_dirty": False,
+                "workspace_status_line_count": False,
+            }
+            summary = self.rewrite_artifact_metadata(output_dir, metadata)
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+                require_clean_workspace=True,
+            )
+
+        self.assertTrue(
+            any(
+                "metadata.workspace_status_line_count must be integer 0" in failure
+                for failure in failures
+            ),
+            failures,
+        )
 
     def test_artifact_verifier_rejects_checksum_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

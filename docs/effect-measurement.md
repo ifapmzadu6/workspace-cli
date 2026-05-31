@@ -35,8 +35,8 @@ python3 tools/verify_effect_artifacts.py target/effect-paper
 
 The `Paper Effect Artifacts` GitHub workflow runs the clean-machine path on
 demand and weekly. It prepares the public holdout remotes, generates
-`target/effect-paper`, verifies the artifact directory, and uploads it as a
-workflow artifact.
+`target/effect-paper`, verifies the artifact directory with
+`--require-clean-workspace`, and uploads it as a workflow artifact.
 
 If those pinned repositories are not already checked out at the manifest paths,
 prepare a local manifest from the recorded remotes before generating artifacts:
@@ -72,6 +72,10 @@ threshold log, manifest hash consistency against `effect.json` metadata,
 recomputed threshold gates, Markdown re-render consistency with `effect.json`,
 result-summary consistency with `effect.json`, and residual-cluster diagnostic
 fields for missing predictable/new targets plus top non-targets.
+The verifier also supports `--require-clean-workspace` for CI-published paper
+artifacts; this requires `workspace_dirty: false`,
+`workspace_status_line_count: 0` as an integer, and a recorded workspace
+commit in both `effect.json` and `result_summary.json`.
 For paper-style holdout reports, the threshold log gates case-weighted and
 repo-macro AP effect-size floors, oracle-normalized AP, plus Holm-adjusted
 paired sign-flip p-value ceilings for the key hybrid-vs-baseline deltas.
