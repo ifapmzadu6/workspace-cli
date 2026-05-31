@@ -95,7 +95,7 @@ const RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER: f64 = 1.2;
 const RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER: f64 = 3.5;
 const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
-const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.9;
+const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.4;
 const RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER: f64 = 1.5;
 const RELATED_HYBRID_SOURCE_CHANGELOG_SCORE_MULTIPLIER: f64 = 1.4;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
@@ -11784,13 +11784,22 @@ src/b.rs
             related_path_score_multiplier("README.md", "CHANGELOG.md")
         );
         assert_eq!(
-            related_hybrid_path_score_multiplier("README.md", "CHANGELOG.md", 1.0, 0.5),
+            related_hybrid_path_score_multiplier(
+                "README.md",
+                "CHANGELOG.md",
+                1.0,
+                RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE / 2.0,
+            ),
             related_path_score_multiplier("README.md", "CHANGELOG.md")
         );
         assert!(
-            related_hybrid_path_score_multiplier("README.md", "CHANGELOG.md", 1.0, 1.0)
-                >= related_path_score_multiplier("README.md", "CHANGELOG.md")
-                    * RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER
+            related_hybrid_path_score_multiplier(
+                "README.md",
+                "CHANGELOG.md",
+                1.0,
+                RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE,
+            ) >= related_path_score_multiplier("README.md", "CHANGELOG.md")
+                * RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER
         );
         assert_eq!(
             related_hybrid_path_score_multiplier("README.md", "docs/guide.md", 1.0, 1.0),
