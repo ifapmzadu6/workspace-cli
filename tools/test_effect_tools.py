@@ -2888,6 +2888,110 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures,
         )
 
+    def test_artifact_verifier_rejects_missing_markdown_residual_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            summary = {
+                "schema_version": 5,
+                "threshold_margins": [],
+                "repo_temporal_holdout": {
+                    "k": 5,
+                    "oracle_normalized": {
+                        "workspace_related_hybrid": {
+                            "oracle_gap_average_precision_at_5": 0.123,
+                        },
+                    },
+                    "residual_gap_clusters": [
+                        {
+                            "missing_expected_counts": [
+                                {"path": "src/main.rs", "count": 2},
+                            ],
+                            "method_false_positive_counts": [
+                                {"path": "README.md", "count": 3},
+                            ],
+                            "top_residual_cases": [
+                                {
+                                    "missing_expected": ["src/main.rs"],
+                                    "missing_expected_ranks": [
+                                        {
+                                            "path": "src/main.rs",
+                                            "rank": 2,
+                                            "score": 0.5,
+                                        },
+                                    ],
+                                    "missing_predictable_expected": ["src/main.rs"],
+                                    "missing_unpredictable_expected": [],
+                                    "method_hits": ["Cargo.toml"],
+                                    "method_false_positives": ["README.md"],
+                                    "method_top": ["README.md", "Cargo.toml"],
+                                    "method_top_ranked": [
+                                        {
+                                            "path": "README.md",
+                                            "rank": 1,
+                                            "score": 1.0,
+                                        },
+                                        {
+                                            "path": "Cargo.toml",
+                                            "rank": 2,
+                                            "score": 0.8,
+                                        },
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            }
+            stale_markdown = (
+                "# Effect Report\n\n"
+                "| missing counts | false-positive counts |\n"
+                "| --- | --- |\n"
+                "| stale | stale |\n"
+            )
+            (output_dir / "result_summary.json").write_text(
+                json.dumps(summary) + "\n",
+                encoding="utf-8",
+            )
+            (output_dir / "effect.md").write_text(
+                stale_markdown,
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["result_summary"] = (
+                verify_effect_artifacts.file_sha256(
+                    output_dir / "result_summary.json"
+                )
+            )
+            run_manifest["sha256"]["markdown"] = verify_effect_artifacts.file_sha256(
+                output_dir / "effect.md"
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+                rendered_markdown=stale_markdown,
+            )
+
+        self.assertTrue(
+            any(
+                "effect.md missing" in failure and "src/main.rs x2" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "effect.md missing" in failure and "README.md x3" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
     def test_artifact_verifier_rejects_effect_schema_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "artifacts"

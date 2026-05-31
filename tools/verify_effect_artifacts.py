@@ -955,6 +955,75 @@ def verify_markdown_matches_report(
         failures.append("effect.md does not match summarize_effect.py output")
 
 
+def verify_markdown_residual_count_tables(
+    result_summary: dict[str, Any],
+    markdown_path: Path,
+    failures: list[str],
+) -> None:
+    try:
+        markdown = markdown_path.read_text(encoding="utf-8")
+    except OSError as error:
+        failures.append(f"effect.md could not be read for residual count check: {error}")
+        return
+
+    holdout = result_summary.get("repo_temporal_holdout")
+    if not isinstance(holdout, dict):
+        return
+    verify_holdout_markdown_residual_count_table(
+        holdout,
+        "repo_temporal_holdout",
+        markdown,
+        failures,
+    )
+    predictable = holdout.get("predictable_only")
+    if isinstance(predictable, dict):
+        verify_holdout_markdown_residual_count_table(
+            predictable,
+            "repo_temporal_holdout.predictable_only",
+            markdown,
+            failures,
+        )
+
+
+def verify_holdout_markdown_residual_count_table(
+    holdout: dict[str, Any],
+    label: str,
+    markdown: str,
+    failures: list[str],
+) -> None:
+    clusters = holdout.get("residual_gap_clusters")
+    if not isinstance(clusters, list) or not clusters:
+        return
+    if "missing counts" not in markdown:
+        failures.append(f"effect.md missing missing counts column for {label}")
+    if "false-positive counts" not in markdown:
+        failures.append(f"effect.md missing false-positive counts column for {label}")
+    for cluster_index, cluster in enumerate(clusters):
+        if not isinstance(cluster, dict):
+            continue
+        cluster_label = f"{label}.residual_gap_clusters[{cluster_index}]"
+        for field in ("missing_expected_counts", "method_false_positive_counts"):
+            text = format_residual_path_counts(cluster.get(field))
+            if text and text not in markdown:
+                failures.append(f"effect.md missing {cluster_label}.{field}: {text}")
+
+
+def format_residual_path_counts(value: Any, *, limit: int = 4) -> str:
+    if not isinstance(value, list) or not value:
+        return ""
+    rendered = []
+    for entry in value[:limit]:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        count = entry.get("count")
+        if isinstance(path, str) and isinstance(count, int) and not isinstance(count, bool):
+            rendered.append(f"{path} x{count}")
+    if len(value) > limit:
+        rendered.append(f"+{len(value) - limit} more")
+    return ", ".join(rendered)
+
+
 def verify_threshold_recheck(
     effect_report: dict[str, Any],
     manifest: dict[str, Any],
@@ -1011,6 +1080,11 @@ def verify_artifact_directory(
     verify_residual_gap_clusters(result_summary, failures)
     verify_result_summary_matches_report(effect_report, result_summary, failures)
     verify_markdown_matches_report(effect_report, artifact_dir / "effect.md", failures)
+    verify_markdown_residual_count_tables(
+        result_summary,
+        artifact_dir / "effect.md",
+        failures,
+    )
     verify_manifest_shape(manifest, failures)
     verify_checksums(artifact_dir, manifest, failures)
     verify_holdout_manifest_hashes(effect_report, manifest, failures)
