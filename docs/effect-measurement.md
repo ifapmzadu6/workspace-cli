@@ -266,8 +266,10 @@ outside manifest and lockfile contexts, down-weights cross-ecosystem package
 metadata in mixed Cargo/npm repositories outside manifest, lockfile, release,
 and JavaScript contexts, down-weights saturated package/release metadata ties
 for Cargo manifest and lockfile seeds in mixed Cargo/npm repositories, lightly
-down-weights JavaScript lockfiles for source/test seeds, and the impact-specific
-PageRank ranking that lightly prioritizes tests over documentation noise.
+down-weights utility-shaped source siblings for non-utility source seeds,
+lightly down-weights JavaScript lockfiles for source/test seeds, and the
+impact-specific PageRank ranking that lightly prioritizes tests over
+documentation noise.
 The path-locality baseline ranks tracked files by shared parent directories and
 file extensions with the seed files, so it controls for a cheap static
 seed-specific signal without using history.
@@ -638,7 +640,7 @@ file labels. It preserves the main result with tighter aggregate evidence:
 
 ```text
 expanded temporal leakage audit: 53/53 cases checked, index head matched held-out parent for 53, failures 0
-expanded cross_repo hybrid average_precision@5: 0.822 (0.749, 0.895)
+expanded cross_repo hybrid average_precision@5: 0.834 (0.760, 0.901)
 expanded cross_repo direct average_precision@5: 0.626 (0.524, 0.736)
 expanded cross_repo pagerank average_precision@5: 0.577 (0.490, 0.665)
 expanded cross_repo recent_activity average_precision@5: 0.403 (0.321, 0.485)
@@ -647,47 +649,47 @@ expanded cross_repo path_locality average_precision@5: 0.095 (0.064, 0.127)
 expanded cross_repo lexical_similarity average_precision@5: 0.244 (0.152, 0.336)
 expanded cross_repo content_similarity average_precision@5: 0.378 (0.322, 0.434)
 expanded cross_repo history_oracle_ceiling average_precision@5: 0.853 (0.784, 0.918)
-expanded cross_repo hybrid oracle-normalized average_precision@5: 0.964, oracle gap: 0.031
-expanded cross_repo hybrid - direct average_precision@5: +0.196 (0.141, 0.251), wins/ties/losses 29/24/0, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - pagerank average_precision@5: +0.245 (0.184, 0.311), wins/ties/losses 35/16/2, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.578 (0.479, 0.676), wins/ties/losses 43/9/1, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - content_similarity average_precision@5: +0.444 (0.381, 0.512), wins/ties/losses 49/3/1, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - recent_activity average_precision@5: +0.419 (0.346, 0.494), wins/ties/losses 44/9/0, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - global_pagerank average_precision@5: +0.324 (0.255, 0.398), wins/ties/losses 39/12/2, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid average_precision@5: 0.864 (0.802, 0.924)
+expanded cross_repo hybrid oracle-normalized average_precision@5: 0.978, oracle gap: 0.019
+expanded cross_repo hybrid - direct average_precision@5: +0.207 (0.151, 0.266), wins/ties/losses 29/24/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - pagerank average_precision@5: +0.257 (0.194, 0.322), wins/ties/losses 37/14/2, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.590 (0.490, 0.684), wins/ties/losses 43/9/1, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - content_similarity average_precision@5: +0.456 (0.394, 0.523), wins/ties/losses 49/4/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - recent_activity average_precision@5: +0.431 (0.360, 0.504), wins/ties/losses 45/8/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - global_pagerank average_precision@5: +0.336 (0.264, 0.410), wins/ties/losses 39/12/2, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid average_precision@5: 0.882 (0.819, 0.938)
 expanded predictable cross_repo lexical_similarity average_precision@5: 0.253 (0.159, 0.353)
 expanded predictable cross_repo content_similarity average_precision@5: 0.399 (0.341, 0.457)
 expanded predictable cross_repo history_oracle_ceiling average_precision@5: 0.915 (0.863, 0.957)
-expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.944, oracle gap: 0.051
-expanded predictable cross_repo hybrid - direct average_precision@5: +0.220 (0.152, 0.287), wins/ties/losses 29/23/0, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.253 (0.194, 0.319), wins/ties/losses 35/15/2, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.611 (0.511, 0.707), wins/ties/losses 43/8/1, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - content_similarity average_precision@5: +0.465 (0.401, 0.533), wins/ties/losses 49/2/1, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.964, oracle gap: 0.033
+expanded predictable cross_repo hybrid - direct average_precision@5: +0.237 (0.165, 0.309), wins/ties/losses 29/23/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.271 (0.207, 0.342), wins/ties/losses 37/13/2, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.629 (0.525, 0.729), wins/ties/losses 43/8/1, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - content_similarity average_precision@5: +0.482 (0.419, 0.549), wins/ties/losses 49/3/0, p_greater=<0.0001, holm_p_greater=<0.0001
 ```
 
 The expanded manifest also runs a denser hybrid direct-weight sweep:
 
 ```text
-expanded cross_repo hybrid direct_weight=0.00 average_precision@5: 0.690
-expanded cross_repo hybrid direct_weight=0.05 average_precision@5: 0.704
-expanded cross_repo hybrid direct_weight=0.10 average_precision@5: 0.721
-expanded cross_repo hybrid direct_weight=0.25 average_precision@5: 0.764
-expanded cross_repo hybrid direct_weight=0.50 average_precision@5: 0.796
-expanded cross_repo hybrid direct_weight=0.60 average_precision@5: 0.796
-expanded cross_repo hybrid direct_weight=0.70 average_precision@5: 0.808
-expanded cross_repo hybrid direct_weight=0.75 average_precision@5: 0.813
-expanded cross_repo hybrid direct_weight=0.80 average_precision@5: 0.813
-expanded cross_repo hybrid direct_weight=0.82 average_precision@5: 0.813
-expanded cross_repo hybrid direct_weight=0.85 average_precision@5: 0.822
-expanded cross_repo hybrid direct_weight=0.88 average_precision@5: 0.822
-expanded cross_repo hybrid direct_weight=0.90 average_precision@5: 0.822
-expanded cross_repo hybrid direct_weight=0.92 average_precision@5: 0.821
-expanded cross_repo hybrid direct_weight=0.95 average_precision@5: 0.811
-expanded cross_repo hybrid direct_weight=1.00 average_precision@5: 0.764
-expanded cross_repo hybrid direct_weight=0.90 - direct average_precision@5: +0.196 (0.140, 0.256), p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid direct_weight=0.90 - pagerank average_precision@5: +0.245 (0.179, 0.316), p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid direct_weight=0.50 average_precision@5: 0.835
-expanded predictable cross_repo hybrid direct_weight=0.90 average_precision@5: 0.864
+expanded cross_repo hybrid direct_weight=0.00 average_precision@5: 0.698
+expanded cross_repo hybrid direct_weight=0.05 average_precision@5: 0.712
+expanded cross_repo hybrid direct_weight=0.10 average_precision@5: 0.729
+expanded cross_repo hybrid direct_weight=0.25 average_precision@5: 0.772
+expanded cross_repo hybrid direct_weight=0.50 average_precision@5: 0.804
+expanded cross_repo hybrid direct_weight=0.60 average_precision@5: 0.804
+expanded cross_repo hybrid direct_weight=0.70 average_precision@5: 0.816
+expanded cross_repo hybrid direct_weight=0.75 average_precision@5: 0.824
+expanded cross_repo hybrid direct_weight=0.80 average_precision@5: 0.824
+expanded cross_repo hybrid direct_weight=0.82 average_precision@5: 0.824
+expanded cross_repo hybrid direct_weight=0.85 average_precision@5: 0.834
+expanded cross_repo hybrid direct_weight=0.88 average_precision@5: 0.834
+expanded cross_repo hybrid direct_weight=0.90 average_precision@5: 0.834
+expanded cross_repo hybrid direct_weight=0.92 average_precision@5: 0.833
+expanded cross_repo hybrid direct_weight=0.95 average_precision@5: 0.823
+expanded cross_repo hybrid direct_weight=1.00 average_precision@5: 0.784
+expanded cross_repo hybrid direct_weight=0.90 - direct average_precision@5: +0.207 (0.149, 0.268), p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid direct_weight=0.90 - pagerank average_precision@5: +0.257 (0.189, 0.327), p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid direct_weight=0.50 average_precision@5: 0.854
+expanded predictable cross_repo hybrid direct_weight=0.90 average_precision@5: 0.882
 ```
 
 With the related path, CI-workflow manifest, changelog-manifest,
@@ -695,61 +697,60 @@ root-document direct-tie, shared filename-token, unshared script-utility
 sibling suppression, low-signal repository-metadata down-weight,
 release-workflow metadata down-weight outside manifest and lockfile contexts,
 cross-ecosystem package-metadata down-weight in mixed Cargo/npm repositories,
-Cargo saturated package/release metadata down-weight, JS/TS source-changelog,
-JS toolchain cold-start, changelog-to-toolchain cold-start, bidirectional
-evaluation-script documentation, skill-document evaluation-document,
-non-manifest metadata suppression, README-to-lockfile, and JS
-source/test-to-lockfile down-weight priors enabled, the fine sweep has a broad
-high-weight plateau and peaks across 0.85 to 0.90 on both the all-target and
-predictable slices.
+Cargo saturated package/release metadata down-weight, source utility-sibling
+down-weight, JS/TS source-changelog, JS toolchain cold-start,
+changelog-to-toolchain cold-start, bidirectional evaluation-script
+documentation, skill-document evaluation-document, non-manifest metadata
+suppression, README-to-lockfile, and JS source/test-to-lockfile down-weight
+priors enabled, the fine sweep has a broad high-weight plateau and peaks across
+0.85 to 0.90 on both the all-target and predictable slices.
 Leave-one-repo-out selection over that dense grid uses a 0.002 AP/nDCG
 indifference band to avoid overfitting tiny train-fold differences. It selects
 0.90 for all three held-out repositories on both all-target and predictable
-slices. The LORO aggregate matches the fixed default, with AP@5 0.822
-all-target and 0.864 predictable-only. Because 0.90 is now on the fixed-ref peak
-and the LORO-selected weight, the CLI related hybrid default remains 0.90.
+slices. The LORO aggregate matches the fixed default, with AP@5 0.834
+all-target and 0.882 predictable-only. Because 0.90 is now on the fixed-ref
+peak and the LORO-selected weight, the CLI related hybrid default remains 0.90.
 
 Residual gap analysis on the fixed-ref manifest shows that the remaining
-oracle gap is concentrated rather than diffuse. The largest remaining cluster is
-a `related-cli` source split (`97835ef97e8d`), capped below perfect oracle AP
-because `src/model.rs` is new at the parent revision while the older source
-siblings have broad, tied historical evidence. The lower-threshold root-document
-prior lifts strongly tied narrative documents, while filename-token and
-bidirectional evaluation-script documentation priors connect comparison scripts
-with their root measurement docs. The skill-document evaluation-document prior
-then recovers `MEASUREMENTS.md` for the `skills/find-related-files/SKILL.md`
-seed while leaving the `src/main.rs` source split residual untouched; the
-broader source-entrypoint variant regresses the source split by promoting
-evaluation documents above source siblings. The non-manifest metadata
-suppression then removes `package.json` and CI workflow metadata from the
-`src/main.rs` seed's top five without touching manifest and lockfile seeds where
-package and release automation are true version-bump neighbors. The low-signal
-metadata down-weight moves `.gitignore` behind source and test neighbors in the
-`workspace-cli` hybrid-ranking holdout, making that repository's expanded
-per-repo oracle gap zero. Unshared script-utility suppression keeps older release
-helper scripts out of the top five for comparison-script seeds, but historical
-evidence still ranks package metadata as strongly related, and release workflows
-remain strong for manifest and lockfile seeds where version-bump history makes
-them legitimate neighbors. The release-workflow metadata down-weight removes
-that automation churn from the top five for source, documentation, and skill
-seeds without regressing the version-bump cases. The cross-ecosystem
-package-metadata down-weight then lowers `package.json` for non-manifest
-source, documentation, and skill seeds in the mixed Cargo/npm residual while
-preserving package and release neighbors for ordinary manifest and lockfile
-version-bump seeds. The Cargo saturated-metadata down-weight then handles the
-remaining `related-cli` behavior-removal commit (`6447d4333c23`): when
-`package.json` and release workflow metadata tie the Cargo counterpart as the
-maximum direct edge, the metadata paths move behind README, the skill document,
-and `src/main.rs`, reducing that cluster's oracle gap from 0.646 to 0.224 while
-leaving the `5cf1f67199` and `71313f1274` version-bump cases intact. The JS/TS
-source-changelog prior narrows the next `llm-json-extract`
-source/test residual (`21764e9cfbe3`), the README-to-lockfile down-weight
-removes `package-lock.json` from the top four for the feature-edit README seed,
-and the JS source/test lockfile down-weight moves `README.md` ahead of
+oracle gap is concentrated rather than diffuse. The largest remaining
+all-target cluster is now the `llm-json-extract` schema feature commit
+(`21764e9cfbe3`), where `package-lock.json` remains the top-k non-target for
+the changelog and package-manifest seeds even though source, test, package, and
+README targets are all present. The JS/TS source-changelog prior narrows that
+source/test residual, the README-to-lockfile down-weight removes
+`package-lock.json` from the top four for the feature-edit README seed, and the
+JS source/test lockfile down-weight moves `README.md` ahead of
 `package-lock.json` for the matching source and test seeds without changing
-dependency-bump seeds where lockfiles are true targets. `package-lock.json`
-remains the top-k non-target for the changelog and package-manifest seeds in
-that feature-edit commit. The strengthened
+dependency-bump seeds where lockfiles are true targets.
+
+The lower-threshold root-document prior lifts strongly tied narrative
+documents, while filename-token and bidirectional evaluation-script
+documentation priors connect comparison scripts with their root measurement
+docs. The skill-document evaluation-document prior then recovers
+`MEASUREMENTS.md` for the `skills/find-related-files/SKILL.md` seed. The
+non-manifest metadata suppression removes `package.json` and CI workflow
+metadata from source/documentation seeds without touching manifest and lockfile
+seeds where package and release automation are true version-bump neighbors. The
+low-signal metadata down-weight moves `.gitignore` behind source and test
+neighbors in the `workspace-cli` hybrid-ranking holdout, making that
+repository's expanded per-repo oracle gap zero. Unshared script-utility
+suppression keeps older release helper scripts out of the top five for
+comparison-script seeds, while the release-workflow metadata down-weight removes
+automation churn from source, documentation, and skill seeds without regressing
+the version-bump cases. The cross-ecosystem package-metadata down-weight lowers
+`package.json` for non-manifest source, documentation, and skill seeds in the
+mixed Cargo/npm residual while preserving package and release neighbors for
+ordinary manifest and lockfile version-bump seeds. The Cargo saturated-metadata
+down-weight then handles the `related-cli` behavior-removal commit
+(`6447d4333c23`): when `package.json` and release workflow metadata tie the
+Cargo counterpart as the maximum direct edge, the metadata paths move behind
+README, the skill document, and `src/main.rs`, reducing that cluster's oracle
+gap from 0.646 to 0.224 while leaving the `5cf1f67199` and `71313f1274`
+version-bump cases intact. The source utility-sibling down-weight resolves the
+`related-cli` source split (`97835ef97e8d`) by moving `cli.rs` and `*_utils.rs`
+behind non-utility source siblings; the hybrid ranking now reaches the
+history-oracle AP ceiling for those cases even though new `src/model.rs` cannot
+be ranked from parent-history evidence. The strengthened
 changelog-to-toolchain cold-start prior recovers `tsconfig.json` for the
 `llm-json-extract` dependency bump (`6a2977eb724e`) when there is no direct
 changelog edge yet, removing that commit from the residual clusters while

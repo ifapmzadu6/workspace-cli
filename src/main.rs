@@ -91,6 +91,7 @@ const RELATED_SHARED_EXTENSION_SCORE_MULTIPLIER: f64 = 1.03;
 const RELATED_SHARED_TEST_KIND_SCORE_MULTIPLIER: f64 = 1.04;
 const RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER: f64 = 4.25;
 const RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT: f64 = 0.3;
+const RELATED_HYBRID_SOURCE_UTILITY_SIBLING_SCORE_MULTIPLIER: f64 = 0.65;
 const RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER: f64 = 1.2;
 const RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER: f64 = 3.5;
 const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
@@ -4674,6 +4675,11 @@ fn related_hybrid_path_score_multiplier(
     {
         multiplier *= RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight >= RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT
+        && is_source_utility_sibling_candidate(target, candidate)
+    {
+        multiplier *= RELATED_HYBRID_SOURCE_UTILITY_SIBLING_SCORE_MULTIPLIER;
+    }
     if direct_edge_weight > 0.0 && is_manifest_lock_pair(target, candidate) {
         multiplier *= RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER;
     }
@@ -4738,6 +4744,26 @@ fn is_same_source_sibling(target: &str, candidate: &str) -> bool {
         && path_extension(target) == path_extension(candidate)
         && is_source_code_file(target)
         && is_source_code_file(candidate)
+}
+
+fn is_source_utility_sibling_candidate(target: &str, candidate: &str) -> bool {
+    is_same_source_sibling(target, candidate)
+        && !is_source_utility_module(target)
+        && is_source_utility_module(candidate)
+}
+
+fn is_source_utility_module(path: &str) -> bool {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    let stem = file_name
+        .split_once('.')
+        .map_or(file_name, |(stem, _)| stem);
+    stem == "cli"
+        || stem == "cmd"
+        || stem == "commands"
+        || stem == "utils"
+        || stem == "util"
+        || stem.ends_with("_utils")
+        || stem.ends_with("_util")
 }
 
 fn is_source_code_file(path: &str) -> bool {
@@ -11934,6 +11960,17 @@ src/b.rs
                 >= pagerank_multiplier * RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER
         );
         assert_eq!(
+            related_hybrid_path_score_multiplier("src/main.rs", "src/path_utils.rs", 1.0, 1.0),
+            related_path_score_multiplier("src/main.rs", "src/path_utils.rs")
+                * RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER
+                * RELATED_HYBRID_SOURCE_UTILITY_SIBLING_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("src/path_utils.rs", "src/main.rs", 1.0, 1.0),
+            related_path_score_multiplier("src/path_utils.rs", "src/main.rs")
+                * RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER
+        );
+        assert_eq!(
             related_hybrid_path_score_multiplier("src/main.rs", "Cargo.toml", 1.0, 1.0),
             1.0
         );
@@ -12265,6 +12302,9 @@ src/b.rs
         assert!(!is_same_source_sibling("main.rs", "lib.rs"));
         assert!(!is_source_code_file("README.md"));
         assert!(!is_source_code_file("scripts/release.sh"));
+        assert!(is_source_utility_module("src/cli.rs"));
+        assert!(is_source_utility_module("src/path_utils.rs"));
+        assert!(!is_source_utility_module("src/output.rs"));
     }
 
     #[test]
