@@ -447,6 +447,24 @@ The paired timing delta was `-27.443s` with interval `(-35.891, -18.992)`;
 `-7.250` commands with interval `(-9.500, -5.494)`. This directly fixes the
 rollback regression observed in the previous clean four-task aggregate.
 
+Rerunning the four-task same-commit aggregate with `workspace trial` included at
+commit `d60671ba693b6ce1a43d9e54944002b8315cf96c` produced:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 8 | 1.000 | 1.000 | 56.813 (45.400, 67.082) | 10.500 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 8 | 1.000 | 1.000 | 39.851 (33.992, 47.486) | 4.375 | 4.375 | 4.250 | 0.250 |
+
+Across the eight paired passing runs, the timing delta was `-16.962s` with
+interval `(-28.078, -6.259)`, and `workspace_cli` was faster in six of eight
+pairs. The command-count delta was `-6.125` commands with interval
+`(-8.375, -3.750)`. By task, the timing deltas were
+`invoice_tax_sync = -6.842s`, `policy_threshold_sync = +1.391s`,
+`rollback_recovery = -33.107s`, and
+`subscription_rollout_sync = -29.291s`. Rollback and subscription were faster in
+both pairs, invoice was split one-to-one while still using seven fewer commands
+on average, and policy remained a near-parity small task.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -478,13 +496,15 @@ entries and no `operation log unreadable` status.
   Adding `workspace trial` then converted rollback recovery from the remaining
   regression into a clean four-run speedup with a non-zero-crossing interval.
   The updated four-task same-commit aggregate also has a non-zero-crossing timing
-  improvement. The paper can now make controlled-task speedup claims for
-  transactional recovery, invoice-style multi-file synchronization, subscription
-  rollout synchronization, and same-commit aggregate behavior.
+  improvement after `workspace trial`, with rollback no longer the regressing
+  task. The paper can now make controlled-task speedup claims for transactional
+  recovery, invoice-style multi-file synchronization, subscription rollout
+  synchronization, and same-commit aggregate behavior.
 
 ## Next Required Step
 
-The next evaluation should rerun the four-task same-commit aggregate with
-`workspace trial` included, then increase repetitions on the combined task set.
-The report should keep separating single-task speed claims, larger-task safety
-claims, merged artifact claims, and same-commit cross-task aggregate claims.
+The next evaluation should increase repetitions on the four-task aggregate with
+`workspace trial` included and refresh the paper artifact bundle from that clean
+commit. The report should keep separating single-task speed claims, larger-task
+safety claims, merged artifact claims, and same-commit cross-task aggregate
+claims.
