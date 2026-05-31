@@ -265,6 +265,65 @@ def aggregate_suite(
     }
 
 
+def metadata_value(values: list[Any]) -> Any:
+    present = [value for value in values if value not in (None, "")]
+    if not present:
+        return ""
+    first = present[0]
+    if all(value == first for value in present):
+        return first
+    return sorted({str(value) for value in present})
+
+
+def suite_summary_path(path: Path) -> Path:
+    if path.is_dir():
+        return path / "suite_summary.json"
+    return path
+
+
+def load_suite_summary(path: Path) -> dict[str, Any]:
+    summary_path = suite_summary_path(path)
+    data = json.loads(summary_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"suite summary must be a JSON object: {summary_path}")
+    if not isinstance(data.get("runs"), list):
+        raise ValueError(f"suite summary missing runs array: {summary_path}")
+    return data
+
+
+def merge_suite_summaries(
+    suite_paths: list[Path],
+    *,
+    bootstrap_samples: int = BOOTSTRAP_SAMPLES,
+) -> dict[str, Any]:
+    summaries = [load_suite_summary(path) for path in suite_paths]
+    runs = [run for summary in summaries for run in summary["runs"]]
+    merged = aggregate_suite(runs, bootstrap_samples=bootstrap_samples)
+    merged["source_suites"] = [
+        {
+            "path": str(suite_summary_path(path)),
+            "tasks": summary.get("tasks", []),
+            "run_count": summary.get("run_count", 0),
+            "workspace_commit": summary.get("workspace_commit", ""),
+            "workspace_dirty": bool(summary.get("workspace_dirty")),
+        }
+        for path, summary in zip(suite_paths, summaries)
+    ]
+    merged["codex_binary"] = metadata_value(
+        [summary.get("codex_binary", "") for summary in summaries]
+    )
+    merged["workspace_binary"] = metadata_value(
+        [summary.get("workspace_binary", "") for summary in summaries]
+    )
+    merged["workspace_commit"] = metadata_value(
+        [summary.get("workspace_commit", "") for summary in summaries]
+    )
+    merged["workspace_dirty"] = any(
+        bool(summary.get("workspace_dirty")) for summary in summaries
+    )
+    return merged
+
+
 def elapsed_ci(summary: dict[str, Any]) -> str:
     elapsed = summary["elapsed_seconds"]
     return (
@@ -280,22 +339,34 @@ def delta_ci(delta: dict[str, Any]) -> str:
     )
 
 
+def markdown_metadata_value(value: Any) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return str(value)
+
+
 def render_suite_markdown(summary: dict[str, Any]) -> str:
     lines = [
         "# Codex Workspace Suite",
         "",
         f"- generated_at: `{summary['generated_at']}`",
-        f"- workspace commit: `{summary.get('workspace_commit', '')}`",
+        f"- workspace commit: `{markdown_metadata_value(summary.get('workspace_commit', ''))}`",
         f"- workspace dirty: `{str(summary.get('workspace_dirty', '')).lower()}`",
         f"- tasks: `{', '.join(summary['tasks'])}`",
         f"- pilot runs: `{summary['run_count']}`",
         f"- bootstrap samples: `{summary['bootstrap_samples']}`",
-        "",
-        "## Overall Conditions",
-        "",
-        "| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean log entries | mean rollback ops |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
+    if summary.get("source_suites"):
+        lines.append(f"- source suites: `{len(summary['source_suites'])}`")
+    lines.extend(
+        [
+            "",
+            "## Overall Conditions",
+            "",
+            "| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean log entries | mean rollback ops |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
     for condition, stats in summary["conditions"].items():
         lines.append(
             "| {condition} | {runs} | {pass_rate:.3f} | {diff_correct:.3f} | "
@@ -445,6 +516,12 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
     )
     summary["workspace_commit"] = commit.stdout.strip() if commit.returncode == 0 else ""
     summary["workspace_dirty"] = bool(status.stdout.strip())
+    write_suite_artifacts(summary, output_dir)
+    return summary
+
+
+def write_suite_artifacts(summary: dict[str, Any], output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "suite_summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -453,7 +530,6 @@ def run_suite(args: argparse.Namespace) -> dict[str, Any]:
         render_suite_markdown(summary),
         encoding="utf-8",
     )
-    return summary
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -503,6 +579,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="reuse existing per-run summary.json files when present",
     )
+    parser.add_argument(
+        "--merge-suite",
+        nargs="+",
+        type=Path,
+        help=(
+            "merge existing suite directories or suite_summary.json files instead "
+            "of running new Codex pilots"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.repetitions < 1:
         parser.error("--repetitions must be at least 1")
@@ -514,7 +599,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        summary = run_suite(args)
+        if args.merge_suite:
+            summary = merge_suite_summaries(
+                args.merge_suite,
+                bootstrap_samples=args.bootstrap_samples,
+            )
+            write_suite_artifacts(summary, args.output_dir.resolve())
+        else:
+            summary = run_suite(args)
     except Exception as error:
         print(f"codex workspace suite failed: {error}", file=sys.stderr)
         return 1
