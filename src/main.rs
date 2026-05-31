@@ -107,6 +107,7 @@ const RELATED_HYBRID_EVAL_DOC_SCRIPT_SCORE_MULTIPLIER: f64 = 3.1;
 const RELATED_HYBRID_SKILL_EVAL_DOC_SCORE_MULTIPLIER: f64 = 3.0;
 const RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER: f64 = 1.5;
 const RELATED_HYBRID_SOURCE_CHANGELOG_SCORE_MULTIPLIER: f64 = 1.4;
+const RELATED_HYBRID_README_LOCKFILE_SCORE_MULTIPLIER: f64 = 0.9;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
@@ -4714,6 +4715,9 @@ fn related_hybrid_path_score_multiplier(
     if is_release_workflow_metadata_candidate(target, candidate) {
         multiplier *= RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0 && is_readme_lockfile_candidate(target, candidate) {
+        multiplier *= RELATED_HYBRID_README_LOCKFILE_SCORE_MULTIPLIER;
+    }
     multiplier
 }
 
@@ -4927,6 +4931,14 @@ fn is_script_like_file(path: &str) -> bool {
 
 fn is_low_signal_repo_metadata_file(path: &str) -> bool {
     matches!(path, ".gitignore")
+}
+
+fn is_readme_lockfile_candidate(target: &str, candidate: &str) -> bool {
+    target == "README.md" && is_javascript_lockfile(candidate)
+}
+
+fn is_javascript_lockfile(path: &str) -> bool {
+    matches!(path, "package-lock.json" | "pnpm-lock.yaml" | "yarn.lock")
 }
 
 fn is_release_workflow_metadata_candidate(target: &str, candidate: &str) -> bool {
@@ -12081,6 +12093,15 @@ src/b.rs
         assert_eq!(
             related_hybrid_path_score_multiplier("src/main.rs", "COMPARISON.md", 1.0, 0.1),
             related_path_score_multiplier("src/main.rs", "COMPARISON.md")
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("README.md", "package-lock.json", 1.0, 1.0),
+            related_path_score_multiplier("README.md", "package-lock.json")
+                * RELATED_HYBRID_README_LOCKFILE_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("CHANGELOG.md", "package-lock.json", 1.0, 1.0),
+            related_path_score_multiplier("CHANGELOG.md", "package-lock.json")
         );
         assert_eq!(
             related_hybrid_path_score_multiplier("tools/measure_effect.py", ".gitignore", 1.0, 1.0),
