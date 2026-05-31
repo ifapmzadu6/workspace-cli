@@ -98,6 +98,7 @@ const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.4;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER: f64 = 6.0;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
+const RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER: f64 = 30.0;
 const RELATED_HYBRID_EVAL_SCRIPT_DOC_SCORE_MULTIPLIER: f64 = 1.15;
 const RELATED_HYBRID_EVAL_DOC_SCRIPT_SCORE_MULTIPLIER: f64 = 3.1;
 const RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER: f64 = 1.5;
@@ -4686,6 +4687,10 @@ fn related_hybrid_path_score_multiplier(
     {
         multiplier *= RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight == 0.0 && is_changelog_javascript_toolchain_config_pair(target, candidate)
+    {
+        multiplier *= RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER;
+    }
     if direct_edge_weight > 0.0 && is_evaluation_script_documentation_pair(target, candidate) {
         multiplier *= RELATED_HYBRID_EVAL_SCRIPT_DOC_SCORE_MULTIPLIER;
     }
@@ -4807,6 +4812,11 @@ fn is_javascript_toolchain_manifest_pair(target: &str, candidate: &str) -> bool 
 
 fn is_javascript_toolchain_config(path: &str) -> bool {
     matches!(path, "tsconfig.json" | "jsconfig.json")
+}
+
+fn is_changelog_javascript_toolchain_config_pair(target: &str, candidate: &str) -> bool {
+    (is_project_changelog(target) && is_javascript_toolchain_config(candidate))
+        || (is_javascript_toolchain_config(target) && is_project_changelog(candidate))
 }
 
 fn is_javascript_package_manifest_or_lock(path: &str) -> bool {
@@ -11899,6 +11909,15 @@ src/b.rs
             related_hybrid_path_score_multiplier("package-lock.json", "jsconfig.json", 1.0, 0.05)
                 >= related_path_score_multiplier("package-lock.json", "jsconfig.json")
                     * RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER
+        );
+        assert!(
+            related_hybrid_path_score_multiplier("CHANGELOG.md", "tsconfig.json", 0.0, 0.0)
+                >= related_path_score_multiplier("CHANGELOG.md", "tsconfig.json")
+                    * RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("CHANGELOG.md", "tsconfig.json", 1.0, 0.1),
+            related_path_score_multiplier("CHANGELOG.md", "tsconfig.json")
         );
         assert!(
             related_hybrid_path_score_multiplier("scripts/compare.sh", "COMPARISON.md", 1.0, 0.1)
