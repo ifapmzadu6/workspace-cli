@@ -1545,6 +1545,29 @@ class EffectThresholdTests(unittest.TestCase):
             output,
         )
 
+    def test_effect_threshold_success_output_preserves_tiny_ceiling_values(self) -> None:
+        report = self.passing_report()
+        tiny_p_value = 3.725290298461914e-9
+        for delta in report["measurements"][-1]["paired_deltas"].values():
+            delta["p_greater_holm_delta_average_precision_at_5"] = tiny_p_value
+
+        output = check_effect_thresholds.render_success_output(
+            report,
+            require_holdout=True,
+        )
+
+        expected = (
+            "- repo_temporal_holdout_aggregate.paired_deltas"
+            ".max_holm_p_greater_average_precision_at_5: "
+            "value=3.72529e-09, maximum=0.0050, headroom=+0.0050\n"
+        )
+        self.assertIn(expected, output)
+        self.assertNotIn(
+            "repo_temporal_holdout_aggregate.paired_deltas"
+            ".max_holm_p_greater_average_precision_at_5: value=0.0000",
+            output,
+        )
+
     def test_effect_threshold_margin_entries_are_structured(self) -> None:
         entries = check_effect_thresholds.threshold_margin_entries(
             self.passing_report(),

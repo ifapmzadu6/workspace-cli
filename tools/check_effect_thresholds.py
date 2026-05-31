@@ -972,6 +972,17 @@ def append_ceiling_margin(
     )
 
 
+def format_threshold_float(value: float, *, decimals: int, signed: bool = False) -> str:
+    number = float(value)
+    if number == 0.0:
+        number = 0.0
+    sign = "+" if signed else ""
+    fixed = f"{number:{sign}.{decimals}f}"
+    if number != 0.0 and float(fixed) == 0.0:
+        return f"{number:{sign}.6g}"
+    return fixed
+
+
 def format_threshold_margin_entry(entry: dict[str, Any]) -> str:
     label = str(entry.get("label", ""))
     if entry.get("missing"):
@@ -985,15 +996,15 @@ def format_threshold_margin_entry(entry: dict[str, Any]) -> str:
                 f"margin={int(entry['margin']):+d}"
             )
         return (
-            f"{label}: value={float(entry['value']):.3f}, "
-            f"minimum={float(entry['minimum']):.3f}, "
-            f"margin={float(entry['margin']):+.3f}"
+            f"{label}: value={format_threshold_float(entry['value'], decimals=3)}, "
+            f"minimum={format_threshold_float(entry['minimum'], decimals=3)}, "
+            f"margin={format_threshold_float(entry['margin'], decimals=3, signed=True)}"
         )
     if gate == "maximum":
         return (
-            f"{label}: value={float(entry['value']):.4f}, "
-            f"maximum={float(entry['maximum']):.4f}, "
-            f"headroom={float(entry['headroom']):+.4f}"
+            f"{label}: value={format_threshold_float(entry['value'], decimals=4)}, "
+            f"maximum={format_threshold_float(entry['maximum'], decimals=4)}, "
+            f"headroom={format_threshold_float(entry['headroom'], decimals=4, signed=True)}"
         )
     return f"{label}: {entry.get('status', 'unknown')}"
 
