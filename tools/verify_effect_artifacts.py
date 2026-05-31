@@ -308,6 +308,143 @@ def verify_holdout_manifest_hashes(
             )
 
 
+def verify_holdout_manifest_contents(
+    effect_report: dict[str, Any],
+    artifact_dir: Path,
+    manifest: dict[str, Any],
+    failures: list[str],
+) -> None:
+    if manifest.get("require_holdout_thresholds") is not True:
+        return
+    metadata = effect_report.get("metadata")
+    if not isinstance(metadata, dict):
+        failures.append("effect.json metadata must be present for holdout verification")
+        return
+    if not is_nonempty_string(metadata.get("repo_holdout_manifest_sha256")):
+        failures.append(
+            "effect.json metadata.repo_holdout_manifest_sha256 must be a "
+            "non-empty string when require_holdout_thresholds is true"
+        )
+    if not is_nonempty_string(manifest.get("holdout_manifest")):
+        failures.append(
+            "run_manifest.json holdout_manifest must be a non-empty string when "
+            "require_holdout_thresholds is true"
+        )
+
+    holdout_manifest = load_json_object(
+        artifact_dir / OPTIONAL_ARTIFACT_FILES["holdout_manifest"],
+        "holdout_manifest.json",
+        failures,
+    )
+    verify_holdout_entries_match(
+        metadata.get("repo_holdouts"),
+        holdout_manifest.get("repo_holdouts"),
+        failures,
+        source_label="holdout_manifest.json",
+        compare_repo=True,
+    )
+    verify_prepared_source_manifest(
+        metadata,
+        holdout_manifest,
+        artifact_dir,
+        manifest,
+        failures,
+    )
+
+
+def verify_prepared_source_manifest(
+    metadata: dict[str, Any],
+    holdout_manifest: dict[str, Any],
+    artifact_dir: Path,
+    run_manifest: dict[str, Any],
+    failures: list[str],
+) -> None:
+    metadata_source = metadata.get("repo_holdout_source_manifest")
+    metadata_source_hash = metadata.get("repo_holdout_source_manifest_sha256")
+    if metadata_source is None and metadata_source_hash is None:
+        return
+    prepared_from = holdout_manifest.get("prepared_from")
+    if not isinstance(prepared_from, dict):
+        failures.append(
+            "holdout_manifest.json prepared_from must be present when "
+            "effect.json metadata records a source holdout manifest"
+        )
+        return
+    source = prepared_from.get("manifest")
+    if source != metadata_source:
+        failures.append(
+            "holdout_manifest.json prepared_from.manifest does not match "
+            "effect.json metadata.repo_holdout_source_manifest"
+        )
+    source_hash = prepared_from.get("manifest_sha256")
+    if source_hash != metadata_source_hash:
+        failures.append(
+            "holdout_manifest.json prepared_from.manifest_sha256 does not match "
+            "effect.json metadata.repo_holdout_source_manifest_sha256"
+        )
+    if not is_nonempty_string(run_manifest.get("holdout_source_manifest")):
+        failures.append(
+            "run_manifest.json holdout_source_manifest must be a non-empty string "
+            "when effect.json metadata records a source holdout manifest"
+        )
+    source_manifest = load_json_object(
+        artifact_dir / OPTIONAL_ARTIFACT_FILES["holdout_source_manifest"],
+        "holdout_source_manifest.json",
+        failures,
+    )
+    verify_holdout_entries_match(
+        metadata.get("repo_holdouts"),
+        source_manifest.get("repo_holdouts"),
+        failures,
+        source_label="holdout_source_manifest.json",
+        compare_repo=False,
+    )
+
+
+def verify_holdout_entries_match(
+    metadata_entries: Any,
+    manifest_entries: Any,
+    failures: list[str],
+    *,
+    source_label: str,
+    compare_repo: bool,
+) -> None:
+    if not isinstance(metadata_entries, list) or not metadata_entries:
+        failures.append("effect.json metadata.repo_holdouts must be a non-empty list")
+        return
+    if not isinstance(manifest_entries, list) or not manifest_entries:
+        failures.append(f"{source_label} repo_holdouts must be a non-empty list")
+        return
+    if len(metadata_entries) != len(manifest_entries):
+        failures.append(
+            f"{source_label} repo_holdouts length does not match "
+            "effect.json metadata.repo_holdouts"
+        )
+    fields = ["ref", "remote_url"]
+    if compare_repo:
+        fields.insert(0, "repo")
+    for index, (metadata_entry, manifest_entry) in enumerate(
+        zip(metadata_entries, manifest_entries)
+    ):
+        entry_label = f"{source_label} repo_holdouts[{index}]"
+        if not isinstance(metadata_entry, dict):
+            failures.append(
+                f"effect.json metadata.repo_holdouts[{index}] must be an object"
+            )
+            continue
+        if not isinstance(manifest_entry, dict):
+            failures.append(f"{entry_label} must be an object")
+            continue
+        for field in fields:
+            metadata_value = metadata_entry.get(field)
+            manifest_value = manifest_entry.get(field)
+            if metadata_value != manifest_value:
+                failures.append(
+                    f"{entry_label}.{field} does not match effect.json "
+                    f"metadata.repo_holdouts[{index}].{field}"
+                )
+
+
 def verify_threshold_log(
     effect_report: dict[str, Any],
     manifest: dict[str, Any],
@@ -711,6 +848,7 @@ def verify_artifact_directory(
     verify_manifest_shape(manifest, failures)
     verify_checksums(artifact_dir, manifest, failures)
     verify_holdout_manifest_hashes(effect_report, manifest, failures)
+    verify_holdout_manifest_contents(effect_report, artifact_dir, manifest, failures)
     verify_threshold_recheck(effect_report, manifest, failures)
     verify_threshold_log(
         effect_report,

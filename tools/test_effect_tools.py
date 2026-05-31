@@ -1836,8 +1836,27 @@ class EffectArtifactVerifierTests(unittest.TestCase):
 
     def write_artifact_set(self, output_dir: Path) -> None:
         output_dir.mkdir()
+        holdout_entries = [
+            {
+                "repo": str(output_dir / "repo"),
+                "ref": "abc123",
+                "remote_url": "https://example.test/repo.git",
+            }
+        ]
+        holdout_manifest = {"repo_holdouts": holdout_entries}
+        (output_dir / "holdout_manifest.json").write_text(
+            json.dumps(holdout_manifest) + "\n",
+            encoding="utf-8",
+        )
+        metadata = {
+            "repo_holdouts": holdout_entries,
+            "repo_holdout_manifest_sha256": verify_effect_artifacts.file_sha256(
+                output_dir / "holdout_manifest.json"
+            ),
+        }
         artifacts = {
-            "effect.json": json.dumps({"measurements": []}) + "\n",
+            "effect.json": json.dumps({"metadata": metadata, "measurements": []})
+            + "\n",
             "effect.md": self.MARKDOWN_FIXTURE,
             "result_summary.json": json.dumps(self.SUMMARY_FIXTURE) + "\n",
             "thresholds.txt": "effect threshold check passed\n",
@@ -1850,6 +1869,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             "markdown": str(output_dir / "effect.md"),
             "result_summary": str(output_dir / "result_summary.json"),
             "thresholds": str(output_dir / "thresholds.txt"),
+            "holdout_manifest": str(output_dir / "holdout_manifest.json"),
             "paper_manifest": "holdouts.json",
             "workspace_repo": str(Path.cwd()),
             "output_dir": str(output_dir),
@@ -1881,6 +1901,11 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             "sha256": {
                 key: verify_effect_artifacts.file_sha256(output_dir / filename)
                 for key, filename in verify_effect_artifacts.ARTIFACT_FILES.items()
+            }
+            | {
+                "holdout_manifest": verify_effect_artifacts.file_sha256(
+                    output_dir / "holdout_manifest.json"
+                ),
             },
         }
         (output_dir / "run_manifest.json").write_text(
@@ -1929,9 +1954,17 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         output_dir: Path,
         metadata: dict,
     ) -> dict:
-        effect_report = {"metadata": metadata, "measurements": []}
+        original_effect = json.loads((output_dir / "effect.json").read_text())
+        original_metadata = original_effect.get("metadata", {})
+        holdout_metadata = {
+            key: value
+            for key, value in original_metadata.items()
+            if key.startswith("repo_holdout") or key == "repo_holdouts"
+        }
+        merged_metadata = {**holdout_metadata, **metadata}
+        effect_report = {"metadata": merged_metadata, "measurements": []}
         summary = {
-            "metadata": metadata,
+            "metadata": merged_metadata,
             "schema_version": 2,
             "threshold_margins": [],
         }
@@ -2639,6 +2672,155 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "threshold recheck failed: hybrid AP degraded" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_missing_holdout_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            effect_json = output_dir / "effect.json"
+            effect_json.write_text(
+                json.dumps({"metadata": {}, "measurements": []}) + "\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["json"] = verify_effect_artifacts.file_sha256(
+                effect_json
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "metadata.repo_holdout_manifest_sha256 must be a non-empty string"
+                in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "metadata.repo_holdouts must be a non-empty list" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_holdout_manifest_entry_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            holdout_manifest = json.loads(
+                (output_dir / "holdout_manifest.json").read_text()
+            )
+            holdout_manifest["repo_holdouts"][0]["ref"] = "def456"
+            (output_dir / "holdout_manifest.json").write_text(
+                json.dumps(holdout_manifest) + "\n",
+                encoding="utf-8",
+            )
+            holdout_hash = verify_effect_artifacts.file_sha256(
+                output_dir / "holdout_manifest.json"
+            )
+            effect_report = json.loads((output_dir / "effect.json").read_text())
+            effect_report["metadata"]["repo_holdout_manifest_sha256"] = holdout_hash
+            (output_dir / "effect.json").write_text(
+                json.dumps(effect_report) + "\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["json"] = verify_effect_artifacts.file_sha256(
+                output_dir / "effect.json"
+            )
+            run_manifest["sha256"]["holdout_manifest"] = holdout_hash
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "holdout_manifest.json repo_holdouts[0].ref does not match"
+                in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_source_manifest_entry_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            source_manifest = {
+                "repo_holdouts": [
+                    {
+                        "repo": ".",
+                        "ref": "def456",
+                        "remote_url": "https://example.test/repo.git",
+                    }
+                ]
+            }
+            (output_dir / "holdout_source_manifest.json").write_text(
+                json.dumps(source_manifest) + "\n",
+                encoding="utf-8",
+            )
+            source_hash = verify_effect_artifacts.file_sha256(
+                output_dir / "holdout_source_manifest.json"
+            )
+            holdout_manifest = json.loads(
+                (output_dir / "holdout_manifest.json").read_text()
+            )
+            holdout_manifest["prepared_from"] = {
+                "manifest": "source-holdouts.json",
+                "manifest_sha256": source_hash,
+            }
+            (output_dir / "holdout_manifest.json").write_text(
+                json.dumps(holdout_manifest) + "\n",
+                encoding="utf-8",
+            )
+            holdout_hash = verify_effect_artifacts.file_sha256(
+                output_dir / "holdout_manifest.json"
+            )
+            effect_report = json.loads((output_dir / "effect.json").read_text())
+            effect_report["metadata"]["repo_holdout_manifest_sha256"] = holdout_hash
+            effect_report["metadata"]["repo_holdout_source_manifest"] = (
+                "source-holdouts.json"
+            )
+            effect_report["metadata"]["repo_holdout_source_manifest_sha256"] = (
+                source_hash
+            )
+            (output_dir / "effect.json").write_text(
+                json.dumps(effect_report) + "\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["holdout_source_manifest"] = str(
+                output_dir / "holdout_source_manifest.json"
+            )
+            run_manifest["sha256"]["json"] = verify_effect_artifacts.file_sha256(
+                output_dir / "effect.json"
+            )
+            run_manifest["sha256"]["holdout_manifest"] = holdout_hash
+            run_manifest["sha256"]["holdout_source_manifest"] = source_hash
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "holdout_source_manifest.json repo_holdouts[0].ref does not match"
+                in failure
                 for failure in failures
             ),
             failures,
