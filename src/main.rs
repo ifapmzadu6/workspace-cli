@@ -1582,14 +1582,14 @@ fn apply_patch_transaction_from_path(
     patch_path: &Path,
     patch_file: String,
 ) -> Result<AppliedPatchTransaction> {
-    let files_changed = extract_patch_files_from_path(&patch_path)
+    let files_changed = extract_patch_files_from_path(patch_path)
         .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
     validate_patch_targets(&files_changed)?;
-    run_git_apply(workspace, &patch_path, ["--check"])?;
+    run_git_apply(workspace, patch_path, ["--check"])?;
     ensure_log_writable(workspace)?;
 
     let transaction_id = new_id("tx");
-    let stored_patch = store_transaction_patch_for_id(workspace, &transaction_id, &patch_path)?;
+    let stored_patch = store_transaction_patch_for_id(workspace, &transaction_id, patch_path)?;
     if let Err(error) = run_git_apply(workspace, &stored_patch, []) {
         let _ = fs::remove_file(&stored_patch);
         return Err(error);
