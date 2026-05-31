@@ -592,14 +592,17 @@ class SummaryFormattingTests(unittest.TestCase):
         self.assertIn("sign-flip method", current)
 
     def test_metadata_table_includes_holdout_remote_urls(self) -> None:
+        holdout_ref = "abcdef123456"
         table = summarize_effect.render_metadata_table(
             {
                 "metadata": {
+                    "schema_version": 2,
+                    "workspace_commit": "1234567890abcdef1234567890abcdef12345678",
                     "workspace_bin": "target/debug/workspace",
                     "repo_holdouts": [
                         {
                             "repo": "../example",
-                            "ref": "abcdef123456",
+                            "ref": holdout_ref,
                             "remote_url": "https://example.test/repo.git",
                         }
                     ],
@@ -607,7 +610,9 @@ class SummaryFormattingTests(unittest.TestCase):
             }
         )
 
-        self.assertIn("../example@abcdef1234", table)
+        self.assertIn("| artifact schema | 2 |", table)
+        self.assertIn("1234567890abcdef1234567890abcdef12345678", table)
+        self.assertIn(f"../example@{holdout_ref}", table)
         self.assertIn("https://example.test/repo.git", table)
 
     def test_metadata_table_includes_holdout_source_manifest(self) -> None:
@@ -624,8 +629,9 @@ class SummaryFormattingTests(unittest.TestCase):
         )
 
         self.assertIn("target/effect-repos/holdouts.local.json", table)
+        self.assertIn("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", table)
         self.assertIn("tools/effect_paper_holdouts.json", table)
-        self.assertIn("cccccccccccccccc", table)
+        self.assertIn("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", table)
 
     def test_oracle_normalized_table_reports_gap(self) -> None:
         table = summarize_effect.render_oracle_normalized_table(

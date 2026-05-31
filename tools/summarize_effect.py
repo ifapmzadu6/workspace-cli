@@ -357,6 +357,10 @@ def short_commit(commit: Any) -> str:
     return str(commit)[:10] if commit else ""
 
 
+def metadata_ref(ref: Any) -> str:
+    return str(ref) if ref else ""
+
+
 def render_metadata_table(report: dict[str, Any]) -> str:
     metadata = report.get("metadata")
     if not isinstance(metadata, dict):
@@ -374,14 +378,14 @@ def render_metadata_table(report: dict[str, Any]) -> str:
             repo = holdout.get("repo", "")
             ref = holdout.get("ref", "")
             remote_url = holdout.get("remote_url")
-            label = f"{repo}@{short_commit(ref)}"
+            label = f"{repo}@{metadata_ref(ref)}"
             if remote_url:
                 label = f"{label} ({remote_url})"
             holdout_parts.append(label)
         holdout_text = ", ".join(holdout_parts)
 
     rows = [
-        ["workspace commit", short_commit(metadata.get("workspace_commit"))],
+        ["workspace commit", metadata_ref(metadata.get("workspace_commit"))],
         ["workspace dirty", "yes" if metadata.get("workspace_dirty") else "no"],
         ["workspace bin", str(metadata.get("workspace_bin", ""))],
         ["primary k", str(metadata.get("primary_k", ""))],
@@ -389,6 +393,8 @@ def render_metadata_table(report: dict[str, Any]) -> str:
         ["sign-flip samples", str(metadata.get("sign_flip_samples", ""))],
         ["repo holdouts", holdout_text or "none"],
     ]
+    if metadata.get("schema_version") is not None:
+        rows.insert(0, ["artifact schema", str(metadata["schema_version"])])
     if metadata.get("sign_flip_method"):
         rows.insert(-1, ["sign-flip method", str(metadata["sign_flip_method"])])
     if metadata.get("repo_holdout_manifest"):
@@ -397,7 +403,7 @@ def render_metadata_table(report: dict[str, Any]) -> str:
         rows.append(
             [
                 "manifest sha256",
-                str(metadata["repo_holdout_manifest_sha256"])[:16],
+                str(metadata["repo_holdout_manifest_sha256"]),
             ]
         )
     if metadata.get("repo_holdout_source_manifest"):
@@ -411,7 +417,7 @@ def render_metadata_table(report: dict[str, Any]) -> str:
         rows.append(
             [
                 "source manifest sha256",
-                str(metadata["repo_holdout_source_manifest_sha256"])[:16],
+                str(metadata["repo_holdout_source_manifest_sha256"]),
             ]
         )
     return "\n".join(
