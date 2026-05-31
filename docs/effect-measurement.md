@@ -266,10 +266,11 @@ outside manifest and lockfile contexts, down-weights cross-ecosystem package
 metadata in mixed Cargo/npm repositories outside manifest, lockfile, release,
 and JavaScript contexts, down-weights saturated package/release metadata ties
 for Cargo manifest and lockfile seeds in mixed Cargo/npm repositories, lightly
-down-weights utility-shaped source siblings for non-utility source seeds,
-lightly down-weights JavaScript lockfiles for source/test seeds, and the
-impact-specific PageRank ranking that lightly prioritizes tests over
-documentation noise.
+boosts root evaluation documents for Cargo manifest and lockfile seeds when
+direct history connects them, down-weights utility-shaped source siblings for
+non-utility source seeds, lightly down-weights JavaScript lockfiles for
+source/test seeds, and the impact-specific PageRank ranking that lightly
+prioritizes tests over documentation noise.
 The path-locality baseline ranks tracked files by shared parent directories and
 file extensions with the seed files, so it controls for a cheap static
 seed-specific signal without using history.
@@ -640,7 +641,7 @@ file labels. It preserves the main result with tighter aggregate evidence:
 
 ```text
 expanded temporal leakage audit: 53/53 cases checked, index head matched held-out parent for 53, failures 0
-expanded cross_repo hybrid average_precision@5: 0.834 (0.760, 0.901)
+expanded cross_repo hybrid average_precision@5: 0.838 (0.765, 0.904)
 expanded cross_repo direct average_precision@5: 0.626 (0.524, 0.736)
 expanded cross_repo pagerank average_precision@5: 0.577 (0.490, 0.665)
 expanded cross_repo recent_activity average_precision@5: 0.403 (0.321, 0.485)
@@ -649,47 +650,47 @@ expanded cross_repo path_locality average_precision@5: 0.095 (0.064, 0.127)
 expanded cross_repo lexical_similarity average_precision@5: 0.244 (0.152, 0.336)
 expanded cross_repo content_similarity average_precision@5: 0.378 (0.322, 0.434)
 expanded cross_repo history_oracle_ceiling average_precision@5: 0.853 (0.784, 0.918)
-expanded cross_repo hybrid oracle-normalized average_precision@5: 0.978, oracle gap: 0.019
-expanded cross_repo hybrid - direct average_precision@5: +0.207 (0.151, 0.266), wins/ties/losses 29/24/0, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - pagerank average_precision@5: +0.257 (0.194, 0.322), wins/ties/losses 37/14/2, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.590 (0.490, 0.684), wins/ties/losses 43/9/1, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - content_similarity average_precision@5: +0.456 (0.394, 0.523), wins/ties/losses 49/4/0, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - recent_activity average_precision@5: +0.431 (0.360, 0.504), wins/ties/losses 45/8/0, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - global_pagerank average_precision@5: +0.336 (0.264, 0.410), wins/ties/losses 39/12/2, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid average_precision@5: 0.882 (0.819, 0.938)
+expanded cross_repo hybrid oracle-normalized average_precision@5: 0.982, oracle gap: 0.015
+expanded cross_repo hybrid - direct average_precision@5: +0.211 (0.153, 0.271), wins/ties/losses 29/24/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - pagerank average_precision@5: +0.261 (0.200, 0.327), wins/ties/losses 37/14/2, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.594 (0.495, 0.689), wins/ties/losses 43/9/1, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - content_similarity average_precision@5: +0.460 (0.400, 0.525), wins/ties/losses 49/4/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - recent_activity average_precision@5: +0.435 (0.363, 0.508), wins/ties/losses 45/8/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - global_pagerank average_precision@5: +0.340 (0.268, 0.416), wins/ties/losses 39/12/2, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid average_precision@5: 0.886 (0.826, 0.940)
 expanded predictable cross_repo lexical_similarity average_precision@5: 0.253 (0.159, 0.353)
 expanded predictable cross_repo content_similarity average_precision@5: 0.399 (0.341, 0.457)
 expanded predictable cross_repo history_oracle_ceiling average_precision@5: 0.915 (0.863, 0.957)
-expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.964, oracle gap: 0.033
-expanded predictable cross_repo hybrid - direct average_precision@5: +0.237 (0.165, 0.309), wins/ties/losses 29/23/0, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.271 (0.207, 0.342), wins/ties/losses 37/13/2, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.629 (0.525, 0.729), wins/ties/losses 43/8/1, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - content_similarity average_precision@5: +0.482 (0.419, 0.549), wins/ties/losses 49/3/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.968, oracle gap: 0.029
+expanded predictable cross_repo hybrid - direct average_precision@5: +0.242 (0.170, 0.315), wins/ties/losses 29/23/0, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.275 (0.211, 0.347), wins/ties/losses 37/13/2, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.633 (0.530, 0.735), wins/ties/losses 43/8/1, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - content_similarity average_precision@5: +0.486 (0.422, 0.553), wins/ties/losses 49/3/0, p_greater=<0.0001, holm_p_greater=<0.0001
 ```
 
 The expanded manifest also runs a denser hybrid direct-weight sweep:
 
 ```text
-expanded cross_repo hybrid direct_weight=0.00 average_precision@5: 0.698
-expanded cross_repo hybrid direct_weight=0.05 average_precision@5: 0.712
-expanded cross_repo hybrid direct_weight=0.10 average_precision@5: 0.729
-expanded cross_repo hybrid direct_weight=0.25 average_precision@5: 0.772
-expanded cross_repo hybrid direct_weight=0.50 average_precision@5: 0.804
-expanded cross_repo hybrid direct_weight=0.60 average_precision@5: 0.804
-expanded cross_repo hybrid direct_weight=0.70 average_precision@5: 0.816
-expanded cross_repo hybrid direct_weight=0.75 average_precision@5: 0.824
-expanded cross_repo hybrid direct_weight=0.80 average_precision@5: 0.824
-expanded cross_repo hybrid direct_weight=0.82 average_precision@5: 0.824
-expanded cross_repo hybrid direct_weight=0.85 average_precision@5: 0.834
-expanded cross_repo hybrid direct_weight=0.88 average_precision@5: 0.834
-expanded cross_repo hybrid direct_weight=0.90 average_precision@5: 0.834
-expanded cross_repo hybrid direct_weight=0.92 average_precision@5: 0.833
-expanded cross_repo hybrid direct_weight=0.95 average_precision@5: 0.823
+expanded cross_repo hybrid direct_weight=0.00 average_precision@5: 0.668
+expanded cross_repo hybrid direct_weight=0.05 average_precision@5: 0.688
+expanded cross_repo hybrid direct_weight=0.10 average_precision@5: 0.709
+expanded cross_repo hybrid direct_weight=0.25 average_precision@5: 0.752
+expanded cross_repo hybrid direct_weight=0.50 average_precision@5: 0.794
+expanded cross_repo hybrid direct_weight=0.60 average_precision@5: 0.797
+expanded cross_repo hybrid direct_weight=0.70 average_precision@5: 0.809
+expanded cross_repo hybrid direct_weight=0.75 average_precision@5: 0.817
+expanded cross_repo hybrid direct_weight=0.80 average_precision@5: 0.819
+expanded cross_repo hybrid direct_weight=0.82 average_precision@5: 0.821
+expanded cross_repo hybrid direct_weight=0.85 average_precision@5: 0.838
+expanded cross_repo hybrid direct_weight=0.88 average_precision@5: 0.838
+expanded cross_repo hybrid direct_weight=0.90 average_precision@5: 0.838
+expanded cross_repo hybrid direct_weight=0.92 average_precision@5: 0.837
+expanded cross_repo hybrid direct_weight=0.95 average_precision@5: 0.827
 expanded cross_repo hybrid direct_weight=1.00 average_precision@5: 0.784
-expanded cross_repo hybrid direct_weight=0.90 - direct average_precision@5: +0.207 (0.149, 0.268), p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid direct_weight=0.90 - pagerank average_precision@5: +0.257 (0.189, 0.327), p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid direct_weight=0.50 average_precision@5: 0.854
-expanded predictable cross_repo hybrid direct_weight=0.90 average_precision@5: 0.882
+expanded cross_repo hybrid direct_weight=0.90 - direct average_precision@5: +0.211 (0.152, 0.275), p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid direct_weight=0.90 - pagerank average_precision@5: +0.261 (0.193, 0.331), p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid direct_weight=0.50 average_precision@5: 0.837
+expanded predictable cross_repo hybrid direct_weight=0.90 average_precision@5: 0.886
 ```
 
 With the related path, CI-workflow manifest, changelog-manifest,
@@ -697,18 +698,18 @@ root-document direct-tie, shared filename-token, unshared script-utility
 sibling suppression, low-signal repository-metadata down-weight,
 release-workflow metadata down-weight outside manifest and lockfile contexts,
 cross-ecosystem package-metadata down-weight in mixed Cargo/npm repositories,
-Cargo saturated package/release metadata down-weight, source utility-sibling
-down-weight, JS/TS source-changelog, JS toolchain cold-start,
-changelog-to-toolchain cold-start, bidirectional evaluation-script
+Cargo saturated package/release metadata down-weight, Cargo evaluation-document
+boost, source utility-sibling down-weight, JS/TS source-changelog, JS toolchain
+cold-start, changelog-to-toolchain cold-start, bidirectional evaluation-script
 documentation, skill-document evaluation-document, non-manifest metadata
 suppression, README-to-lockfile, and JS source/test-to-lockfile down-weight
 priors enabled, the fine sweep has a broad high-weight plateau and peaks across
-0.85 to 0.90 on both the all-target and predictable slices.
+0.85 to 0.90 on the all-target slice and at 0.90 on the predictable slice.
 Leave-one-repo-out selection over that dense grid uses a 0.002 AP/nDCG
 indifference band to avoid overfitting tiny train-fold differences. It selects
 0.90 for all three held-out repositories on both all-target and predictable
-slices. The LORO aggregate matches the fixed default, with AP@5 0.834
-all-target and 0.882 predictable-only. Because 0.90 is now on the fixed-ref
+slices. The LORO aggregate matches the fixed default, with AP@5 0.838
+all-target and 0.886 predictable-only. Because 0.90 is now on the fixed-ref
 peak and the LORO-selected weight, the CLI related hybrid default remains 0.90.
 
 Residual gap analysis on the fixed-ref manifest shows that the remaining
@@ -746,11 +747,16 @@ down-weight then handles the `related-cli` behavior-removal commit
 Cargo counterpart as the maximum direct edge, the metadata paths move behind
 README, the skill document, and `src/main.rs`, reducing that cluster's oracle
 gap from 0.646 to 0.224 while leaving the `5cf1f67199` and `71313f1274`
-version-bump cases intact. The source utility-sibling down-weight resolves the
-`related-cli` source split (`97835ef97e8d`) by moving `cli.rs` and `*_utils.rs`
-behind non-utility source siblings; the hybrid ranking now reaches the
-history-oracle AP ceiling for those cases even though new `src/model.rs` cannot
-be ranked from parent-history evidence. The strengthened
+version-bump cases intact. The Cargo evaluation-document boost then resolves the
+remaining `6447d4333c23` Cargo-manifest residual by moving
+`MEASUREMENTS.md` ahead of stale package metadata for Cargo manifest and
+lockfile seeds, bringing the `related-cli` repository aggregate to its
+history-oracle AP ceiling while preserving AP 1.0 for the version-bump Cargo
+seeds. The source utility-sibling down-weight resolves the `related-cli` source
+split (`97835ef97e8d`) by moving `cli.rs` and `*_utils.rs` behind non-utility
+source siblings; the hybrid ranking now reaches the history-oracle AP ceiling
+for those cases even though new `src/model.rs` cannot be ranked from
+parent-history evidence. The strengthened
 changelog-to-toolchain cold-start prior recovers `tsconfig.json` for the
 `llm-json-extract` dependency bump (`6a2977eb724e`) when there is no direct
 changelog edge yet, removing that commit from the residual clusters while

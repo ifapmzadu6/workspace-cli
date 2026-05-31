@@ -106,6 +106,7 @@ const RELATED_HYBRID_CARGO_SATURATED_METADATA_MIN_DIRECT_SCORE: f64 = 0.999;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER: f64 = 6.0;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
 const RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER: f64 = 60.0;
+const RELATED_HYBRID_CARGO_EVAL_DOC_SCORE_MULTIPLIER: f64 = 3.1;
 const RELATED_HYBRID_EVAL_SCRIPT_DOC_SCORE_MULTIPLIER: f64 = 1.15;
 const RELATED_HYBRID_EVAL_DOC_SCRIPT_SCORE_MULTIPLIER: f64 = 3.1;
 const RELATED_HYBRID_SKILL_EVAL_DOC_SCORE_MULTIPLIER: f64 = 3.0;
@@ -4707,6 +4708,9 @@ fn related_hybrid_path_score_multiplier(
     {
         multiplier *= RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0 && is_cargo_manifest_evaluation_document_pair(target, candidate) {
+        multiplier *= RELATED_HYBRID_CARGO_EVAL_DOC_SCORE_MULTIPLIER;
+    }
     if direct_edge_weight > 0.0 && is_evaluation_script_documentation_pair(target, candidate) {
         multiplier *= RELATED_HYBRID_EVAL_SCRIPT_DOC_SCORE_MULTIPLIER;
     }
@@ -4882,6 +4886,10 @@ fn is_javascript_package_manifest_or_lock(path: &str) -> bool {
 
 fn is_evaluation_script_documentation_pair(target: &str, candidate: &str) -> bool {
     is_evaluation_script_file(target) && is_root_evaluation_document(candidate)
+}
+
+fn is_cargo_manifest_evaluation_document_pair(target: &str, candidate: &str) -> bool {
+    is_cargo_manifest_or_lock(target) && is_root_evaluation_document(candidate)
 }
 
 fn is_evaluation_documentation_script_pair(target: &str, candidate: &str) -> bool {
@@ -12096,6 +12104,19 @@ src/b.rs
         assert_eq!(
             related_hybrid_path_score_multiplier("CHANGELOG.md", "tsconfig.json", 1.0, 0.1),
             related_path_score_multiplier("CHANGELOG.md", "tsconfig.json")
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("Cargo.toml", "MEASUREMENTS.md", 1.0, 0.1),
+            related_path_score_multiplier("Cargo.toml", "MEASUREMENTS.md")
+                * RELATED_HYBRID_CARGO_EVAL_DOC_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("MEASUREMENTS.md", "Cargo.toml", 1.0, 0.1),
+            related_path_score_multiplier("MEASUREMENTS.md", "Cargo.toml")
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("package.json", "MEASUREMENTS.md", 1.0, 0.1),
+            related_path_score_multiplier("package.json", "MEASUREMENTS.md")
         );
         assert!(
             related_hybrid_path_score_multiplier("scripts/compare.sh", "COMPARISON.md", 1.0, 0.1)

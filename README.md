@@ -248,11 +248,14 @@ automation and package-maintenance churn do not crowd out behavior-level source
 or documentation neighbors. For Cargo manifest and lockfile seeds in mixed
 Cargo/npm repositories, saturated package/release metadata ties are also
 down-weighted so repeated release churn does not mask source and documentation
-neighbors. Utility-shaped source siblings such as `cli.rs` and `*_utils.rs` are
-lightly down-weighted for non-utility source seeds, so broad support modules do
-not outrank feature/data modules on pure source-split ties. JavaScript lockfiles
-are lightly down-weighted for source/test seeds, preserving dependency-bump
-recall while reducing lockfile churn in feature-edit neighborhoods. Use
+neighbors. Cargo manifest and lockfile seeds also lift root evaluation documents
+such as `COMPARISON.md` and `MEASUREMENTS.md` when direct history connects them,
+so behavioral comparison notes are not hidden by package metadata churn.
+Utility-shaped source siblings such as `cli.rs` and `*_utils.rs` are lightly
+down-weighted for non-utility source seeds, so broad support modules do not
+outrank feature/data modules on pure source-split ties. JavaScript lockfiles are
+lightly down-weighted for source/test seeds, preserving dependency-bump recall
+while reducing lockfile churn in feature-edit neighborhoods. Use
 `--hybrid-direct-weight` with values from `0.0` to `1.0` for ablation runs; the
 default is `0.9` for `related`.
 
