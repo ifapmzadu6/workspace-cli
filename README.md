@@ -128,6 +128,12 @@ real `workspace` binary inside temporary workspaces. The tests cover
 `map/read`, the co-change index, `related/impact`, and the
 `patch/run/log/diff/rollback` transaction flow.
 
+Codex-in-the-loop evaluation is documented in
+[docs/codex-agent-evaluation.md](docs/codex-agent-evaluation.md). The pilot
+runner creates controlled temporary tasks and runs real `codex exec` conditions
+with and without `workspace-cli` instructions, recording success, time, command
+use, final diffs, and workspace operation logs.
+
 Effect measurement is documented in
 [docs/effect-measurement.md](docs/effect-measurement.md) and implemented by
 `tools/measure_effect.py`. It measures observation coverage, related-file

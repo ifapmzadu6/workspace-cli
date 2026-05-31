@@ -6970,9 +6970,11 @@ fn read_captured_output_with_limit<R: Read>(
 fn append_operation_log(workspace: &Workspace, record: OperationLogRecord<'_>) -> Result<()> {
     let entry = operation_log_entry(record);
     let line = serde_json::to_string(&entry)?;
-    use std::io::Write;
     let mut file = open_log_for_append(workspace)?;
+    file.lock()
+        .with_context(|| format!("failed to lock {}", workspace.log_path().display()))?;
     writeln!(file, "{line}")?;
+    file.flush()?;
     Ok(())
 }
 
@@ -10671,6 +10673,40 @@ rename to new name.txt
         assert_eq!(log.entries[0].scope, "change.patch");
         assert_eq!(log.entries[0].summary, "patched");
         assert_eq!(log.entries[0].transaction_id.as_deref(), Some("tx-1"));
+    }
+
+    #[test]
+    fn append_operation_log_serializes_parallel_writers() {
+        let temp = tempfile::TempDir::new().expect("temp dir should be created");
+        let workspace = Workspace {
+            root: temp.path().to_path_buf(),
+            is_git_repo: false,
+        };
+
+        std::thread::scope(|scope| {
+            for worker in 0..12 {
+                let root = workspace.root.clone();
+                scope.spawn(move || {
+                    let workspace = Workspace {
+                        root,
+                        is_git_repo: false,
+                    };
+                    for item in 0..25 {
+                        let scope = format!("worker-{worker}-file-{item}");
+                        append_operation_log(
+                            &workspace,
+                            OperationLogRecord::observe(LOG_OP_READ, &scope, "read"),
+                        )
+                        .expect("parallel log entry should be appended");
+                    }
+                });
+            }
+        });
+
+        let log = read_log(&workspace, 400).expect("parallel log should be readable");
+        assert_eq!(log.entries.len(), 300);
+        assert_eq!(log.omitted_lines, 0);
+        assert!(log.entries.iter().all(|entry| entry.op == LOG_OP_READ));
     }
 
     #[test]
