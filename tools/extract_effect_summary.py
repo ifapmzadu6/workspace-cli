@@ -151,11 +151,30 @@ def oracle_normalized_metrics(
     return result
 
 
+def average_precision_at_k(top: list[str], expected: list[str], k: int) -> float | None:
+    expected_set = set(expected)
+    if not expected_set:
+        return None
+    hits = 0
+    precision_sum = 0.0
+    seen = set()
+    for rank, path in enumerate(top[:k], start=1):
+        if path in seen:
+            continue
+        seen.add(path)
+        if path in expected_set:
+            hits += 1
+            precision_sum += hits / rank
+    return round(precision_sum / len(expected_set), 3)
+
+
 def residual_gap_clusters(
     measurements: list[dict[str, Any]],
     *,
     method: str = "workspace_related_hybrid",
     oracle_method: str = "history_oracle_ceiling",
+    expected_key: str = "expected",
+    retarget_metrics: bool = False,
     limit: int = 8,
     case_limit: int = 5,
 ) -> list[dict[str, Any]]:
@@ -181,11 +200,12 @@ def residual_gap_clusters(
                 continue
             method_ap = method_summary.get(metric)
             oracle_ap = oracle_summary.get(metric)
-            if method_ap is None or oracle_ap is None:
-                continue
-            gap = float(oracle_ap) - float(method_ap)
-            if gap <= 0.0:
-                continue
+            method_top = [
+                path for path in method_summary.get("top", []) if isinstance(path, str)
+            ]
+            oracle_top = [
+                path for path in oracle_summary.get("top", []) if isinstance(path, str)
+            ]
 
             repo = case.get("repo") or measurement.get("repo")
             commit = case.get("heldout_commit")
@@ -203,6 +223,8 @@ def residual_gap_clusters(
                     "metric": metric,
                     "method": method,
                     "oracle_method": oracle_method,
+                    "expected_key": expected_key,
+                    "retarget_metrics": retarget_metrics,
                     "_gap_sum": 0.0,
                     "_method_ap_sum": 0.0,
                     "_oracle_ap_sum": 0.0,
@@ -215,8 +237,23 @@ def residual_gap_clusters(
             )
 
             expected = [
-                path for path in case.get("expected", []) if isinstance(path, str)
+                path for path in case.get(expected_key, []) if isinstance(path, str)
             ]
+            if not expected:
+                continue
+            if retarget_metrics:
+                computed_method_ap = average_precision_at_k(method_top, expected, k)
+                computed_oracle_ap = average_precision_at_k(oracle_top, expected, k)
+                if computed_method_ap is None or computed_oracle_ap is None:
+                    continue
+                method_ap = computed_method_ap
+                oracle_ap = computed_oracle_ap
+            elif method_ap is None or oracle_ap is None:
+                continue
+            gap = float(oracle_ap) - float(method_ap)
+            if gap <= 0.0:
+                continue
+
             predictable_expected = [
                 path
                 for path in case.get("predictable_expected", [])
@@ -227,12 +264,17 @@ def residual_gap_clusters(
                 for path in case.get("unpredictable_expected", [])
                 if isinstance(path, str)
             ]
-            hits = [
-                path for path in method_summary.get("hits", []) if isinstance(path, str)
-            ]
-            top = [
-                path for path in method_summary.get("top", []) if isinstance(path, str)
-            ]
+            expected_set = set(expected)
+            hits = [path for path in method_top[:k] if path in expected_set]
+            if expected_key == "predictable_expected":
+                predictable_target_count = len(expected)
+                unpredictable_target_count = 0
+            elif expected_key == "unpredictable_expected":
+                predictable_target_count = 0
+                unpredictable_target_count = len(expected)
+            else:
+                predictable_target_count = len(predictable_expected)
+                unpredictable_target_count = len(unpredictable_expected)
             hit_set = set(hits)
             seed = case.get("seed")
             if isinstance(seed, str):
@@ -242,8 +284,8 @@ def residual_gap_clusters(
             cluster["_method_ap_sum"] += float(method_ap)
             cluster["_oracle_ap_sum"] += float(oracle_ap)
             cluster["_target_count"] += len(expected)
-            cluster["_predictable_target_count"] += len(predictable_expected)
-            cluster["_unpredictable_target_count"] += len(unpredictable_expected)
+            cluster["_predictable_target_count"] += predictable_target_count
+            cluster["_unpredictable_target_count"] += unpredictable_target_count
             cluster["_cases"].append(
                 {
                     "seed": seed,
@@ -255,7 +297,7 @@ def residual_gap_clusters(
                         path for path in expected if path not in hit_set
                     ],
                     "method_hits": hits,
-                    "method_top": top,
+                    "method_top": method_top,
                 },
             )
 
@@ -280,6 +322,8 @@ def residual_gap_clusters(
             "metric": metric,
             "method": cluster["method"],
             "oracle_method": cluster["oracle_method"],
+            "expected_key": cluster["expected_key"],
+            "retarget_metrics": cluster["retarget_metrics"],
             "case_count": case_count,
             "seed_count": len(cluster["_seed_set"]),
             "target_count": cluster["_target_count"],
@@ -521,10 +565,28 @@ def extract_summary(report: dict[str, Any]) -> dict[str, Any]:
             repo_summary = headline_holdout_summary(measurement)
             repo_summary["repo"] = measurement.get("repo")
             repo_summary["repo_name"] = repo_name(measurement.get("repo"))
+            predictable = repo_summary.get("predictable_only")
+            if isinstance(predictable, dict):
+                clusters = residual_gap_clusters(
+                    [measurement],
+                    expected_key="predictable_expected",
+                    retarget_metrics=True,
+                )
+                if clusters:
+                    predictable["residual_gap_clusters"] = clusters
             holdout_summary["per_repo"].append(repo_summary)
         clusters = residual_gap_clusters(repo_measurements)
         if clusters:
             holdout_summary["residual_gap_clusters"] = clusters
+        predictable = holdout_summary.get("predictable_only")
+        if isinstance(predictable, dict):
+            clusters = residual_gap_clusters(
+                repo_measurements,
+                expected_key="predictable_expected",
+                retarget_metrics=True,
+            )
+            if clusters:
+                predictable["residual_gap_clusters"] = clusters
     return {
         "schema_version": SCHEMA_VERSION,
         "metadata": report.get("metadata", {}),

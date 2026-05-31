@@ -709,6 +709,21 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                         "head_matches_parent_count": 50,
                         "failure_count": 0,
                     },
+                    "predictable_only": {
+                        "k": 5,
+                        "case_count": 3,
+                        "target_count": 3,
+                        "aggregate": {
+                            "workspace_related_hybrid": {
+                                "mean_average_precision_at_5": 0.7,
+                            },
+                            "history_oracle_ceiling": {
+                                "mean_average_precision_at_5": 0.9,
+                            },
+                        },
+                        "paired_deltas": {},
+                        "hybrid_weight_sweep": [],
+                    },
                     "aggregate": {
                         "workspace_related_hybrid": {
                             "mean_average_precision_at_5": 0.651,
@@ -816,6 +831,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                                 },
                                 "history_oracle_ceiling": {
                                     "average_precision_at_5": 1.0,
+                                    "top": ["Cargo.toml", "src/main.rs"],
                                 },
                             },
                         },
@@ -834,6 +850,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                                 },
                                 "history_oracle_ceiling": {
                                     "average_precision_at_5": 1.0,
+                                    "top": ["Cargo.lock"],
                                 },
                             },
                         },
@@ -852,6 +869,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                                 },
                                 "history_oracle_ceiling": {
                                     "average_precision_at_5": 0.75,
+                                    "top": ["tests/cli.rs"],
                                 },
                             },
                         },
@@ -930,6 +948,14 @@ class EffectSummaryExtractionTests(unittest.TestCase):
         self.assertEqual(
             residual_clusters[0]["top_residual_cases"][0]["missing_expected"],
             ["src/main.rs"],
+        )
+        predictable_clusters = holdout["predictable_only"]["residual_gap_clusters"]
+        self.assertEqual(len(predictable_clusters), 1)
+        self.assertEqual(predictable_clusters[0]["expected_key"], "predictable_expected")
+        self.assertTrue(predictable_clusters[0]["retarget_metrics"])
+        self.assertEqual(
+            predictable_clusters[0]["oracle_gap_average_precision_at_5"],
+            0.75,
         )
         self.assertEqual(
             holdout["per_repo"][0]["residual_gap_clusters"][0][

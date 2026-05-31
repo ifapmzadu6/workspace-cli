@@ -58,7 +58,8 @@ holdout repositories, and holdout remote URLs. The Markdown summary
 renders the same metadata before the metric tables, while
 `result_summary.json` extracts the headline metrics, full weight sweep, best
 weight result, per-repository holdout results, oracle-normalized AP gaps, and
-residual gap clusters into a compact machine-readable form. Paper artifact
+residual gap clusters, including predictable-only clusters retargeted from
+case-level ranking lists, into a compact machine-readable form. Paper artifact
 directories also include copies of the local holdout manifest and source
 holdout manifest when available. The run manifest records the exact
 generation commands,
@@ -197,7 +198,7 @@ cutoff, which defaults to 5:
 - oracle-normalized AP and oracle gap for temporal holdout measurements that
   include the history-only oracle ceiling
 - residual gap clusters that group remaining hybrid-vs-oracle AP gaps by
-  repository and held-out commit
+  repository and held-out commit, including predictable-only retargeted gaps
 - a default cutoff sweep at @1, @3, and @5
 - an optional hybrid direct-weight sweep for ablation
 - an optional leave-one-repo-out direct-weight selection check when multiple
@@ -666,8 +667,8 @@ CI-workflow manifest prior is therefore intentionally one-way
 `package.json -> workflow` boost fixes one remaining case but degrades ordinary
 package release cases where lockfiles, changelogs, source, and tests are the
 stronger historical neighbors. `result_summary.json` now emits the same
-repo/commit residual gap clusters so this diagnosis is reproducible directly
-from the paper artifact.
+repo/commit residual gap clusters, plus the predictable-only retargeted
+clusters, so this diagnosis is reproducible directly from the paper artifact.
 
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and
