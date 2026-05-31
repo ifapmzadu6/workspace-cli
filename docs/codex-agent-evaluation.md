@@ -39,6 +39,10 @@ python3 tools/run_codex_workspace_suite.py \
   --repetitions 2 \
   --output-dir target/codex-workspace-suite-cross-task
 python3 tools/run_codex_workspace_suite.py \
+  --tasks policy_threshold_sync invoice_tax_sync rollback_recovery subscription_rollout_sync \
+  --repetitions 2 \
+  --output-dir target/codex-workspace-suite-cross-task-subscription
+python3 tools/run_codex_workspace_suite.py \
   --tasks subscription_rollout_sync \
   --repetitions 4 \
   --output-dir target/codex-workspace-suite-subscription-rollout
@@ -370,6 +374,25 @@ standalone larger-task speedup claim. The command-count delta strengthened to
 kept the exact six-file diff in every run while `shell_only` over-edited the
 support-policy decoy in one run.
 
+The same-commit cross-task suite that included the shortened subscription task
+at commit `fc9ea0223b952828a1399a96ebade035dc81c7bf` completed eight paired
+passing runs:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 8 | 1.000 | 1.000 | 54.706 (46.946, 62.143) | 11.000 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 8 | 1.000 | 1.000 | 54.496 (44.552, 65.055) | 4.875 | 4.875 | 5.000 | 0.250 |
+
+The aggregate paired timing delta was `-0.210s` with interval
+`(-5.252, 6.099)`, so adding the subscription task moves the same-commit
+cross-task suite from a speedup claim to parity. `workspace_cli` was faster in
+five of eight pairs, and the command-count delta remained strong at `-6.125`
+commands with interval `(-8.125, -4.000)`. By task, invoice and rollback still
+had non-zero-crossing timing wins (`-5.602s` and `-5.181s` respectively), policy
+remained near parity (`-0.485s`), and subscription was slower in both pairs
+(`+10.428s`, interval `(2.149, 18.706)`) while still using exactly ten fewer
+commands per pair.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -395,20 +418,23 @@ entries and no `operation log unreadable` status.
   timing improvement with a non-zero-crossing interval and substantially fewer
   commands, and the merged twelve-pair evidence artifact independently points in
   the same direction. The subscription rollout task is larger; after protocol
-  shortening it shows lower mean elapsed time and three of four paired wins, but
-  its timing interval still crosses zero. It does show perfect workspace
-  diff-scope correctness versus shell over-editing and a large command-count
-  reduction. The paper can now make controlled-task speedup claims for
-  transactional recovery, invoice-style multi-file synchronization, and
-  small-suite aggregate behavior, while separately presenting larger-task safety
-  and command-count evidence and treating broader generalization as early pilot
-  evidence.
+  shortening it shows lower mean elapsed time and three of four paired wins in
+  the standalone four-run suite, but its timing interval still crosses zero.
+  When subscription is included in a same-commit cross-task suite, the aggregate
+  timing effect moves to parity because subscription is slower in both paired
+  runs. It still shows perfect workspace diff-scope correctness in the
+  standalone shortened suite and a large command-count reduction in both
+  subscription suites. The paper can now make controlled-task speedup claims for
+  transactional recovery, invoice-style multi-file synchronization, and the
+  three-task aggregate, while presenting the four-task aggregate as parity with
+  strong command-count evidence and treating larger-task generalization as an
+  optimization target.
 
 ## Next Required Step
 
-The next evaluation should run a same-commit cross-task suite that includes the
-shortened subscription rollout task, then increase repetitions or add another
-larger task to test whether the larger-task timing interval can move away from
-zero. The report should keep separating single-task speed claims, larger-task
-safety claims, merged artifact claims, and same-commit cross-task aggregate
-claims.
+The next evaluation should inspect the subscription `workspace_cli` traces from
+the four-task suite, identify why the shorter command sequence still takes
+longer than shell in both pairs, and then rerun a same-commit subscription-heavy
+suite after optimizing that path. The report should keep separating single-task
+speed claims, larger-task safety claims, merged artifact claims, and same-commit
+cross-task aggregate claims.
