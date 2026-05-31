@@ -58,12 +58,13 @@ holdout repositories, and holdout remote URLs. The Markdown summary
 renders the same metadata before the metric tables, while
 `result_summary.json` extracts the headline metrics, full weight sweep, best
 weight result, per-repository holdout results, oracle-normalized AP gaps, and
-leakage audit into a compact machine-readable form. The run manifest records the
-exact generation commands,
-verifier command, and SHA-256 checksums for each generated artifact. The
-verifier checks required files, JSON parseability, a passing threshold log,
-manifest hash consistency, recomputed threshold gates, and result-summary
-consistency with `effect.json`.
+leakage audit into a compact machine-readable form. Paper artifact directories
+also include copies of the local holdout manifest and source holdout manifest
+when available. The run manifest records the exact generation commands,
+verifier command, and SHA-256 checksums for each generated artifact and copied
+manifest. The verifier checks required files, JSON parseability, a passing
+threshold log, manifest hash consistency against `effect.json` metadata,
+recomputed threshold gates, and result-summary consistency with `effect.json`.
 For paper-style holdout reports, the threshold log gates case-weighted and
 repo-macro AP effect-size floors, oracle-normalized AP, plus Holm-adjusted
 paired sign-flip p-value ceilings for the key hybrid-vs-baseline deltas.

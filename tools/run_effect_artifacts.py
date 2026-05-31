@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -43,6 +44,8 @@ def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
     result_summary_path = output_dir / "result_summary.json"
     threshold_path = output_dir / "thresholds.txt"
     run_manifest_path = output_dir / "run_manifest.json"
+    holdout_manifest_path = output_dir / "holdout_manifest.json"
+    holdout_source_manifest_path = output_dir / "holdout_source_manifest.json"
 
     measurement_command = [
         sys.executable,
@@ -82,6 +85,8 @@ def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
         "result_summary_path": result_summary_path,
         "threshold_path": threshold_path,
         "run_manifest_path": run_manifest_path,
+        "holdout_manifest_path": holdout_manifest_path,
+        "holdout_source_manifest_path": holdout_source_manifest_path,
         "measurement_command": measurement_command,
         "threshold_command": threshold_command,
         "summary_command": summary_command,
@@ -120,12 +125,54 @@ def file_sha256(path: Path) -> str:
 
 
 def artifact_checksums(plan: dict[str, Any]) -> dict[str, str]:
-    return {
+    checksums = {
         "json": file_sha256(plan["json_path"]),
         "markdown": file_sha256(plan["markdown_path"]),
         "result_summary": file_sha256(plan["result_summary_path"]),
         "thresholds": file_sha256(plan["threshold_path"]),
     }
+    if plan["manifest"] is not None:
+        checksums["holdout_manifest"] = file_sha256(plan["holdout_manifest_path"])
+        if plan["holdout_source_manifest_path"].is_file():
+            checksums["holdout_source_manifest"] = file_sha256(
+                plan["holdout_source_manifest_path"]
+            )
+    return checksums
+
+
+def load_json_file(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def prepared_source_manifest_path(manifest_path: Path) -> Path | None:
+    manifest = load_json_file(manifest_path)
+    prepared_from = manifest.get("prepared_from")
+    if not isinstance(prepared_from, dict):
+        return None
+    source = prepared_from.get("manifest")
+    if not isinstance(source, str) or not source:
+        return None
+    source_path = Path(source)
+    if source_path.is_absolute():
+        return source_path if source_path.is_file() else None
+    for candidate in [ROOT / source_path, manifest_path.parent / source_path]:
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def copy_manifest_artifacts(plan: dict[str, Any]) -> None:
+    manifest = plan["manifest"]
+    if manifest is None:
+        return
+    shutil.copyfile(manifest, plan["holdout_manifest_path"])
+    source_manifest = prepared_source_manifest_path(manifest)
+    if source_manifest is not None:
+        shutil.copyfile(source_manifest, plan["holdout_source_manifest_path"])
 
 
 def write_run_manifest(plan: dict[str, Any]) -> None:
@@ -139,6 +186,16 @@ def write_run_manifest(plan: dict[str, Any]) -> None:
         "thresholds": repo_relative(plan["threshold_path"]),
         "paper_manifest": (
             repo_relative(plan["manifest"]) if plan["manifest"] is not None else None
+        ),
+        "holdout_manifest": (
+            repo_relative(plan["holdout_manifest_path"])
+            if plan["manifest"] is not None
+            else None
+        ),
+        "holdout_source_manifest": (
+            repo_relative(plan["holdout_source_manifest_path"])
+            if plan["holdout_source_manifest_path"].is_file()
+            else None
         ),
         "require_holdout_thresholds": plan["require_holdout_thresholds"],
         "sha256": artifact_checksums(plan),
@@ -162,6 +219,7 @@ def run_plan(
     runner: Runner = subprocess.run,
 ) -> None:
     plan["output_dir"].mkdir(parents=True, exist_ok=True)
+    copy_manifest_artifacts(plan)
     run_stdout_to_file(plan["measurement_command"], plan["json_path"], runner=runner)
     run_stdout_to_file(
         plan["threshold_command"],

@@ -146,13 +146,15 @@ corrected paired significance of the key deltas.
 The artifact runner also writes `result_summary.json`, a compact machine-readable
 summary of the headline metrics, full weight sweep, best weight result, and
 per-repository holdout results, oracle-normalized AP gaps, plus the leakage
-audit.
+audit. Paper artifact directories include copies of the local holdout manifest
+and source holdout manifest when available.
 `run_manifest.json` records the exact commands and SHA-256 checksums for each
-generated artifact. `tools/verify_effect_artifacts.py` checks that the artifact
-directory has all required files, parseable JSON outputs, a passing threshold
-log, SHA-256 hashes that match the run manifest, a recomputed threshold pass,
-and a result summary that matches `effect.json`. The manifest also records the
-verifier command for artifact consumers.
+generated artifact and copied manifest. `tools/verify_effect_artifacts.py`
+checks that the artifact directory has all required files, parseable JSON
+outputs, a passing threshold log, SHA-256 hashes that match the run manifest,
+holdout manifest hashes that match `effect.json` metadata, a recomputed
+threshold pass, and a result summary that matches `effect.json`. The manifest
+also records the verifier command for artifact consumers.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`. `tools/prepare_effect_holdouts.py`

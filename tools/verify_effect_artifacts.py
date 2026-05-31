@@ -21,6 +21,11 @@ ARTIFACT_FILES = {
     "result_summary": "result_summary.json",
     "thresholds": "thresholds.txt",
 }
+OPTIONAL_ARTIFACT_FILES = {
+    "holdout_manifest": "holdout_manifest.json",
+    "holdout_source_manifest": "holdout_source_manifest.json",
+}
+KNOWN_ARTIFACT_FILES = {**ARTIFACT_FILES, **OPTIONAL_ARTIFACT_FILES}
 RUN_MANIFEST = "run_manifest.json"
 REQUIRED_COMMANDS = {
     "measure",
@@ -85,7 +90,7 @@ def verify_manifest_shape(manifest: dict[str, Any], failures: list[str]) -> None
                 "run_manifest.json sha256 map missing keys: "
                 + ", ".join(missing_hashes)
             )
-        for key in sorted(set(ARTIFACT_FILES) & set(sha256)):
+        for key in sorted(set(KNOWN_ARTIFACT_FILES) & set(sha256)):
             if not isinstance(sha256[key], str):
                 failures.append(f"run_manifest.json sha256.{key} must be a string")
 
@@ -103,6 +108,13 @@ def verify_manifest_shape(manifest: dict[str, Any], failures: list[str]) -> None
     if not isinstance(manifest.get("require_holdout_thresholds"), bool):
         failures.append("run_manifest.json require_holdout_thresholds must be boolean")
 
+    for key in OPTIONAL_ARTIFACT_FILES:
+        value = manifest.get(key)
+        if value is not None and not isinstance(value, str):
+            failures.append(f"run_manifest.json {key} must be a string or null")
+        if value is not None and isinstance(sha256, dict) and key not in sha256:
+            failures.append(f"run_manifest.json sha256 map missing key: {key}")
+
 
 def verify_checksums(
     artifact_dir: Path,
@@ -112,14 +124,56 @@ def verify_checksums(
     sha256 = manifest.get("sha256")
     if not isinstance(sha256, dict):
         return
-    for key, filename in ARTIFACT_FILES.items():
+    for key, filename in KNOWN_ARTIFACT_FILES.items():
         expected = sha256.get(key)
         if not isinstance(expected, str):
             continue
-        actual = file_sha256(artifact_dir / filename)
+        path = artifact_dir / filename
+        if not path.is_file():
+            failures.append(f"missing checksummed artifact: {filename}")
+            continue
+        actual = file_sha256(path)
         if actual != expected:
             failures.append(
                 f"{filename} sha256 mismatch: expected {expected}, got {actual}"
+            )
+
+
+def verify_holdout_manifest_hashes(
+    effect_report: dict[str, Any],
+    manifest: dict[str, Any],
+    failures: list[str],
+) -> None:
+    metadata = effect_report.get("metadata")
+    if not isinstance(metadata, dict):
+        return
+    sha256 = manifest.get("sha256")
+    if not isinstance(sha256, dict):
+        return
+
+    holdout_hash = metadata.get("repo_holdout_manifest_sha256")
+    if holdout_hash is not None:
+        if not isinstance(holdout_hash, str):
+            failures.append(
+                "effect.json metadata.repo_holdout_manifest_sha256 must be a string"
+            )
+        elif sha256.get("holdout_manifest") != holdout_hash:
+            failures.append(
+                "holdout_manifest.json sha256 does not match "
+                "effect.json metadata.repo_holdout_manifest_sha256"
+            )
+
+    source_hash = metadata.get("repo_holdout_source_manifest_sha256")
+    if source_hash is not None:
+        if not isinstance(source_hash, str):
+            failures.append(
+                "effect.json metadata.repo_holdout_source_manifest_sha256 "
+                "must be a string"
+            )
+        elif sha256.get("holdout_source_manifest") != source_hash:
+            failures.append(
+                "holdout_source_manifest.json sha256 does not match "
+                "effect.json metadata.repo_holdout_source_manifest_sha256"
             )
 
 
@@ -205,6 +259,7 @@ def verify_artifact_directory(artifact_dir: Path) -> list[str]:
     verify_result_summary_matches_report(effect_report, result_summary, failures)
     verify_manifest_shape(manifest, failures)
     verify_checksums(artifact_dir, manifest, failures)
+    verify_holdout_manifest_hashes(effect_report, manifest, failures)
     verify_threshold_recheck(effect_report, manifest, failures)
     verify_threshold_log(artifact_dir / "thresholds.txt", failures)
     return failures
