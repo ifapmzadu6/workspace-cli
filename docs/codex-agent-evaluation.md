@@ -39,6 +39,10 @@ python3 tools/run_codex_workspace_suite.py \
   --repetitions 2 \
   --output-dir target/codex-workspace-suite-cross-task
 python3 tools/run_codex_workspace_suite.py \
+  --tasks subscription_rollout_sync \
+  --repetitions 4 \
+  --output-dir target/codex-workspace-suite-subscription-rollout
+python3 tools/run_codex_workspace_suite.py \
   --merge-suite \
   target/codex-workspace-suite-policy \
   target/codex-workspace-suite-invoice-tax \
@@ -322,6 +326,30 @@ interval `(-5.250, -2.750)`. By task, the timing deltas were
 task-level intervals, while policy remained close to parity but used fewer
 commands.
 
+To test a larger repository-like workflow, the harness now includes
+`subscription_rollout_sync`. This task synchronizes a six-file Enterprise Plus
+rollout across plan limits, feature flags, billing catalog data, two
+documentation files, and a welcome email template, with support/trial decoys in
+the repository. The first single pilot solved the task in both conditions:
+`shell_only` took 59.346 seconds and 13 commands, while `workspace_cli` took
+50.810 seconds and 5 commands with the exact six-file diff.
+
+The repeated four-run subscription suite gave a more mixed timing result but a
+strong safety and command-count result:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 4 | 1.000 | 0.500 | 68.769 (61.742, 76.741) | 12.750 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 4 | 1.000 | 1.000 | 81.844 (66.233, 97.574) | 5.500 | 5.500 | 5.000 | 0.000 |
+
+The paired timing delta was `+13.075s` with interval `(-10.508, 34.911)`, so
+the larger task does not support a speedup claim yet. However, `workspace_cli`
+used 7.250 fewer commands on average with interval `(-10.006, -4.250)` and
+kept the final diff exactly scoped in every run. `shell_only` passed every run
+but edited the support-policy decoy in two of four runs. This is evidence that
+the related-file workflow can reduce over-editing on larger tasks even when
+elapsed time remains dominated by Codex reasoning variance.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -346,15 +374,17 @@ entries and no `operation log unreadable` status.
   zero. The latest three-task suite shows a same-commit twelve-pair aggregate
   timing improvement with a non-zero-crossing interval and substantially fewer
   commands, and the merged twelve-pair evidence artifact independently points in
-  the same direction. The paper can now make controlled-task speedup claims for
+  the same direction. The new subscription rollout task is larger and shows
+  perfect workspace diff-scope correctness versus shell over-editing, but not an
+  elapsed-time win. The paper can now make controlled-task speedup claims for
   transactional recovery, invoice-style multi-file synchronization, and
-  small-suite aggregate behavior, while still treating broader generalization as
-  early pilot evidence.
+  small-suite aggregate behavior, while separately presenting larger-task
+  safety evidence and treating broader generalization as early pilot evidence.
 
 ## Next Required Step
 
-The next evaluation should add at least one larger repository-like task where
-the audit log, related-file discovery, impact checks, rollback, stdin patching,
-and batched observations remove enough wasted search or recovery work to pay for
-the tool overhead. The report should keep separating single-task claims, merged
-artifact claims, and same-commit cross-task aggregate claims.
+The next evaluation should optimize the subscription rollout protocol so Codex
+does not spend extra reasoning turns drafting alternate large patches, then run
+a cross-task suite that includes the subscription task. The report should keep
+separating single-task speed claims, larger-task safety claims, merged artifact
+claims, and same-commit cross-task aggregate claims.
