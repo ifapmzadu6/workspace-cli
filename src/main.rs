@@ -96,6 +96,8 @@ const RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER: f64 = 3.5;
 const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.4;
+const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER: f64 = 6.0;
+const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
 const RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER: f64 = 1.5;
 const RELATED_HYBRID_SOURCE_CHANGELOG_SCORE_MULTIPLIER: f64 = 1.4;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
@@ -4676,6 +4678,12 @@ fn related_hybrid_path_score_multiplier(
     if direct_edge_weight > 0.0 && is_source_changelog_pair(target, candidate) {
         multiplier *= RELATED_HYBRID_SOURCE_CHANGELOG_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0
+        && direct_score <= RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE
+        && is_javascript_toolchain_manifest_pair(target, candidate)
+    {
+        multiplier *= RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER;
+    }
     if direct_edge_weight > 0.0 && shares_parent_and_name_token(target, candidate) {
         multiplier *= RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER;
     }
@@ -4781,6 +4789,23 @@ fn is_root_documentation_pair(target: &str, candidate: &str) -> bool {
 fn is_source_changelog_pair(target: &str, candidate: &str) -> bool {
     (is_javascript_source_code_file(target) && is_project_changelog(candidate))
         || (is_project_changelog(target) && is_javascript_source_code_file(candidate))
+}
+
+fn is_javascript_toolchain_manifest_pair(target: &str, candidate: &str) -> bool {
+    (is_javascript_toolchain_config(target) && is_javascript_package_manifest_or_lock(candidate))
+        || (is_javascript_package_manifest_or_lock(target)
+            && is_javascript_toolchain_config(candidate))
+}
+
+fn is_javascript_toolchain_config(path: &str) -> bool {
+    matches!(path, "tsconfig.json" | "jsconfig.json")
+}
+
+fn is_javascript_package_manifest_or_lock(path: &str) -> bool {
+    matches!(
+        path,
+        "package.json" | "package-lock.json" | "pnpm-lock.yaml" | "yarn.lock"
+    )
 }
 
 fn is_root_markdown_document(path: &str) -> bool {
@@ -11820,6 +11845,24 @@ src/b.rs
         assert_eq!(
             related_hybrid_path_score_multiplier("src/index.ts", "CHANGELOG.md", 0.0, 0.0),
             related_path_score_multiplier("src/index.ts", "CHANGELOG.md")
+        );
+        assert!(
+            related_hybrid_path_score_multiplier("package.json", "tsconfig.json", 1.0, 0.05)
+                >= related_path_score_multiplier("package.json", "tsconfig.json")
+                    * RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("package.json", "tsconfig.json", 1.0, 0.2),
+            related_path_score_multiplier("package.json", "tsconfig.json")
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("package.json", "tsconfig.json", 0.0, 0.0),
+            related_path_score_multiplier("package.json", "tsconfig.json")
+        );
+        assert!(
+            related_hybrid_path_score_multiplier("package-lock.json", "jsconfig.json", 1.0, 0.05)
+                >= related_path_score_multiplier("package-lock.json", "jsconfig.json")
+                    * RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER
         );
         assert!(
             related_hybrid_path_score_multiplier(
