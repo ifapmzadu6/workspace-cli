@@ -38,6 +38,12 @@ python3 tools/run_codex_workspace_suite.py \
   --tasks policy_threshold_sync invoice_tax_sync rollback_recovery \
   --repetitions 2 \
   --output-dir target/codex-workspace-suite-cross-task
+python3 tools/run_codex_workspace_suite.py \
+  --merge-suite \
+  target/codex-workspace-suite-policy \
+  target/codex-workspace-suite-invoice-tax \
+  target/codex-workspace-suite-rollback \
+  --output-dir target/codex-workspace-suite-merged
 ```
 
 The pilot writes `summary.json`, `summary.md`, raw Codex JSONL, stderr logs,
@@ -51,7 +57,9 @@ The suite runner repeats one or more pilot tasks and writes `suite_summary.json`
 and `suite_summary.md`, while preserving each per-run pilot artifact directory.
 It reports pass rate, expected-diff-scope correctness, elapsed-time bootstrap
 intervals, command counts, workspace log usage, rollback usage, paired
-`workspace_cli - shell_only` timing deltas, and paired command-count deltas.
+`workspace_cli - shell_only` timing deltas, and paired command-count deltas. It
+can also merge existing suite directories into a larger aggregate summary without
+rerunning Codex, preserving the source suite metadata in `source_suites`.
 
 ## Current Pilot Results
 
@@ -273,6 +281,23 @@ and `rollback_recovery = -17.094s`. This is still a small controlled suite, but
 it is the first multi-task Codex-in-the-loop result where the aggregate timing
 interval does not cross zero.
 
+Merging the existing task-specific four-run suites for the same three optimized
+tasks gives a 12-pair aggregate without discarding the original per-run
+artifacts:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 12 | 1.000 | 1.000 | 52.321 (45.009, 59.710) | 9.500 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 12 | 1.000 | 1.000 | 45.567 (41.270, 49.767) | 5.333 | 5.333 | 5.667 | 0.333 |
+
+The 12-pair timing delta was `-6.754s` with bootstrap interval
+`(-11.528, -1.933)`, and `workspace_cli` was faster in nine of twelve paired
+runs. The paired command-count delta was `-4.167` commands with interval
+`(-5.500, -2.833)`. The merged source suites were generated from clean
+workspaces at the optimized task-specific commits rather than one single commit,
+so this should be cited as a merged evidence artifact; the same-commit two-run
+cross-task suite above is the cleaner commit-local result.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -294,17 +319,18 @@ entries and no `operation log unreadable` status.
   still statistically weak timing improvement. The optimized rollback suite is
   the first repeated single-task Codex-in-the-loop result where `workspace_cli`
   was faster in every paired run and the paired timing interval did not cross
-  zero. The latest three-task suite also shows an aggregate timing improvement
-  with a non-zero-crossing interval and substantially fewer commands. The paper
-  can now make controlled-task speedup claims for transactional recovery and
-  small-suite aggregate behavior, while still treating broader generalization as
-  early pilot evidence.
+  zero. The latest three-task suites also show aggregate timing improvements
+  with non-zero-crossing intervals and substantially fewer commands across both
+  the same-commit two-run suite and the merged twelve-pair evidence artifact.
+  The paper can now make controlled-task speedup claims for transactional
+  recovery and small-suite aggregate behavior, while still treating broader
+  generalization as early pilot evidence.
 
 ## Next Required Step
 
-The next evaluation should increase repetitions on the three-task suite and add
-at least one larger repository-like task where the audit log, related-file
-discovery, impact checks, rollback, stdin patching, and batched observations
-remove enough wasted search or recovery work to pay for the tool overhead. The
-report should keep separating single-task claims from cross-task aggregate
-claims.
+The next evaluation should rerun the three-task suite with four repetitions on a
+single current commit and add at least one larger repository-like task where the
+audit log, related-file discovery, impact checks, rollback, stdin patching, and
+batched observations remove enough wasted search or recovery work to pay for the
+tool overhead. The report should keep separating single-task claims, merged
+artifact claims, and same-commit cross-task aggregate claims.
