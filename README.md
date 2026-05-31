@@ -63,6 +63,7 @@ workspace read      Read a text file or line range
 workspace diff      Show the current git diff
 workspace patch     Apply a patch as a recorded transaction
 workspace replace   Apply exact text replacements as a recorded transaction
+workspace trial     Apply a patch, run a verifier, and optionally roll back
 workspace run       Run a command and record the result
 workspace log       Show the operation log
 workspace rollback  Roll back a workspace patch or replace transaction
@@ -470,6 +471,20 @@ avoid creating a temporary patch file just to apply a transaction.
 Large changed-file lists are bounded in patch and rollback observations. The
 total count remains available as `file_count`, with omitted files reported
 separately.
+
+### `workspace trial`
+
+Applies a patch, runs a verifier command, and optionally rolls the patch back if
+the verifier exits nonzero:
+
+```sh
+workspace trial proposed.diff --run "cargo test" --rollback-on-fail --include-patch
+```
+
+The JSON response includes the patch transaction id, verifier output, exit
+status, changed files, optional rollback transaction id, and optional bounded
+patch content. This bundles the common "try proposed patch, test it, undo it,
+then inspect the patch" agent workflow into one observed operation.
 
 ### `workspace replace`
 

@@ -1314,6 +1314,123 @@ diff --git a/note.txt b/note.txt
 }
 
 #[test]
+fn trial_rolls_back_failed_verifier_and_includes_patch() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+    write_file(
+        root,
+        "bad.patch",
+        "\
+diff --git a/note.txt b/note.txt
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-hello
++bad
+",
+    );
+
+    let trial = run_workspace(
+        root,
+        &[
+            "trial",
+            "--description",
+            "try bad patch",
+            "--run",
+            "grep -q '^good$' note.txt",
+            "--rollback-on-fail",
+            "--include-patch",
+            "--json",
+            "bad.patch",
+        ],
+    );
+
+    assert_eq!(trial["kind"], "workspace_trial");
+    assert_eq!(trial["scope"], "bad.patch");
+    assert_eq!(trial["data"]["patch_file"], "bad.patch");
+    assert_eq!(trial["data"]["exit_code"], 1);
+    assert_eq!(trial["data"]["rolled_back"], true);
+    assert!(trial["data"]["rollback_transaction_id"].is_string());
+    assert_eq!(trial["data"]["file_count"], 1);
+    assert_eq!(trial["data"]["files_changed"][0], "note.txt");
+    assert!(
+        trial["data"]["patch"]
+            .as_str()
+            .expect("trial should include patch content")
+            .contains("+bad")
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello\n"
+    );
+    assert!(
+        strings_at(&trial, &["next_observations"])
+            .contains(&"workspace diff --summary".to_string())
+    );
+
+    let log = run_workspace(root, &["log", "--limit", "1", "--json"]);
+    assert_eq!(log["data"]["entries"][0]["op"], "trial");
+    assert_eq!(log["data"]["entries"][0]["summary"], "try bad patch");
+}
+
+#[test]
+fn trial_keeps_successful_patch_and_can_be_rolled_back() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    commit_all(root, "initial note");
+    write_file(
+        root,
+        "good.patch",
+        "\
+diff --git a/note.txt b/note.txt
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-hello
++good
+",
+    );
+
+    let trial = run_workspace(
+        root,
+        &[
+            "trial",
+            "--run",
+            "grep -q '^good$' note.txt",
+            "--rollback-on-fail",
+            "--json",
+            "good.patch",
+        ],
+    );
+
+    assert_eq!(trial["kind"], "workspace_trial");
+    assert_eq!(trial["data"]["exit_code"], 0);
+    assert_eq!(trial["data"]["rolled_back"], false);
+    assert!(trial["data"]["rollback_transaction_id"].is_null());
+    assert_eq!(fs::read_to_string(root.join("note.txt")).unwrap(), "good\n");
+    let transaction_id = trial["data"]["patch_transaction_id"]
+        .as_str()
+        .expect("transaction id should be a string")
+        .to_string();
+    assert!(
+        strings_at(&trial, &["next_observations"])
+            .contains(&format!("workspace rollback {transaction_id}"))
+    );
+
+    let rollback = run_workspace(root, &["rollback", &transaction_id, "--json"]);
+    assert_eq!(rollback["kind"], "workspace_rollback");
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello\n"
+    );
+}
+
+#[test]
 fn replace_can_apply_exact_replacements_from_stdin_and_rollback() {
     let temp = init_git_repo();
     let root = temp.path();

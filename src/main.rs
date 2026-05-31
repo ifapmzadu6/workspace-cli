@@ -63,6 +63,7 @@ const WORKSPACE_READ_KIND: &str = "workspace_read";
 const WORKSPACE_DIFF_KIND: &str = "workspace_diff";
 const WORKSPACE_PATCH_KIND: &str = "workspace_patch";
 const WORKSPACE_REPLACE_KIND: &str = "workspace_replace";
+const WORKSPACE_TRIAL_KIND: &str = "workspace_trial";
 const WORKSPACE_RUN_KIND: &str = "workspace_run";
 const WORKSPACE_LOG_KIND: &str = "workspace_log";
 const WORKSPACE_ROLLBACK_KIND: &str = "workspace_rollback";
@@ -80,6 +81,7 @@ const LOG_OP_READ: &str = "read";
 const LOG_OP_DIFF: &str = "diff";
 const LOG_OP_PATCH: &str = "patch";
 const LOG_OP_REPLACE: &str = "replace";
+const LOG_OP_TRIAL: &str = "trial";
 const LOG_OP_RUN: &str = "run";
 const LOG_OP_ROLLBACK: &str = "rollback";
 const IMPACT_SOURCE_DIFF: &str = "diff";
@@ -212,6 +214,8 @@ enum Commands {
     Patch(PatchArgs),
     /// Apply exact text replacements as a recorded transaction.
     Replace(ReplaceArgs),
+    /// Apply a patch, run a verifier, and optionally roll back on failure.
+    Trial(TrialArgs),
     /// Run a command and record its output.
     Run(RunArgs),
     /// Show recorded workspace operations.
@@ -439,6 +443,27 @@ struct ReplaceArgs {
     stdin: bool,
     /// JSON file containing exact replacements.
     replace_file: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct TrialArgs {
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    json: bool,
+    /// Optional human-readable transaction description.
+    #[arg(long)]
+    description: Option<String>,
+    /// Command to run after applying the patch.
+    #[arg(long)]
+    run: String,
+    /// Roll back the patch transaction when the command exits nonzero.
+    #[arg(long)]
+    rollback_on_fail: bool,
+    /// Include bounded patch content in the JSON response.
+    #[arg(long)]
+    include_patch: bool,
+    /// Patch file to apply with git apply.
+    patch_file: PathBuf,
 }
 
 #[derive(Args)]
@@ -1031,6 +1056,25 @@ struct ReplaceData {
     omitted_files: usize,
 }
 
+#[derive(Serialize)]
+struct TrialData {
+    patch_transaction_id: String,
+    rollback_transaction_id: Option<String>,
+    patch_file: String,
+    stored_patch: String,
+    file_count: usize,
+    files_changed: Vec<String>,
+    omitted_files: usize,
+    command: String,
+    exit_code: Option<i32>,
+    duration_ms: u128,
+    stdout: String,
+    stderr: String,
+    rolled_back: bool,
+    patch: Option<String>,
+    patch_truncated: bool,
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum ReplaceInput {
@@ -1392,6 +1436,7 @@ fn main() -> Result<()> {
         Commands::Diff(args) => cmd_diff(&workspace, args),
         Commands::Patch(args) => cmd_patch(&workspace, args),
         Commands::Replace(args) => cmd_replace(&workspace, args),
+        Commands::Trial(args) => cmd_trial(&workspace, args),
         Commands::Run(args) => cmd_run(&workspace, args),
         Commands::Log(args) => cmd_log(&workspace, args),
         Commands::Rollback(args) => cmd_rollback(&workspace, args),
@@ -1613,6 +1658,22 @@ fn cmd_replace(workspace: &Workspace, args: ReplaceArgs) -> Result<()> {
     )
 }
 
+fn cmd_trial(workspace: &Workspace, args: TrialArgs) -> Result<()> {
+    let trial = observed_trial_transaction(workspace, &args)?;
+    let observation = trial_transaction_observation(workspace, trial);
+    let log_summary = trial_log_summary(args.description, &observation);
+
+    output_changed_observation_with_summary(
+        workspace,
+        args.json,
+        LOG_OP_TRIAL,
+        &log_summary,
+        &observation.data.patch_transaction_id,
+        &observation,
+        print_trial,
+    )
+}
+
 fn observed_patch_transaction(
     workspace: &Workspace,
     args: &PatchArgs,
@@ -1635,6 +1696,41 @@ fn observed_replace_transaction(
         (true, Some(_)) => bail!("--stdin cannot be used with REPLACE_FILE"),
         (false, None) => bail!("workspace replace requires REPLACE_FILE or --stdin"),
     }
+}
+
+fn observed_trial_transaction(
+    workspace: &Workspace,
+    args: &TrialArgs,
+) -> Result<ObservedTrialTransaction> {
+    let patch = apply_patch_transaction(workspace, &args.patch_file)?;
+    let run = execute_run_command(workspace, &args.run)?;
+    let rollback = if args.rollback_on_fail && run.data.exit_code != Some(0) {
+        Some(apply_rollback_transaction(
+            workspace,
+            &patch.transaction_id,
+        )?)
+    } else {
+        None
+    };
+    let patch_content = if args.include_patch {
+        Some(
+            read_text_prefix_bounded(&patch.stored_patch).with_context(|| {
+                format!(
+                    "failed to read stored patch {}",
+                    patch.stored_patch.display()
+                )
+            })?,
+        )
+    } else {
+        None
+    };
+
+    Ok(ObservedTrialTransaction {
+        patch,
+        rollback,
+        run,
+        patch_content,
+    })
 }
 
 fn apply_patch_transaction(
@@ -2133,6 +2229,13 @@ struct AppliedReplaceTransaction {
     files_changed: Vec<String>,
 }
 
+struct ObservedTrialTransaction {
+    patch: AppliedPatchTransaction,
+    rollback: Option<AppliedRollbackTransaction>,
+    run: ObservedRun,
+    patch_content: Option<ReadContent>,
+}
+
 struct AppliedRollbackTransaction {
     rollback_transaction_id: String,
     stored_patch: PathBuf,
@@ -2168,6 +2271,62 @@ fn replace_transaction_observation(
     replace_observation(data, &replace.files_changed)
 }
 
+fn trial_transaction_observation(
+    workspace: &Workspace,
+    trial: ObservedTrialTransaction,
+) -> Observation<TrialData> {
+    let files_changed = trial.patch.files_changed.clone();
+    let observed_files = observed_changed_files(&files_changed);
+    let rollback_transaction_id = trial
+        .rollback
+        .as_ref()
+        .map(|rollback| rollback.rollback_transaction_id.clone());
+    let rolled_back = rollback_transaction_id.is_some();
+    let patch_truncated = trial
+        .patch_content
+        .as_ref()
+        .is_some_and(|content| content.truncated);
+    let patch = trial.patch_content.map(|content| content.content);
+    let output_truncated = trial.run.output_truncated;
+    let run_data = trial.run.data;
+    let patch_transaction_id = trial.patch.transaction_id;
+    let data = TrialData {
+        patch_transaction_id: patch_transaction_id.clone(),
+        rollback_transaction_id,
+        patch_file: trial.patch.patch_file,
+        stored_patch: workspace.relative(&trial.patch.stored_patch),
+        file_count: observed_files.file_count,
+        files_changed: observed_files.files,
+        omitted_files: observed_files.omitted_files,
+        command: run_data.command,
+        exit_code: run_data.exit_code,
+        duration_ms: run_data.duration_ms,
+        stdout: run_data.stdout,
+        stderr: run_data.stderr,
+        rolled_back,
+        patch,
+        patch_truncated,
+    };
+    let summary = trial_summary(&data, output_truncated);
+    let evidence = changed_file_evidence(&files_changed, EVIDENCE_REASON_PATCH_FILE_TARGET);
+    let truncated =
+        transaction_files_truncated(data.omitted_files) || output_truncated || data.patch_truncated;
+    let next_observations = if data.rolled_back {
+        static_observation_commands(&[WORKSPACE_DIFF_SUMMARY_COMMAND])
+    } else {
+        patch_followup_observations(&patch_transaction_id)
+    };
+    observation_with_evidence(
+        WORKSPACE_TRIAL_KIND,
+        data.patch_file.clone(),
+        summary,
+        data,
+        evidence,
+        truncated,
+        next_observations,
+    )
+}
+
 fn rollback_transaction_observation(
     workspace: &Workspace,
     transaction_id: &str,
@@ -2191,6 +2350,10 @@ fn replace_log_summary(
     description: Option<String>,
     observation: &Observation<ReplaceData>,
 ) -> String {
+    description.unwrap_or_else(|| observation.summary.clone())
+}
+
+fn trial_log_summary(description: Option<String>, observation: &Observation<TrialData>) -> String {
     description.unwrap_or_else(|| observation.summary.clone())
 }
 
@@ -3462,6 +3625,33 @@ fn run_summary(exit_code: Option<i32>, duration_ms: u128, truncated: bool) -> St
     let status = run_exit_status_label(exit_code);
     let mut summary = format!("command exited with {status} in {duration_ms}ms");
     append_note_if(&mut summary, truncated, SUMMARY_NOTE_OUTPUT_TRUNCATED);
+    summary
+}
+
+fn trial_summary(data: &TrialData, output_truncated: bool) -> String {
+    let status = run_exit_status_label(data.exit_code);
+    let mut summary = format!(
+        "trial patch transaction {} command exited with {status} in {}ms",
+        data.patch_transaction_id, data.duration_ms
+    );
+    if data.rolled_back {
+        summary.push_str(" and rolled back");
+    }
+    append_note_if(
+        &mut summary,
+        transaction_files_truncated(data.omitted_files),
+        SUMMARY_NOTE_FILES_TRUNCATED,
+    );
+    append_note_if(
+        &mut summary,
+        data.patch_truncated,
+        SUMMARY_NOTE_PATCH_TRUNCATED,
+    );
+    append_note_if(
+        &mut summary,
+        output_truncated,
+        SUMMARY_NOTE_OUTPUT_TRUNCATED,
+    );
     summary
 }
 
@@ -8121,6 +8311,29 @@ fn print_replace(observation: &Observation<ReplaceData>) -> Result<()> {
         &observation.data.files_changed,
         observation.data.omitted_files,
     );
+    Ok(())
+}
+
+fn print_trial(observation: &Observation<TrialData>) -> Result<()> {
+    let data = &observation.data;
+    if !data.stdout.is_empty() {
+        print_stdout_text(&data.stdout);
+    }
+    if !data.stderr.is_empty() {
+        print_stderr_text(&data.stderr);
+    }
+    println!("{}", observation.summary);
+    println!(
+        "{}",
+        patch_transaction_human_summary(&data.patch_transaction_id)
+    );
+    if let Some(rollback_transaction_id) = &data.rollback_transaction_id {
+        println!(
+            "{}",
+            rollback_transaction_human_summary(rollback_transaction_id)
+        );
+    }
+    print_transaction_files(&data.files_changed, data.omitted_files);
     Ok(())
 }
 

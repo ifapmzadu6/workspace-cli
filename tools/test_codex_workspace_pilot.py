@@ -504,7 +504,7 @@ if __name__ == "__main__":
         self.assertIn("workspace diff --json", workspace_prompt)
         self.assertNotIn("impact --diff", workspace_prompt)
 
-    def test_rollback_prompt_requests_patch_transaction_rollback(self) -> None:
+    def test_rollback_prompt_uses_trial_for_proposed_patch(self) -> None:
         task = run_codex_workspace_pilot.task_specs()["rollback_recovery"]
         prompts = run_codex_workspace_pilot.condition_prompts(task)
         workspace_prompt = next(
@@ -512,20 +512,25 @@ if __name__ == "__main__":
         )
 
         self.assertIn("docs/proposed_late_fee_fix.patch", workspace_prompt)
-        self.assertIn("data.transaction_id", workspace_prompt)
-        self.assertIn("rollback <transaction_id>", workspace_prompt)
+        self.assertIn("workspace trial", workspace_prompt)
+        self.assertIn("--rollback-on-fail", workspace_prompt)
+        self.assertIn("--include-patch", workspace_prompt)
+        self.assertIn("data.exit_code", workspace_prompt)
+        self.assertIn("data.stderr", workspace_prompt)
+        self.assertIn("data.patch", workspace_prompt)
+        self.assertIn("do not run separate `workspace patch`", workspace_prompt)
         self.assertIn("do not run `workspace status`", workspace_prompt)
-        self.assertIn("workspace read docs/proposed_late_fee_fix.patch", workspace_prompt)
-        self.assertIn("do not read `src/billing.py` or `docs/billing.md`", workspace_prompt)
+        self.assertNotIn("rollback <transaction_id>", workspace_prompt)
+        self.assertNotIn("workspace read docs/proposed_late_fee_fix.patch", workspace_prompt)
+        self.assertIn("Do not read `src/billing.py` or `docs/billing.md`", workspace_prompt)
         self.assertNotIn("`./bin/workspace status --json`", workspace_prompt)
-        self.assertIn("patch --stdin", workspace_prompt)
-        self.assertIn("do not create or delete a temporary patch file", workspace_prompt)
-        self.assertIn("put the diff content literally", workspace_prompt)
+        self.assertIn("replace --stdin", workspace_prompt)
+        self.assertIn('"replacements"', workspace_prompt)
+        self.assertIn("LATE_FEE_CAP_CENTS = 1500", workspace_prompt)
         self.assertIn("do not shell-escape `$` values", workspace_prompt)
-        self.assertIn("standard unified git diff", workspace_prompt)
         self.assertIn("do not use a `--` separator", workspace_prompt)
         self.assertIn("do not spend time running", workspace_prompt)
-        self.assertIn("keep the daily rate at 150 cents", workspace_prompt)
+        self.assertIn("daily rate at 150 cents", workspace_prompt)
 
     def test_invoice_tax_prompt_requests_cochange_related_and_impact(self) -> None:
         task = run_codex_workspace_pilot.task_specs()["invoice_tax_sync"]
