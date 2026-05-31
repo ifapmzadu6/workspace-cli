@@ -96,6 +96,7 @@ const RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER: f64 = 3.5;
 const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.9;
+const RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
@@ -4667,6 +4668,9 @@ fn related_hybrid_path_score_multiplier(
     {
         multiplier *= RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0 && shares_parent_and_name_token(target, candidate) {
+        multiplier *= RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER;
+    }
     multiplier
 }
 
@@ -4768,6 +4772,55 @@ fn is_root_documentation_pair(target: &str, candidate: &str) -> bool {
 
 fn is_root_markdown_document(path: &str) -> bool {
     path_parent(path).is_empty() && matches!(path_extension(path), Some("md" | "MD"))
+}
+
+fn shares_parent_and_name_token(target: &str, candidate: &str) -> bool {
+    let parent = path_parent(target);
+    if parent.is_empty() || parent != path_parent(candidate) {
+        return false;
+    }
+    let target_tokens = path_name_tokens(target);
+    if target_tokens.is_empty() {
+        return false;
+    }
+    let candidate_tokens = path_name_tokens(candidate);
+    target_tokens
+        .iter()
+        .any(|token| candidate_tokens.contains(token))
+}
+
+fn path_name_tokens(path: &str) -> BTreeSet<String> {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    let stem = file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    let mut tokens = BTreeSet::new();
+    let mut current = String::new();
+    for character in stem.chars() {
+        if character.is_ascii_alphanumeric() {
+            current.push(character.to_ascii_lowercase());
+        } else {
+            push_path_name_token(&mut tokens, &mut current);
+        }
+    }
+    push_path_name_token(&mut tokens, &mut current);
+    tokens
+}
+
+fn push_path_name_token(tokens: &mut BTreeSet<String>, current: &mut String) {
+    if current.len() >= 3 && !is_common_path_name_token(current) {
+        tokens.insert(std::mem::take(current));
+    } else {
+        current.clear();
+    }
+}
+
+fn is_common_path_name_token(token: &str) -> bool {
+    matches!(
+        token,
+        "src" | "test" | "tests" | "index" | "main" | "lib" | "mod" | "config"
+    )
 }
 
 fn path_parent(path: &str) -> &str {
@@ -11703,6 +11756,33 @@ src/b.rs
         assert_eq!(
             related_hybrid_path_score_multiplier("README.md", "docs/guide.md", 1.0, 1.0),
             related_path_score_multiplier("README.md", "docs/guide.md")
+        );
+        assert!(
+            related_hybrid_path_score_multiplier(
+                "scripts/compare.sh",
+                "scripts/external_tool_compare.sh",
+                1.0,
+                0.1
+            ) >= related_path_score_multiplier(
+                "scripts/compare.sh",
+                "scripts/external_tool_compare.sh"
+            ) * RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier(
+                "scripts/compare.sh",
+                "scripts/verify_release_version.sh",
+                1.0,
+                0.1
+            ),
+            related_path_score_multiplier(
+                "scripts/compare.sh",
+                "scripts/verify_release_version.sh"
+            )
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("scripts/compare.sh", "docs/compare.md", 1.0, 0.1),
+            related_path_score_multiplier("scripts/compare.sh", "docs/compare.md")
         );
         assert!(is_manifest_lock_pair("package.json", "package-lock.json"));
         assert!(!is_same_source_sibling("main.rs", "lib.rs"));
