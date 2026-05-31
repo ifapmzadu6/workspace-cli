@@ -684,7 +684,12 @@ CI-workflow manifest prior is therefore intentionally one-way
 (`workflow -> manifest`) and direct-edge gated: a symmetric
 `package.json -> workflow` boost fixes one remaining case but degrades ordinary
 package release cases where lockfiles, changelogs, source, and tests are the
-stronger historical neighbors. `effect.md` and `result_summary.json` now emit
+stronger historical neighbors. A narrower manifest-to-CI cold-start variant has
+the same failure mode: it recovers the predictable CI target for the
+`llm-json-extract` environment-matrix change (`9631a65ab479`) but promotes
+`.github/workflows/ci.yml` above README in the schema-overload feature residual
+(`21764e9cfbe3`), reducing full holdout AP. `effect.md` and
+`result_summary.json` now emit
 the same repo/commit residual gap clusters with missing predictable/new target
 splits and top non-targets, plus the predictable-only retargeted clusters, so
 this diagnosis is reproducible directly from the paper artifact.
