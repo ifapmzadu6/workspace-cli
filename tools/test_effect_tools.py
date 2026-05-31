@@ -1255,13 +1255,6 @@ class EffectSummaryComparisonTests(unittest.TestCase):
                         "average_precision_at_5": {"mean": 0.577},
                     },
                 },
-                "predictable_only": {
-                    "methods": {
-                        "workspace_related_hybrid": {
-                            "average_precision_at_5": {"mean": hybrid_ap + 0.04},
-                        },
-                    },
-                },
                 "oracle_normalized": {
                     "workspace_related_hybrid": {
                         "oracle_normalized_average_precision_at_5": 0.941383,
@@ -1277,8 +1270,32 @@ class EffectSummaryComparisonTests(unittest.TestCase):
                     },
                 },
                 "residual_gap_clusters": [
-                    {"oracle_gap_average_precision_at_5": 0.87},
+                    {
+                        "repo_name": "related-cli",
+                        "heldout_commit": "6447d4333c23",
+                        "oracle_gap_average_precision_at_5": 0.87,
+                        "missing_expected_counts": [
+                            {"path": "COMPARISON.md", "count": 4},
+                            {"path": "MEASUREMENTS.md", "count": 4},
+                        ],
+                        "method_false_positive_counts": [
+                            {"path": "package.json", "count": 3},
+                        ],
+                    },
                 ],
+                "predictable_only": {
+                    "methods": {
+                        "workspace_related_hybrid": {
+                            "average_precision_at_5": {"mean": hybrid_ap + 0.04},
+                        },
+                    },
+                    "residual_gap_clusters": [
+                        {
+                            "repo_name": "llm-json-extract",
+                            "heldout_commit": "9631a65ab479",
+                        },
+                    ],
+                },
             },
             "threshold_margins": [
                 {"label": f"threshold-{index}", "status": status}
@@ -1309,6 +1326,23 @@ class EffectSummaryComparisonTests(unittest.TestCase):
         self.assertEqual(by_metric["threshold failures"]["old"], 0)
         self.assertEqual(by_metric["threshold failures"]["new"], 2)
         self.assertEqual(by_metric["threshold failures"]["delta"], 2)
+        self.assertEqual(by_metric["residual cluster count"]["old"], 1)
+        self.assertEqual(
+            by_metric["top residual cluster"]["new"],
+            "related-cli@6447d4333c23",
+        )
+        self.assertEqual(
+            by_metric["predictable top residual cluster"]["new"],
+            "llm-json-extract@9631a65ab479",
+        )
+        self.assertEqual(
+            by_metric["top residual missing"]["new"],
+            "COMPARISON.md x4, MEASUREMENTS.md x4",
+        )
+        self.assertEqual(
+            by_metric["top residual false positives"]["new"],
+            "package.json x3",
+        )
 
     def test_compare_summaries_renders_markdown_table(self) -> None:
         rows = [

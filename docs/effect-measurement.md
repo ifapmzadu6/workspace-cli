@@ -726,12 +726,15 @@ cluster is a `related-cli` source split (`97835ef97e8d`), capped below perfect
 oracle AP because `src/model.rs` is new at the parent revision while the older
 source siblings have broad, tied historical evidence. The JS/TS
 source-changelog prior narrows the next `llm-json-extract`
-source/test residual (`21764e9cfbe3`) without promoting README over
-`package-lock.json` in the dependency-edit residual. The
+source/test residual (`21764e9cfbe3`), leaving `package-lock.json` as the
+remaining top-k non-target across the feature-edit seeds. The strengthened
 changelog-to-toolchain cold-start prior recovers `tsconfig.json` for the
 `llm-json-extract` dependency bump (`6a2977eb724e`) when there is no direct
-changelog edge yet, while leaving the direct-edge source/test residual
-unchanged. The implemented
+changelog edge yet, removing that commit from the residual clusters while
+leaving the direct-edge source/test residual unchanged. The remaining
+`llm-json-extract` CI-matrix cluster (`9631a65ab479`) mixes one predictable
+workflow target with new `.gitattributes` and smoke-test files, so it remains
+separate from ordinary dependency and feature-edit behavior. The implemented
 CI-workflow manifest prior is therefore intentionally one-way
 (`workflow -> manifest`) and direct-edge gated: a symmetric
 `package.json -> workflow` boost fixes one remaining case but degrades ordinary

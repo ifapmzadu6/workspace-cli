@@ -134,6 +134,101 @@ def threshold_failure_count(summary: dict[str, Any]) -> int | None:
     )
 
 
+def residual_clusters(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    clusters = nested_get(summary, ("repo_temporal_holdout", "residual_gap_clusters"))
+    if not isinstance(clusters, list):
+        return []
+    return [cluster for cluster in clusters if isinstance(cluster, dict)]
+
+
+def predictable_residual_clusters(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    clusters = nested_get(
+        summary,
+        (
+            "repo_temporal_holdout",
+            "predictable_only",
+            "residual_gap_clusters",
+        ),
+    )
+    if not isinstance(clusters, list):
+        return []
+    return [cluster for cluster in clusters if isinstance(cluster, dict)]
+
+
+def residual_cluster_count(summary: dict[str, Any]) -> int:
+    return len(residual_clusters(summary))
+
+
+def predictable_residual_cluster_count(summary: dict[str, Any]) -> int:
+    return len(predictable_residual_clusters(summary))
+
+
+def top_residual_id(summary: dict[str, Any]) -> str | None:
+    return cluster_id(first_cluster(residual_clusters(summary)))
+
+
+def top_predictable_residual_id(summary: dict[str, Any]) -> str | None:
+    return cluster_id(first_cluster(predictable_residual_clusters(summary)))
+
+
+def top_residual_missing(summary: dict[str, Any]) -> str | None:
+    return path_counts_text(
+        first_cluster(residual_clusters(summary)),
+        "missing_expected_counts",
+    )
+
+
+def top_residual_false_positive(summary: dict[str, Any]) -> str | None:
+    return path_counts_text(
+        first_cluster(residual_clusters(summary)),
+        "method_false_positive_counts",
+    )
+
+
+def first_cluster(clusters: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return clusters[0] if clusters else None
+
+
+def cluster_id(cluster: dict[str, Any] | None) -> str | None:
+    if cluster is None:
+        return None
+    repo_name = cluster.get("repo_name")
+    commit = cluster.get("heldout_commit")
+    if not isinstance(repo_name, str) or not isinstance(commit, str):
+        return None
+    return f"{repo_name}@{commit}"
+
+
+def path_counts_text(cluster: dict[str, Any] | None, field: str) -> str | None:
+    if cluster is None:
+        return None
+    rows = cluster.get(field)
+    if not isinstance(rows, list):
+        return None
+    parts = []
+    for row in rows[:5]:
+        if not isinstance(row, dict):
+            continue
+        path = row.get("path")
+        count = row.get("count")
+        if isinstance(path, str) and isinstance(count, int) and not isinstance(
+            count,
+            bool,
+        ):
+            parts.append(f"{path} x{count}")
+    return ", ".join(parts) if parts else None
+
+
+CUSTOM_METRICS = [
+    ("residual cluster count", residual_cluster_count),
+    ("predictable residual cluster count", predictable_residual_cluster_count),
+    ("top residual cluster", top_residual_id),
+    ("predictable top residual cluster", top_predictable_residual_id),
+    ("top residual missing", top_residual_missing),
+    ("top residual false positives", top_residual_false_positive),
+]
+
+
 def compare_summaries(
     old: dict[str, Any],
     new: dict[str, Any],
@@ -143,6 +238,8 @@ def compare_summaries(
         old_value = nested_get(old, path)
         new_value = nested_get(new, path)
         rows.append(make_row(label, old_value, new_value))
+    for label, extractor in CUSTOM_METRICS:
+        rows.append(make_row(label, extractor(old), extractor(new)))
     rows.append(
         make_row(
             "threshold failures",
