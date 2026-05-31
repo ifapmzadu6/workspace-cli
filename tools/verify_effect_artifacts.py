@@ -13,6 +13,7 @@ from typing import Any
 
 
 PASS_MARKER = "effect threshold check passed"
+EXPECTED_EFFECT_METADATA_SCHEMA_VERSION = 2
 EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 3
 FLOAT_TOLERANCE = 1e-9
 
@@ -537,6 +538,22 @@ def verify_result_summary_schema(
     verify_threshold_margin_schema(result_summary, failures)
 
 
+def verify_effect_report_schema(
+    effect_report: dict[str, Any],
+    failures: list[str],
+) -> None:
+    metadata = effect_report.get("metadata")
+    if not isinstance(metadata, dict):
+        failures.append("effect.json metadata must be an object")
+        return
+    schema_version = metadata.get("schema_version")
+    if schema_version != EXPECTED_EFFECT_METADATA_SCHEMA_VERSION:
+        failures.append(
+            "effect.json metadata.schema_version must be "
+            f"{EXPECTED_EFFECT_METADATA_SCHEMA_VERSION}, got {schema_version!r}"
+        )
+
+
 def verify_threshold_margin_schema(
     result_summary: dict[str, Any],
     failures: list[str],
@@ -937,6 +954,7 @@ def verify_artifact_directory(
 
     if "measurements" not in effect_report:
         failures.append("effect.json missing measurements")
+    verify_effect_report_schema(effect_report, failures)
     verify_result_summary_schema(result_summary, failures)
     if require_clean_workspace:
         verify_clean_workspace_metadata(effect_report, result_summary, failures)

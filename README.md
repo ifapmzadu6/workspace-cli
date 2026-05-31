@@ -161,21 +161,21 @@ required files, parseable JSON outputs, expected generation and verification
 commands, expected manifest artifact paths, SHA-256 hashes that match the run
 manifest,
 holdout manifest hashes and holdout entries that match `effect.json` metadata,
-a recomputed threshold pass and threshold log that re-renders from
-`effect.json`, a Markdown summary that re-renders from `effect.json`, and a
-result summary that matches `effect.json`, including score-ranked residual
-diagnostics that line up with each method top-k list. The manifest also records
-the verifier command for artifact consumers.
+a recorded effect report schema version, a recomputed threshold pass and
+threshold log that re-renders from `effect.json`, a Markdown summary that
+re-renders from `effect.json`, and a result summary that matches `effect.json`,
+including score-ranked residual diagnostics that line up with each method top-k
+list. The manifest also records the verifier command for artifact consumers.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`. `tools/prepare_effect_holdouts.py`
 can clone or refresh those repositories from their recorded public HTTPS remotes
 and write a local manifest for the artifact runner.
 Effect reports include reproducibility metadata with the workspace commit,
-dirty state, resampling counts, exact sign-flip p-value method, holdout
-manifest hash, source manifest hash for prepared local manifests, pinned
-repository refs and remote URLs, and a temporal leakage audit that checks each
-training index head against the held-out commit's parent.
+dirty state, effect report schema version, resampling counts, exact sign-flip
+p-value method, holdout manifest hash, source manifest hash for prepared local
+manifests, pinned repository refs and remote URLs, and a temporal leakage audit
+that checks each training index head against the held-out commit's parent.
 
 ### History-Based Related-File Observation
 

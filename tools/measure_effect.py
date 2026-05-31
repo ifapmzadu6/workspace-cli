@@ -2834,7 +2834,7 @@ def measurement_metadata(
     repo_holdout_refs = args.repo_holdout_ref or ["HEAD"] * len(args.repo_holdout)
     manifest_records = getattr(args, "repo_holdout_manifest_records", [])
     metadata: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_bin": str(bin_path),
         "workspace_repo": str(ROOT),
         "workspace_commit": workspace_commit,

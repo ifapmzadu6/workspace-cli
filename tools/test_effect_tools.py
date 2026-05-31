@@ -1920,6 +1920,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             encoding="utf-8",
         )
         metadata = {
+            "schema_version": 2,
             "repo_holdouts": holdout_entries,
             "repo_holdout_manifest_sha256": verify_effect_artifacts.file_sha256(
                 output_dir / "holdout_manifest.json"
@@ -2030,7 +2031,8 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         holdout_metadata = {
             key: value
             for key, value in original_metadata.items()
-            if key.startswith("repo_holdout") or key == "repo_holdouts"
+            if key.startswith("repo_holdout")
+            or key in {"repo_holdouts", "schema_version"}
         }
         merged_metadata = {**holdout_metadata, **metadata}
         effect_report = {"metadata": merged_metadata, "measurements": []}
@@ -2657,6 +2659,35 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             any(
                 "repo_temporal_holdout.predictable_only missing residual_gap_clusters"
                 in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_effect_schema_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            effect_report = json.loads((output_dir / "effect.json").read_text())
+            effect_report["metadata"]["schema_version"] = 1
+            (output_dir / "effect.json").write_text(
+                json.dumps(effect_report) + "\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["json"] = verify_effect_artifacts.file_sha256(
+                output_dir / "effect.json"
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "effect.json metadata.schema_version must be 2, got 1" in failure
                 for failure in failures
             ),
             failures,
