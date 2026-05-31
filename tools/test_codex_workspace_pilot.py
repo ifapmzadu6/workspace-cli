@@ -548,7 +548,7 @@ if __name__ == "__main__":
         self.assertIn("standard unified git diff", workspace_prompt)
         self.assertIn("do not use a `--` separator", workspace_prompt)
 
-    def test_subscription_prompt_requests_cochange_content_and_impact(self) -> None:
+    def test_subscription_prompt_requests_cochange_content_and_diff(self) -> None:
         task = run_codex_workspace_pilot.task_specs()["subscription_rollout_sync"]
         prompts = run_codex_workspace_pilot.condition_prompts(task)
         workspace_prompt = next(
@@ -564,9 +564,14 @@ if __name__ == "__main__":
         self.assertIn("data.included_content", workspace_prompt)
         self.assertIn("patch --stdin --json", workspace_prompt)
         self.assertIn("do not create or delete a temporary patch file", workspace_prompt)
+        self.assertIn("config/plan_limits.json", workspace_prompt)
+        self.assertIn("templates/enterprise_welcome_email.txt", workspace_prompt)
+        self.assertIn("do not edit support", workspace_prompt)
         self.assertIn("complete closing-brace context", workspace_prompt)
         self.assertIn("one complete patch", workspace_prompt)
-        self.assertIn("impact --diff", workspace_prompt)
+        self.assertIn("skip impact analysis", workspace_prompt)
+        self.assertIn("workspace diff --json", workspace_prompt)
+        self.assertNotIn("impact --diff", workspace_prompt)
         self.assertIn("standard unified", workspace_prompt)
         self.assertIn("do not use a `--` separator", workspace_prompt)
 
