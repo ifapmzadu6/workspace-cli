@@ -617,6 +617,48 @@ fn index_related_impact_and_status_cover_cochange_flow() {
     assert!(related_paths.contains(&"src/b.rs".to_string()));
     assert!(related_paths.contains(&"src/c.rs".to_string()));
 
+    let related_with_content = run_workspace(
+        root,
+        &[
+            "related",
+            "src/a.rs",
+            "--by",
+            "cochange",
+            "--use-index",
+            "--rank",
+            "hybrid",
+            "--max-results",
+            "1",
+            "--include-content",
+            "--max-content-files",
+            "1",
+            "--json",
+        ],
+    );
+    let included_content = related_with_content["data"]["included_content"]
+        .as_array()
+        .expect("included_content should be an array");
+    assert_eq!(included_content.len(), 1);
+    assert_eq!(included_content[0]["path"], "src/b.rs");
+    assert!(
+        included_content[0]["content"]
+            .as_str()
+            .expect("included content should be a string")
+            .contains("b3")
+    );
+    assert_eq!(included_content[0]["truncated"], false);
+    assert!(
+        related_with_content["summary"]
+            .as_str()
+            .expect("summary should be a string")
+            .contains("included content for 1 file(s)")
+    );
+    assert!(
+        strings_at(&related_with_content, &["next_observations"])
+            .iter()
+            .all(|item| item != "workspace read src/b.rs")
+    );
+
     let hybrid_related = run_workspace(
         root,
         &[

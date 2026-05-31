@@ -243,12 +243,15 @@ workspace related src/config.rs --by cochange --use-index
 workspace related src/config.rs --by cochange --rank pagerank
 workspace related src/config.rs --by cochange --rank hybrid
 workspace related src/config.rs --by cochange --rank hybrid --hybrid-direct-weight 0.25
+workspace related src/config.rs --by cochange --rank hybrid --include-content --max-content-files 4 --json
 ```
 
 `workspace index status` reports whether the saved index exists and whether it
 is fresh for the current Git `HEAD`. `workspace index cochange --json` returns a
 bounded summary of the saved index; the full edge list is persisted under
 `.workspace/index/cochange.json` for later related/impact queries.
+Use `--include-content` when an agent needs to inspect the top related files in
+the same observation; content is bounded with the same limit as `workspace read`.
 
 `--use-index`, `--rank pagerank`, and `--rank hybrid` use the saved co-change
 graph to propagate from seed files through the graph. This can surface files

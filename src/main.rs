@@ -40,6 +40,7 @@ const MAX_MAP_EVIDENCE_ITEMS: usize = 16;
 const MAX_NEXT_OBSERVATIONS: usize = 5;
 const MAX_MAP_IMPORTANT_NEXT_OBSERVATIONS: usize = 4;
 const MAX_SAMPLE_COMMITS: usize = 5;
+const DEFAULT_RELATED_CONTENT_FILES: usize = 5;
 const MAX_LOG_LINE_BYTES: usize = 64_000;
 const MAX_PACKAGE_JSON_BYTES: u64 = 1_000_000;
 const WORKSPACE_MAP_COMMAND: &str = "workspace map";
@@ -305,6 +306,12 @@ struct RelatedArgs {
     /// Use .workspace/index/cochange.json instead of scanning git log.
     #[arg(long)]
     use_index: bool,
+    /// Include bounded content for top related files in the JSON response.
+    #[arg(long)]
+    include_content: bool,
+    /// Maximum related files whose content should be included.
+    #[arg(long, default_value_t = DEFAULT_RELATED_CONTENT_FILES)]
+    max_content_files: usize,
     /// File path to use as the relationship seed.
     path: PathBuf,
 }
@@ -682,6 +689,8 @@ struct RelatedData {
     max_commits: usize,
     max_files_per_commit: usize,
     related: Vec<RelatedFile>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    included_content: Vec<RelatedContent>,
 }
 
 struct RelatedDataMetadata {
@@ -834,6 +843,13 @@ struct RelatedFile {
     cochanged_commits: usize,
     weighted_cochanges: f64,
     sample_commits: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+struct RelatedContent {
+    path: String,
+    content: String,
+    truncated: bool,
 }
 
 #[derive(Serialize)]
@@ -1883,6 +1899,57 @@ where
         .collect()
 }
 
+fn related_next_observations(workspace: &Workspace, data: &RelatedData) -> Vec<String> {
+    let included_paths: BTreeSet<&str> = data
+        .included_content
+        .iter()
+        .map(|content| content.path.as_str())
+        .collect();
+    read_next_observations(
+        workspace,
+        data.related
+            .iter()
+            .map(|file| file.path.as_str())
+            .filter(|path| !included_paths.contains(path)),
+    )
+}
+
+fn related_content_truncated(data: &RelatedData) -> bool {
+    data.included_content
+        .iter()
+        .any(|content| content.truncated)
+}
+
+fn include_related_content(
+    workspace: &Workspace,
+    data: &mut RelatedData,
+    max_content_files: usize,
+) -> Result<()> {
+    data.included_content.clear();
+    if max_content_files == 0 {
+        return Ok(());
+    }
+
+    for file in &data.related {
+        if data.included_content.len() >= max_content_files {
+            break;
+        }
+        let path = workspace.resolve_path(Path::new(&file.path));
+        if !path.is_file() {
+            continue;
+        }
+        let read_content = read_text_prefix_bounded(&path)
+            .with_context(|| format!("failed to read related file {}", path.display()))?;
+        data.included_content.push(RelatedContent {
+            path: file.path.clone(),
+            content: read_content.content,
+            truncated: read_content.truncated,
+        });
+    }
+
+    Ok(())
+}
+
 fn search_evidence(matches: &[SearchMatch]) -> Vec<Evidence> {
     matches
         .iter()
@@ -2247,7 +2314,7 @@ fn observed_related(
     args: &RelatedArgs,
 ) -> Result<RelatedData> {
     let hybrid_direct_weight = validate_hybrid_direct_weight(args.hybrid_direct_weight)?;
-    if workspace.is_git_repo {
+    let mut data = if workspace.is_git_repo {
         related_by_cochange(workspace, target, args, hybrid_direct_weight)
     } else {
         Ok(related_data_for_non_repo(
@@ -2258,7 +2325,13 @@ fn observed_related(
             args.max_commits,
             args.max_files_per_commit,
         ))
+    }?;
+
+    if args.include_content {
+        include_related_content(workspace, &mut data, args.max_content_files)?;
     }
+
+    Ok(data)
 }
 
 fn observed_related_args(workspace: &Workspace, args: &RelatedArgs) -> Result<ObservedRelated> {
@@ -2274,17 +2347,15 @@ fn related_observation(
 ) -> Observation<RelatedData> {
     let summary = related_summary(&data);
     let evidence = related_evidence(&data);
-    let next_observations = read_next_observations(
-        workspace,
-        data.related.iter().map(|file| file.path.as_str()),
-    );
+    let truncated = related_content_truncated(&data);
+    let next_observations = related_next_observations(workspace, &data);
     observation_with_evidence(
         WORKSPACE_RELATED_KIND,
         target.to_string(),
         summary,
         data,
         evidence,
-        false,
+        truncated,
         next_observations,
     )
 }
@@ -2530,6 +2601,7 @@ fn cochange_related_data(
         max_commits,
         max_files_per_commit,
         related,
+        included_content: Vec::new(),
     }
 }
 
@@ -2753,12 +2825,19 @@ fn related_summary(data: &RelatedData) -> String {
 }
 
 fn related_repository_summary(data: &RelatedData) -> String {
-    format!(
+    let mut summary = format!(
         "{} related file(s) for {} using {} history",
         data.related.len(),
         data.target,
         data.method
-    )
+    );
+    if !data.included_content.is_empty() {
+        summary.push_str(&format!(
+            " (included content for {} file(s))",
+            data.included_content.len()
+        ));
+    }
+    summary
 }
 
 fn impact_summary(data: &ImpactData) -> String {
@@ -7416,6 +7495,15 @@ fn print_related(observation: &Observation<RelatedData>) -> Result<()> {
     for file in &data.related {
         println!("{}", related_file_human_summary(file));
     }
+    for content in &data.included_content {
+        println!();
+        println!("--- {} ---", content.path);
+        print_stdout_text(&content.content);
+        if content.truncated {
+            println!();
+            println!("[content truncated]");
+        }
+    }
     Ok(())
 }
 
@@ -8761,6 +8849,8 @@ rename to new name.txt
             rank: RankingMethod::Pagerank,
             hybrid_direct_weight: None,
             use_index: false,
+            include_content: false,
+            max_content_files: DEFAULT_RELATED_CONTENT_FILES,
             path: PathBuf::from("src/main.rs"),
         };
         let related = observed_related(&workspace, "src/main.rs", &related_args)
@@ -9621,6 +9711,7 @@ rename to new name.txt
                 weighted_cochanges: 1.0,
                 sample_commits: vec!["abc123".to_string()],
             }],
+            included_content: vec![],
         };
         assert_eq!(
             related_summary(&data),
@@ -9739,6 +9830,7 @@ rename to new name.txt
                     sample_commits: vec!["def456".to_string()],
                 },
             ],
+            included_content: vec![],
         };
 
         let observation = related_observation(&workspace, "src/a.rs", related);
@@ -9830,6 +9922,7 @@ rename to new name.txt
             max_commits: 500,
             max_files_per_commit: 100,
             related: vec![],
+            included_content: vec![],
         };
         let direct_related = RelatedFile {
             path: "src/b.rs".to_string(),

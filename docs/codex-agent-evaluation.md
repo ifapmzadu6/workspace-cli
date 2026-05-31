@@ -136,9 +136,9 @@ documentation files after an EU digital VAT policy change. The fixture includes
 shipping and promotion decoys, and its history co-changes
 `tests/test_invoice_pipeline.py` with the four target files. The workspace run
 uses `workspace index cochange`, `workspace related
-tests/test_invoice_pipeline.py --by cochange --use-index --rank hybrid`,
-`workspace patch`, `workspace run`, `workspace impact --diff`, and
-`workspace diff`.
+tests/test_invoice_pipeline.py --by cochange --use-index --rank hybrid
+--include-content`, `workspace patch`, `workspace run`, `workspace impact
+--diff`, and `workspace diff`.
 
 An initial single run solved the task in both conditions but showed avoidable
 workspace overhead: `workspace_cli` took 122.310 seconds and 15 commands versus
@@ -146,7 +146,8 @@ workspace overhead: `workspace_cli` took 122.310 seconds and 15 commands versus
 to state that `workspace patch` requires a standard unified git diff file, and
 that `workspace run` should use the quoted-command form rather than a `--`
 separator, reduced the single-run workspace result to 78.729 seconds and 12
-commands. The final two-run invoice suite still favored `shell_only` on time:
+commands. The pre-content two-run invoice suite still favored `shell_only` on
+time:
 
 | condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -158,6 +159,24 @@ bootstrap interval of `(21.985, 31.059)`. This task is useful evidence that
 co-change discovery can steer Codex to the correct multi-file scope with perfect
 diff-scope correctness in the observed runs, but it still does not show an
 elapsed-time win.
+
+That run exposed a concrete product issue: after `workspace related` identified
+the four target files, Codex spent four more tool calls reading them. The CLI now
+supports `workspace related --include-content --max-content-files <N>`, which
+includes bounded content for top related files in the same JSON observation. On
+the same invoice task, a single run improved `workspace_cli` from 78.729 seconds
+and 12 commands to 71.756 seconds and 7 commands while preserving the exact
+four-file diff. The corresponding two-run suite was:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 2 | 1.000 | 1.000 | 58.120 (54.964, 61.276) | 11.500 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 2 | 1.000 | 1.000 | 66.894 (62.234, 71.553) | 7.500 | 7.000 | 7.000 | 0.000 |
+
+The paired timing delta improved to `workspace_cli - shell_only = +8.773s` with
+a bootstrap interval of `(7.270, 10.277)`, and `workspace_cli` used four fewer
+commands on average than `shell_only`. This is a real overhead reduction and a
+clearer agent-efficiency path, but it is still not an elapsed-time win.
 
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
@@ -176,15 +195,16 @@ entries and no `operation log unreadable` status.
 - The timing evidence is currently negative or mixed: simple checkout and
   co-change tasks were slower with `workspace-cli`, a single rollback run was
   faster, and the bytecode-off two-run rollback suites were slower. Tightening
-  the workspace prompt cut avoidable workspace overhead substantially, and the
-  larger invoice task confirmed multi-file scope correctness, but the paper
-  should not claim speedups from these pilots.
+  prompts and adding `related --include-content` cut avoidable workspace
+  overhead substantially, and the larger invoice task confirmed multi-file scope
+  correctness, but the paper should not claim elapsed-time speedups from these
+  pilots yet.
 
 ## Next Required Step
 
 The next evaluation should use larger repository-like tasks where the audit log,
-related-file discovery, impact checks, and rollback remove enough wasted search
-or recovery work to pay for the tool overhead. The suite runner should then be
-run across more repetitions and tasks, reporting pass rate, elapsed time,
-command counts, rollback usage, and final diff correctness with bootstrap
-intervals.
+related-file discovery, impact checks, rollback, and batched observations remove
+enough wasted search or recovery work to pay for the tool overhead. The suite
+runner should then be run across more repetitions and tasks, reporting pass
+rate, elapsed time, command counts, rollback usage, and final diff correctness
+with bootstrap intervals.

@@ -210,6 +210,11 @@ class CodexWorkspacePilotTests(unittest.TestCase):
                     "--use-index",
                     "--rank",
                     "hybrid",
+                    "--max-results",
+                    "4",
+                    "--include-content",
+                    "--max-content-files",
+                    "4",
                     "--json",
                 ],
                 cwd=repo,
@@ -222,6 +227,11 @@ class CodexWorkspacePilotTests(unittest.TestCase):
             self.assertIn("2100 != 2200", test_result.stderr)
             self.assertEqual(index_result.returncode, 0, index_result.stderr)
             self.assertEqual(related_result.returncode, 0, related_result.stderr)
+            related = json.loads(related_result.stdout)
+            included_content = {
+                item["path"]: item["content"]
+                for item in related["data"]["included_content"]
+            }
             for path in [
                 "config/tax_regions.json",
                 "config/invoice_labels.json",
@@ -229,6 +239,7 @@ class CodexWorkspacePilotTests(unittest.TestCase):
                 "docs/invoice_templates.md",
             ]:
                 self.assertIn(path, related_result.stdout)
+                self.assertIn(path, included_content)
 
     def test_command_like_values_extracts_codex_command_events(self) -> None:
         events = [
@@ -411,6 +422,8 @@ if __name__ == "__main__":
 
         self.assertIn("index cochange", workspace_prompt)
         self.assertIn("related tests/test_invoice_pipeline.py", workspace_prompt)
+        self.assertIn("--include-content", workspace_prompt)
+        self.assertIn("data.included_content", workspace_prompt)
         self.assertIn("impact --diff", workspace_prompt)
         self.assertIn("do not spend time running", workspace_prompt)
         self.assertIn("standard unified git diff", workspace_prompt)
