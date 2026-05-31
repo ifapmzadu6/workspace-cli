@@ -175,7 +175,10 @@ The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`. `tools/prepare_effect_holdouts.py`
 can clone or refresh those repositories from their recorded public HTTPS remotes
-and write a local manifest for the artifact runner.
+and write a local manifest for the artifact runner. The GitHub paper workflow
+also writes a compact step summary with headline AP, threshold status,
+residual-cluster counts, and residual pair-conflict counts beside the artifact
+id and digest.
 Effect reports include reproducibility metadata with the workspace commit,
 dirty state, effect report schema version, resampling counts, exact sign-flip
 p-value method, holdout manifest hash, source manifest hash for prepared local

@@ -45,7 +45,9 @@ python3 tools/compare_effect_summaries.py \
 The `Paper Effect Artifacts` GitHub workflow runs the clean-machine path on
 demand and weekly. It prepares the public holdout remotes, generates
 `target/effect-paper` with `--require-clean-workspace`, verifies the artifact
-directory, and uploads it as a workflow artifact.
+directory, uploads it as a workflow artifact, and writes the headline AP,
+threshold, residual-cluster, and residual pair-conflict diagnostics to the
+GitHub step summary beside the artifact id and digest.
 
 If those pinned repositories are not already checked out at the manifest paths,
 prepare a local manifest from the recorded remotes before generating artifacts:

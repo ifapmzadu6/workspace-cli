@@ -32,6 +32,7 @@ check_effect_thresholds = load_tool("check_effect_thresholds")
 run_effect_artifacts = load_tool("run_effect_artifacts")
 extract_effect_summary = load_tool("extract_effect_summary")
 compare_effect_summaries = load_tool("compare_effect_summaries")
+render_paper_artifact_summary = load_tool("render_paper_artifact_summary")
 verify_effect_artifacts = load_tool("verify_effect_artifacts")
 prepare_effect_holdouts = load_tool("prepare_effect_holdouts")
 
@@ -49,6 +50,69 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertIn("artifact-digest", workflow)
         self.assertIn("GITHUB_STEP_SUMMARY", workflow)
         self.assertIn("--require-clean-workspace", workflow)
+        self.assertIn("tools/render_paper_artifact_summary.py", workflow)
+
+    def test_paper_artifact_summary_renders_headline_metrics(self) -> None:
+        summary = {
+            "schema_version": 7,
+            "metadata": {
+                "workspace_commit": "4a5e6ff16e6156294b3dc54dc558e87ac8fede21",
+            },
+            "repo_temporal_holdout": {
+                "methods": {
+                    "workspace_related_hybrid": {
+                        "average_precision_at_5": {"mean": 0.838},
+                    },
+                },
+                "predictable_only": {
+                    "methods": {
+                        "workspace_related_hybrid": {
+                            "average_precision_at_5": {"mean": 0.886},
+                        },
+                    },
+                    "residual_gap_clusters": [{}, {}, {}],
+                    "residual_pair_conflicts": [{} for _ in range(8)],
+                },
+                "oracle_normalized": {
+                    "workspace_related_hybrid": {
+                        "oracle_normalized_average_precision_at_5": 0.982415,
+                    },
+                },
+                "residual_gap_clusters": [
+                    {
+                        "repo_name": "llm-json-extract",
+                        "heldout_commit": "21764e9cfbe3",
+                    },
+                ],
+                "residual_pair_conflicts": [
+                    {
+                        "repo_name": "llm-json-extract",
+                        "seed": "package.json",
+                        "candidate": "package-lock.json",
+                        "true_target_count": 2,
+                        "residual_false_positive_count": 2,
+                    },
+                ],
+            },
+            "threshold_margins": [
+                {"status": "pass"},
+                {"status": "pass"},
+            ],
+        }
+
+        rendered = render_paper_artifact_summary.render_summary(summary)
+
+        self.assertIn("### Paper effect metrics", rendered)
+        self.assertIn("| workspace commit | 4a5e6ff16e61 |", rendered)
+        self.assertIn("| hybrid AP@5 | 0.838 |", rendered)
+        self.assertIn("| predictable hybrid AP@5 | 0.886 |", rendered)
+        self.assertIn("| threshold failures | 0 |", rendered)
+        self.assertIn("| residual pair conflicts | 1 |", rendered)
+        self.assertIn("| predictable residual pair conflicts | 8 |", rendered)
+        self.assertIn(
+            "llm-json-extract package.json->package-lock.json true=2 false=2",
+            rendered,
+        )
 
 
 class ExactSignFlipTests(unittest.TestCase):
