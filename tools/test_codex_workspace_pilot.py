@@ -417,7 +417,7 @@ if __name__ == "__main__":
         self.assertIn("finished 7.500s faster", rendered)
         self.assertIn("not a statistically powered efficiency claim", rendered)
 
-    def test_policy_prompt_requests_related_and_impact(self) -> None:
+    def test_policy_prompt_requests_related_and_diff(self) -> None:
         task = run_codex_workspace_pilot.task_specs()["policy_threshold_sync"]
         prompts = run_codex_workspace_pilot.condition_prompts(task)
         workspace_prompt = next(
@@ -433,7 +433,10 @@ if __name__ == "__main__":
         self.assertIn("patch --stdin --json", workspace_prompt)
         self.assertIn("do not create or delete a temporary patch file", workspace_prompt)
         self.assertIn("do not shell-escape `$` values", workspace_prompt)
-        self.assertIn("impact --diff", workspace_prompt)
+        self.assertIn("complete JSON closing-brace context", workspace_prompt)
+        self.assertIn("skip impact analysis", workspace_prompt)
+        self.assertIn("workspace diff --json", workspace_prompt)
+        self.assertNotIn("impact --diff", workspace_prompt)
 
     def test_rollback_prompt_requests_patch_transaction_rollback(self) -> None:
         task = run_codex_workspace_pilot.task_specs()["rollback_recovery"]

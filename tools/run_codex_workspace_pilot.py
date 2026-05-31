@@ -638,12 +638,14 @@ def task_specs() -> dict[str, TaskSpec]:
                 "heredoc, use exactly `./bin/workspace patch --stdin --json "
                 "<<'PATCH'` and put the diff content literally; because the "
                 "`PATCH` delimiter is quoted, do not shell-escape `$` values in "
-                "documentation text. Run the test command "
+                "documentation text. Build the unified diff from the exact "
+                "returned content, including complete JSON closing-brace context "
+                "and the final newline, so `git apply` accepts the first patch. "
+                "Run the test command "
                 f"exactly as `./bin/workspace run \"{TEST_COMMAND}\" --json`; "
-                "do not use a `--` separator for `workspace run`. Then finish with "
-                "`./bin/workspace impact --diff --by cochange --ensure-index "
-                "--max-commits 1000 --rank hybrid --json` and "
-                "`./bin/workspace diff --json`."
+                "do not use a `--` separator for `workspace run`. This is a "
+                "small two-file task; after the tests pass, skip impact analysis "
+                "and finish with `./bin/workspace diff --json`."
             ),
             create_repo=create_policy_fixture_repo,
             expected_changed_files=(
