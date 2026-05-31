@@ -70,7 +70,8 @@ verifier command, and SHA-256 checksums for each generated artifact and copied
 manifest. The verifier checks required files, JSON parseability, a passing
 threshold log, manifest hash consistency against `effect.json` metadata,
 recomputed threshold gates, Markdown re-render consistency with `effect.json`,
-and result-summary consistency with `effect.json`.
+result-summary consistency with `effect.json`, and residual-cluster diagnostic
+fields for missing predictable/new targets plus top non-targets.
 For paper-style holdout reports, the threshold log gates case-weighted and
 repo-macro AP effect-size floors, oracle-normalized AP, plus Holm-adjusted
 paired sign-flip p-value ceilings for the key hybrid-vs-baseline deltas.

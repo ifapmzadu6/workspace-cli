@@ -1860,6 +1860,66 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures,
         )
 
+    def test_artifact_verifier_rejects_incomplete_residual_case_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            summary = {
+                "schema_version": 1,
+                "repo_temporal_holdout": {
+                    "k": 5,
+                    "oracle_normalized": {
+                        "workspace_related_hybrid": {
+                            "oracle_gap_average_precision_at_5": 0.123,
+                        },
+                    },
+                    "residual_gap_clusters": [
+                        {
+                            "top_residual_cases": [
+                                {
+                                    "missing_expected": ["src/main.rs"],
+                                    "method_top": ["README.md"],
+                                },
+                            ],
+                        },
+                    ],
+                },
+            }
+            (output_dir / "result_summary.json").write_text(
+                json.dumps(summary) + "\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["result_summary"] = (
+                verify_effect_artifacts.file_sha256(
+                    output_dir / "result_summary.json"
+                )
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+            )
+
+        self.assertTrue(
+            any(
+                "missing_predictable_expected must be a list" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "method_false_positives must be a list" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
     def test_artifact_verifier_rejects_recomputed_threshold_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "artifacts"

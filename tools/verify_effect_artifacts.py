@@ -245,6 +245,58 @@ def verify_holdout_residual_gap_clusters(
             f"result_summary.json {label} missing residual_gap_clusters "
             f"despite positive {metric}"
         )
+        return
+    verify_residual_gap_cluster_schema(clusters, label, failures)
+
+
+def verify_residual_gap_cluster_schema(
+    clusters: list[Any],
+    label: str,
+    failures: list[str],
+) -> None:
+    for cluster_index, cluster in enumerate(clusters):
+        if not isinstance(cluster, dict):
+            failures.append(
+                f"result_summary.json {label}.residual_gap_clusters[{cluster_index}] "
+                "must be an object"
+            )
+            continue
+        cases = cluster.get("top_residual_cases")
+        if not isinstance(cases, list) or not cases:
+            failures.append(
+                f"result_summary.json {label}.residual_gap_clusters[{cluster_index}] "
+                "missing top_residual_cases"
+            )
+            continue
+        for case_index, case in enumerate(cases):
+            case_label = (
+                f"{label}.residual_gap_clusters[{cluster_index}]"
+                f".top_residual_cases[{case_index}]"
+            )
+            verify_residual_gap_case_schema(
+                case,
+                case_label,
+                failures,
+            )
+
+
+def verify_residual_gap_case_schema(
+    case: Any,
+    label: str,
+    failures: list[str],
+) -> None:
+    if not isinstance(case, dict):
+        failures.append(f"result_summary.json {label} must be an object")
+        return
+    for field in (
+        "missing_expected",
+        "missing_predictable_expected",
+        "missing_unpredictable_expected",
+        "method_false_positives",
+        "method_top",
+    ):
+        if not isinstance(case.get(field), list):
+            failures.append(f"result_summary.json {label}.{field} must be a list")
 
 
 def verify_result_summary_matches_report(
