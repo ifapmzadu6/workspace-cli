@@ -262,6 +262,45 @@ def fmt_path_list(paths: list[str], limit: int = 2) -> str:
     return ", ".join(visible) + suffix
 
 
+def path_count_rows(
+    cases: list[dict[str, Any]],
+    field: str,
+    *,
+    limit: int = 12,
+) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for case in cases:
+        paths = case.get(field)
+        if not isinstance(paths, list):
+            continue
+        for path in paths:
+            if isinstance(path, str):
+                counts[path] = counts.get(path, 0) + 1
+    return [
+        {"path": path, "count": count}
+        for path, count in sorted(
+            counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:limit]
+    ]
+
+
+def fmt_path_count_list(entries: list[dict[str, Any]], limit: int = 3) -> str:
+    if not entries:
+        return ""
+    visible = entries[:limit]
+    rendered = []
+    for entry in visible:
+        path = entry.get("path")
+        count = entry.get("count")
+        if not isinstance(path, str) or not isinstance(count, int):
+            continue
+        rendered.append(f"{path} x{count}")
+    if len(entries) > limit:
+        rendered.append(f"+{len(entries) - limit} more")
+    return ", ".join(rendered)
+
+
 def is_json_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
@@ -1025,6 +1064,8 @@ def residual_gap_cluster_entries(
                 "top_missing_predictable": top_case["missing_predictable"],
                 "top_missing_unpredictable": top_case["missing_unpredictable"],
                 "top_false_positives": top_case["false_positives"],
+                "missing_counts": path_count_rows(cases, "missing"),
+                "false_positive_counts": path_count_rows(cases, "false_positives"),
                 "top_method_top": top_case["method_top"],
                 "top_method_ranked": top_case["method_top_ranked"],
             }
@@ -1072,6 +1113,8 @@ def render_residual_gap_cluster_table(
             fmt_path_list(entry["top_missing_predictable"], limit=3),
             fmt_path_list(entry["top_missing_unpredictable"], limit=3),
             fmt_path_list(entry["top_false_positives"], limit=3),
+            fmt_path_count_list(entry["missing_counts"], limit=4),
+            fmt_path_count_list(entry["false_positive_counts"], limit=4),
             fmt_path_list(entry["top_method_top"], limit=3),
             fmt_ranked_path_list(entry["top_method_ranked"], limit=3),
         ]
@@ -1097,6 +1140,8 @@ def render_residual_gap_cluster_table(
                     "missing predictable",
                     "missing new",
                     "top non-targets",
+                    "missing counts",
+                    "false-positive counts",
                     "hybrid top",
                     "hybrid top scores",
                 ],

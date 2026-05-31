@@ -720,9 +720,14 @@ class SummaryFormattingTests(unittest.TestCase):
         self.assertIn("missing predictable", table)
         self.assertIn("missing new", table)
         self.assertIn("top non-targets", table)
+        self.assertIn("missing counts", table)
+        self.assertIn("false-positive counts", table)
         self.assertIn("Cargo.toml", table)
+        self.assertIn("Cargo.toml x1", table)
         self.assertIn(".github/workflows/ci.yml", table)
+        self.assertIn(".github/workflows/ci.yml x1", table)
         self.assertIn("tests/smoke.mjs", table)
+        self.assertIn("tests/smoke.mjs x1", table)
 
         predictable_table = summarize_effect.render_residual_gap_cluster_table(
             report,
