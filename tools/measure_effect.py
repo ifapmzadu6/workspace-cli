@@ -207,27 +207,96 @@ def ranking_diagnostics(
     results: list[str],
     expected: set[str],
     k: int,
+    ranked_candidates: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     rank_by_path: dict[str, int] = {}
     for rank, path in enumerate(results, start=1):
         rank_by_path.setdefault(path, rank)
+    score_by_path: dict[str, float] = {}
+    if ranked_candidates is None:
+        ranked_candidates = [
+            {"path": path, "rank": rank} for rank, path in enumerate(results, start=1)
+        ]
+    else:
+        ranked_candidates = normalize_ranked_candidates(ranked_candidates)
+        rank_by_path.update(
+            {
+                entry["path"]: entry["rank"]
+                for entry in ranked_candidates
+                if isinstance(entry.get("rank"), int)
+            }
+        )
+        score_by_path.update(
+            {
+                entry["path"]: entry["score"]
+                for entry in ranked_candidates
+                if is_finite_number(entry.get("score"))
+            }
+        )
 
     hits_at_k = set(results[:k]) & expected
     missing_expected = sorted(expected - hits_at_k)
     return {
         "candidate_count": len(results),
         "diagnostic_limit": len(results),
-        "missing_expected_ranks": [
-            {
-                "path": path,
-                "rank": rank_by_path.get(path),
-            }
-            for path in missing_expected
-        ],
+        "ranked_candidates": ranked_candidates,
+        "missing_expected_ranks": missing_expected_rank_entries(
+            missing_expected,
+            rank_by_path,
+            score_by_path,
+        ),
         "top_false_positives": [
             path for path in results[:k] if path not in expected
         ],
     }
+
+
+def is_finite_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def normalize_ranked_candidates(
+    ranked_candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    normalized = []
+    seen: set[str] = set()
+    for fallback_rank, entry in enumerate(ranked_candidates, start=1):
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        if not isinstance(path, str) or path in seen:
+            continue
+        seen.add(path)
+        rank = entry.get("rank")
+        if not isinstance(rank, int) or isinstance(rank, bool):
+            rank = fallback_rank
+        candidate = {"path": path, "rank": rank}
+        score = entry.get("score")
+        if is_finite_number(score):
+            candidate["score"] = round(float(score), 6)
+        normalized.append(candidate)
+    return normalized
+
+
+def missing_expected_rank_entries(
+    missing_expected: list[str],
+    rank_by_path: dict[str, int],
+    score_by_path: dict[str, float],
+) -> list[dict[str, Any]]:
+    entries = []
+    for path in missing_expected:
+        entry: dict[str, Any] = {
+            "path": path,
+            "rank": rank_by_path.get(path),
+        }
+        if path in score_by_path:
+            entry["score"] = round(score_by_path[path], 6)
+        entries.append(entry)
+    return entries
 
 
 def aggregate_metric_sets(scenarios: list[dict[str, Any]], k: int) -> dict[str, Any]:
@@ -1072,6 +1141,25 @@ def paths(value: dict[str, Any], *segments: str) -> list[str]:
     for segment in segments:
         cursor = cursor[segment]
     return [item["path"] for item in cursor]
+
+
+def ranked_paths(value: dict[str, Any], *segments: str) -> list[dict[str, Any]]:
+    cursor: Any = value
+    for segment in segments:
+        cursor = cursor[segment]
+    ranked = []
+    for rank, item in enumerate(cursor, start=1):
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path")
+        if not isinstance(path, str):
+            continue
+        entry: dict[str, Any] = {"path": path, "rank": rank}
+        score = item.get("score")
+        if is_finite_number(score):
+            entry["score"] = round(float(score), 6)
+        ranked.append(entry)
+    return ranked
 
 
 def observable_repo_path(path: str) -> str | None:
@@ -2383,6 +2471,7 @@ def measure_repo_holdout(
                                 paths(diagnostic_hybrid, "data", "related"),
                                 expected,
                                 k,
+                                ranked_paths(diagnostic_hybrid, "data", "related"),
                             ),
                         },
                     }

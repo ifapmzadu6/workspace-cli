@@ -60,10 +60,11 @@ while
 weight result, per-repository holdout results, oracle-normalized AP gaps, and
 residual gap clusters with missing targets split into parent-present predictable
 targets and parent-absent new targets, the rank of missed targets when they
-appear in a wider diagnostic hybrid ranking, and top non-targets occupying the
-method's top-k list, including predictable-only clusters retargeted from
-case-level ranking lists, plus structured threshold margin entries, into a
-compact machine-readable form.
+appear in a wider diagnostic hybrid ranking, scores for ranked top-k candidates
+and ranked missed targets, and top non-targets occupying the method's top-k
+list, including predictable-only clusters retargeted from case-level ranking
+lists, plus structured threshold margin entries, into a compact
+machine-readable form.
 Paper artifact directories also include copies of the local holdout manifest and
 source holdout manifest when available. The run manifest records the exact
 generation commands, verifier command, artifact paths, and SHA-256 checksums for
@@ -76,7 +77,8 @@ that match `effect.json` metadata, recomputed threshold gates, threshold-log
 re-render consistency with `effect.json`, Markdown re-render consistency with
 `effect.json`, result-summary consistency with `effect.json`, and
 residual-cluster diagnostic fields for missing predictable/new targets,
-missed-target ranks, and top non-targets.
+missed-target ranks and scores, score-ranked top-k candidates, and top
+non-targets.
 The verifier also supports `--require-clean-workspace` for CI-published paper
 artifacts; this requires `workspace_dirty: false`,
 `workspace_status_line_count: 0` as an integer, and a recorded workspace
@@ -724,7 +726,8 @@ the same failure mode: it recovers the predictable CI target for the
 (`21764e9cfbe3`), reducing full holdout AP. `effect.md` and
 `result_summary.json` now emit
 the same repo/commit residual gap clusters with missing predictable/new target
-splits, missed-target diagnostic ranks, and top non-targets, plus the
+splits, missed-target diagnostic ranks/scores, score-ranked top-k candidates,
+and top non-targets, plus the
 predictable-only retargeted clusters, so this diagnosis is reproducible
 directly from the paper artifact.
 

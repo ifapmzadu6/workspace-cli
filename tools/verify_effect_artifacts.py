@@ -13,7 +13,7 @@ from typing import Any
 
 
 PASS_MARKER = "effect threshold check passed"
-EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 2
+EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 3
 FLOAT_TOLERANCE = 1e-9
 
 ARTIFACT_FILES = {
@@ -742,6 +742,7 @@ def verify_residual_gap_case_schema(
         "missing_unpredictable_expected",
         "method_false_positives",
         "method_top",
+        "method_top_ranked",
     ):
         if not isinstance(case.get(field), list):
             failures.append(f"result_summary.json {label}.{field} must be a list")
@@ -761,6 +762,34 @@ def verify_residual_gap_case_schema(
                 failures.append(
                     f"result_summary.json {entry_label}.rank must be an integer or null"
                 )
+            score = entry.get("score")
+            if score is not None and not is_json_number(score):
+                failures.append(
+                    f"result_summary.json {entry_label}.score must be a number"
+                )
+    top_ranked = case.get("method_top_ranked")
+    if isinstance(top_ranked, list):
+        for rank_index, entry in enumerate(top_ranked):
+            entry_label = f"{label}.method_top_ranked[{rank_index}]"
+            verify_ranked_candidate_schema(entry, entry_label, failures)
+
+
+def verify_ranked_candidate_schema(
+    entry: Any,
+    label: str,
+    failures: list[str],
+) -> None:
+    if not isinstance(entry, dict):
+        failures.append(f"result_summary.json {label} must be an object")
+        return
+    if not isinstance(entry.get("path"), str):
+        failures.append(f"result_summary.json {label}.path must be a string")
+    rank = entry.get("rank")
+    if not isinstance(rank, int) or isinstance(rank, bool):
+        failures.append(f"result_summary.json {label}.rank must be an integer")
+    score = entry.get("score")
+    if score is not None and not is_json_number(score):
+        failures.append(f"result_summary.json {label}.score must be a number")
 
 
 def verify_result_summary_matches_report(

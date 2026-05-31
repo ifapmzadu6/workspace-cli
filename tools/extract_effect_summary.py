@@ -17,7 +17,7 @@ if str(TOOLS_DIR) not in sys.path:
 import check_effect_thresholds  # noqa: E402
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def load_report(path: str) -> dict[str, Any]:
@@ -175,6 +175,44 @@ def average_precision_at_k(top: list[str], expected: list[str], k: int) -> float
     return round(precision_sum / len(expected_set), 3)
 
 
+def is_json_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def diagnostic_ranked_candidates(
+    case: dict[str, Any],
+    method: str,
+) -> list[dict[str, Any]]:
+    diagnostics = case.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return []
+    method_diagnostics = diagnostics.get(method)
+    if not isinstance(method_diagnostics, dict):
+        return []
+    candidates = method_diagnostics.get("ranked_candidates")
+    if not isinstance(candidates, list):
+        return []
+
+    result = []
+    seen: set[str] = set()
+    for entry in candidates:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        rank = entry.get("rank")
+        if not isinstance(path, str) or path in seen:
+            continue
+        if not isinstance(rank, int) or isinstance(rank, bool):
+            continue
+        seen.add(path)
+        candidate: dict[str, Any] = {"path": path, "rank": rank}
+        score = entry.get("score")
+        if is_json_number(score):
+            candidate["score"] = rounded(score)
+        result.append(candidate)
+    return result
+
+
 def missing_expected_rank_diagnostics(
     case: dict[str, Any],
     method: str,
@@ -191,6 +229,11 @@ def missing_expected_rank_diagnostics(
         return []
 
     missing_set = set(missing_expected)
+    score_by_path = {
+        entry["path"]: entry["score"]
+        for entry in diagnostic_ranked_candidates(case, method)
+        if "score" in entry
+    }
     result = []
     for entry in ranks:
         if not isinstance(entry, dict):
@@ -199,9 +242,12 @@ def missing_expected_rank_diagnostics(
         rank = entry.get("rank")
         if not isinstance(path, str) or path not in missing_set:
             continue
-        if rank is not None and not isinstance(rank, int):
+        if rank is not None and (not isinstance(rank, int) or isinstance(rank, bool)):
             continue
-        result.append({"path": path, "rank": rank})
+        result_entry: dict[str, Any] = {"path": path, "rank": rank}
+        if path in score_by_path:
+            result_entry["score"] = score_by_path[path]
+        result.append(result_entry)
     return result
 
 
@@ -317,6 +363,7 @@ def residual_gap_clusters(
             method_false_positives = [
                 path for path in method_top[:k] if path not in expected_set
             ]
+            method_top_ranked = diagnostic_ranked_candidates(case, method)[:k]
             if expected_key == "predictable_expected":
                 missing_predictable_expected = missing_expected
                 missing_unpredictable_expected = []
@@ -360,6 +407,7 @@ def residual_gap_clusters(
                     "method_hits": hits,
                     "method_false_positives": method_false_positives,
                     "method_top": method_top,
+                    "method_top_ranked": method_top_ranked,
                 },
             )
 

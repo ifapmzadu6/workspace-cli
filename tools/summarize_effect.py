@@ -262,6 +262,44 @@ def fmt_path_list(paths: list[str], limit: int = 2) -> str:
     return ", ".join(visible) + suffix
 
 
+def is_json_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def diagnostic_ranked_candidates(
+    case: dict[str, Any],
+    method: str,
+) -> list[dict[str, Any]]:
+    diagnostics = case.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return []
+    method_diagnostics = diagnostics.get(method)
+    if not isinstance(method_diagnostics, dict):
+        return []
+    candidates = method_diagnostics.get("ranked_candidates")
+    if not isinstance(candidates, list):
+        return []
+
+    result = []
+    seen: set[str] = set()
+    for entry in candidates:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        rank = entry.get("rank")
+        if not isinstance(path, str) or path in seen:
+            continue
+        if not isinstance(rank, int) or isinstance(rank, bool):
+            continue
+        seen.add(path)
+        candidate: dict[str, Any] = {"path": path, "rank": rank}
+        score = entry.get("score")
+        if is_json_number(score):
+            candidate["score"] = round(float(score), 6)
+        result.append(candidate)
+    return result
+
+
 def missing_expected_rank_diagnostics(
     case: dict[str, Any],
     method: str,
@@ -277,6 +315,11 @@ def missing_expected_rank_diagnostics(
     if not isinstance(ranks, list):
         return []
     missing_set = set(missing)
+    score_by_path = {
+        entry["path"]: entry["score"]
+        for entry in diagnostic_ranked_candidates(case, method)
+        if "score" in entry
+    }
     result = []
     for entry in ranks:
         if not isinstance(entry, dict):
@@ -285,9 +328,12 @@ def missing_expected_rank_diagnostics(
         rank = entry.get("rank")
         if not isinstance(path, str) or path not in missing_set:
             continue
-        if rank is not None and not isinstance(rank, int):
+        if rank is not None and (not isinstance(rank, int) or isinstance(rank, bool)):
             continue
-        result.append({"path": path, "rank": rank})
+        result_entry: dict[str, Any] = {"path": path, "rank": rank}
+        if path in score_by_path:
+            result_entry["score"] = score_by_path[path]
+        result.append(result_entry)
     return result
 
 
@@ -299,7 +345,9 @@ def fmt_ranked_path_list(entries: list[dict[str, Any]], limit: int = 2) -> str:
     for entry in visible:
         rank = entry.get("rank")
         suffix = f"@{rank}" if isinstance(rank, int) else "@>limit"
-        rendered.append(f"{entry.get('path', '')}{suffix}")
+        score = entry.get("score")
+        score_suffix = f":{score:.3f}" if is_json_number(score) else ""
+        rendered.append(f"{entry.get('path', '')}{suffix}{score_suffix}")
     if len(entries) > limit:
         rendered.append(f"+{len(entries) - limit} more")
     return ", ".join(rendered)
@@ -937,6 +985,10 @@ def residual_gap_cluster_entries(
                     "missing_unpredictable": missing_unpredictable,
                     "false_positives": false_positives,
                     "method_top": method_top[:k],
+                    "method_top_ranked": diagnostic_ranked_candidates(
+                        case,
+                        method,
+                    )[:k],
                 }
             )
 
@@ -968,6 +1020,7 @@ def residual_gap_cluster_entries(
                 "top_missing_unpredictable": top_case["missing_unpredictable"],
                 "top_false_positives": top_case["false_positives"],
                 "top_method_top": top_case["method_top"],
+                "top_method_ranked": top_case["method_top_ranked"],
             }
         )
     return sorted(
@@ -1014,6 +1067,7 @@ def render_residual_gap_cluster_table(
             fmt_path_list(entry["top_missing_unpredictable"], limit=3),
             fmt_path_list(entry["top_false_positives"], limit=3),
             fmt_path_list(entry["top_method_top"], limit=3),
+            fmt_ranked_path_list(entry["top_method_ranked"], limit=3),
         ]
         for entry in entries
     ]
@@ -1038,6 +1092,7 @@ def render_residual_gap_cluster_table(
                     "missing new",
                     "top non-targets",
                     "hybrid top",
+                    "hybrid top scores",
                 ],
                 rows,
             ),

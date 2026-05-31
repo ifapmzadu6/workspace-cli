@@ -123,6 +123,34 @@ class HoldoutOracleTests(unittest.TestCase):
         )
         self.assertEqual(diagnostics["top_false_positives"], ["README.md"])
 
+    def test_ranking_diagnostics_include_ranked_candidate_scores(self) -> None:
+        diagnostics = measure_effect.ranking_diagnostics(
+            ["README.md", "Cargo.toml", "src/main.rs"],
+            {"Cargo.toml", "src/main.rs"},
+            1,
+            [
+                {"path": "README.md", "rank": 1, "score": 1.0},
+                {"path": "Cargo.toml", "rank": 2, "score": 0.75},
+                {"path": "src/main.rs", "rank": 3, "score": 0.5},
+            ],
+        )
+
+        self.assertEqual(
+            diagnostics["ranked_candidates"],
+            [
+                {"path": "README.md", "rank": 1, "score": 1.0},
+                {"path": "Cargo.toml", "rank": 2, "score": 0.75},
+                {"path": "src/main.rs", "rank": 3, "score": 0.5},
+            ],
+        )
+        self.assertEqual(
+            diagnostics["missing_expected_ranks"],
+            [
+                {"path": "Cargo.toml", "rank": 2, "score": 0.75},
+                {"path": "src/main.rs", "rank": 3, "score": 0.5},
+            ],
+        )
+
     def test_observable_repo_path_preserves_dot_prefixed_paths(self) -> None:
         self.assertEqual(
             measure_effect.observable_repo_path(".github/workflows/release.yml"),
@@ -954,6 +982,39 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                                         {
                                             "path": "src/main.rs",
                                             "rank": 7,
+                                            "score": 0.125,
+                                        },
+                                    ],
+                                    "ranked_candidates": [
+                                        {
+                                            "path": "README.md",
+                                            "rank": 1,
+                                            "score": 1.0,
+                                        },
+                                        {
+                                            "path": "Cargo.toml",
+                                            "rank": 2,
+                                            "score": 0.8,
+                                        },
+                                        {
+                                            "path": "Cargo.lock",
+                                            "rank": 3,
+                                            "score": 0.6,
+                                        },
+                                        {
+                                            "path": "tests/cli.rs",
+                                            "rank": 4,
+                                            "score": 0.4,
+                                        },
+                                        {
+                                            "path": ".gitignore",
+                                            "rank": 5,
+                                            "score": 0.2,
+                                        },
+                                        {
+                                            "path": "src/main.rs",
+                                            "rank": 7,
+                                            "score": 0.125,
                                         },
                                     ],
                                     "top_false_positives": [
@@ -1010,7 +1071,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
 
         summary = extract_effect_summary.extract_summary(report)
 
-        self.assertEqual(summary["schema_version"], 2)
+        self.assertEqual(summary["schema_version"], 3)
         self.assertEqual(summary["observation_recall"]["map_fact_recall"], 1.0)
         holdout = summary["repo_temporal_holdout"]
         self.assertEqual(holdout["temporal_leakage_audit"]["failure_count"], 0)
@@ -1083,7 +1144,17 @@ class EffectSummaryExtractionTests(unittest.TestCase):
             residual_clusters[0]["top_residual_cases"][0][
                 "missing_expected_ranks"
             ],
-            [{"path": "src/main.rs", "rank": 7}],
+            [{"path": "src/main.rs", "rank": 7, "score": 0.125}],
+        )
+        self.assertEqual(
+            residual_clusters[0]["top_residual_cases"][0]["method_top_ranked"],
+            [
+                {"path": "README.md", "rank": 1, "score": 1.0},
+                {"path": "Cargo.toml", "rank": 2, "score": 0.8},
+                {"path": "Cargo.lock", "rank": 3, "score": 0.6},
+                {"path": "tests/cli.rs", "rank": 4, "score": 0.4},
+                {"path": ".gitignore", "rank": 5, "score": 0.2},
+            ],
         )
         self.assertEqual(
             residual_clusters[0]["top_residual_cases"][0][
@@ -1492,7 +1563,7 @@ class EffectThresholdTests(unittest.TestCase):
         summary = extract_effect_summary.extract_summary(self.passing_report())
 
         by_label = {entry["label"]: entry for entry in summary["threshold_margins"]}
-        self.assertEqual(summary["schema_version"], 2)
+        self.assertEqual(summary["schema_version"], 3)
         self.assertEqual(
             by_label[
                 "repo_temporal_holdout_aggregate.workspace_related_hybrid"
@@ -1828,7 +1899,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
 
 class EffectArtifactVerifierTests(unittest.TestCase):
     SUMMARY_FIXTURE = {
-        "schema_version": 2,
+        "schema_version": 3,
         "repo_temporal_holdout": {},
         "threshold_margins": [],
     }
@@ -1965,7 +2036,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         effect_report = {"metadata": merged_metadata, "measurements": []}
         summary = {
             "metadata": merged_metadata,
-            "schema_version": 2,
+            "schema_version": 3,
             "threshold_margins": [],
         }
         (output_dir / "effect.json").write_text(
@@ -2187,7 +2258,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2232,7 +2303,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2496,7 +2567,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures = self.verify_with_patched_semantics(
                 output_dir,
                 extracted_summary={
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "changed": True,
                     "threshold_margins": [],
                 },
@@ -2536,7 +2607,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -2596,7 +2667,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -2654,6 +2725,13 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "missing_expected_ranks must be a list" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "method_top_ranked must be a list" in failure
                 for failure in failures
             ),
             failures,
