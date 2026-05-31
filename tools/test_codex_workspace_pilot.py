@@ -48,6 +48,57 @@ class CodexWorkspacePilotTests(unittest.TestCase):
             self.assertIn("95.0 != 93.0", result.stderr)
             self.assertTrue((repo / "bin" / "workspace").is_file())
 
+    def test_policy_fixture_exposes_related_config_and_docs(self) -> None:
+        workspace_binary = ROOT / "target" / "debug" / "workspace"
+        if not workspace_binary.is_file():
+            self.skipTest("workspace binary has not been built")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo = Path(tmp_dir) / "fixture"
+            run_codex_workspace_pilot.create_policy_fixture_repo(
+                repo,
+                workspace_binary,
+            )
+
+            test_result = subprocess.run(
+                ["python3", "-m", "unittest", "discover", "-s", "tests"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            index_result = subprocess.run(
+                ["./bin/workspace", "index", "cochange", "--json"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            related_result = subprocess.run(
+                [
+                    "./bin/workspace",
+                    "related",
+                    "tests/test_discounts.py",
+                    "--by",
+                    "cochange",
+                    "--use-index",
+                    "--rank",
+                    "hybrid",
+                    "--json",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(test_result.returncode, 0)
+            self.assertIn("2000 != 2500", test_result.stderr)
+            self.assertEqual(index_result.returncode, 0, index_result.stderr)
+            self.assertEqual(related_result.returncode, 0, related_result.stderr)
+            self.assertIn("config/discount_policy.json", related_result.stdout)
+            self.assertIn("docs/discount_policy.md", related_result.stdout)
+
     def test_command_like_values_extracts_codex_command_events(self) -> None:
         events = [
             {
@@ -113,6 +164,17 @@ class CodexWorkspacePilotTests(unittest.TestCase):
         self.assertIn("| workspace_cli | true | 15.5 | 6 | 5 | 7 |", rendered)
         self.assertIn("took 5.500s longer", rendered)
         self.assertIn("evidence of overhead", rendered)
+
+    def test_policy_prompt_requests_related_and_impact(self) -> None:
+        task = run_codex_workspace_pilot.task_specs()["policy_threshold_sync"]
+        prompts = run_codex_workspace_pilot.condition_prompts(task)
+        workspace_prompt = next(
+            prompt.prompt for prompt in prompts if prompt.name == "workspace_cli"
+        )
+
+        self.assertIn("index cochange", workspace_prompt)
+        self.assertIn("related tests/test_discounts.py", workspace_prompt)
+        self.assertIn("impact --diff", workspace_prompt)
 
 
 if __name__ == "__main__":

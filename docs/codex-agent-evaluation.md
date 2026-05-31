@@ -5,9 +5,9 @@ historical co-changes. The stronger claim is that a development agent such as
 Codex can use `workspace-cli` to work more safely and efficiently in a real
 workspace.
 
-`tools/run_codex_workspace_pilot.py` is the first real Codex-in-the-loop pilot.
-It creates the same temporary failing-test repository twice, then runs Codex
-non-interactively in two conditions:
+`tools/run_codex_workspace_pilot.py` runs real Codex-in-the-loop pilots. For
+each selected task, it creates the same temporary failing-test repository twice,
+then runs Codex non-interactively in two conditions:
 
 | condition | instruction |
 | --- | --- |
@@ -20,6 +20,9 @@ Run it after building the workspace binary:
 cargo build
 python3 tools/run_codex_workspace_pilot.py \
   --output-dir target/codex-workspace-pilot
+python3 tools/run_codex_workspace_pilot.py \
+  --task policy_threshold_sync \
+  --output-dir target/codex-workspace-pilot-policy
 ```
 
 The pilot writes `summary.json`, `summary.md`, raw Codex JSONL, stderr logs,
@@ -27,9 +30,10 @@ command lists, final diffs, and the `workspace_cli` operation log. The summary
 captures test success, elapsed seconds, command counts, workspace command
 counts, workspace log entry counts, changed files, and the final diff.
 
-## Current Pilot Result
+## Current Pilot Results
 
-The first locked-log pilot on this machine solved the task in both conditions:
+The first locked-log checkout pilot on this machine solved the task in both
+conditions:
 
 | condition | passed | seconds | commands | workspace commands | workspace log entries | changed files |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -42,6 +46,21 @@ negative evidence, and it means future agent-efficiency claims need larger tasks
 where structured observation, transaction logs, impact analysis, and rollback
 can pay for their overhead.
 
+The first co-change-oriented policy pilot also solved the task in both
+conditions:
+
+| condition | passed | seconds | commands | workspace commands | workspace log entries | changed files |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `shell_only` | true | 57.656 | 13 | 0 | 0 | `config/discount_policy.json`, `docs/discount_policy.md` |
+| `workspace_cli` | true | 103.745 | 13 | 12 | 16 | `config/discount_policy.json`, `docs/discount_policy.md` |
+
+The `workspace_cli` run used `workspace index cochange`, `workspace related
+tests/test_discounts.py --by cochange --use-index --rank hybrid`, `workspace
+patch`, `workspace impact --diff --by cochange --use-index --rank hybrid`, and
+`workspace diff`. It still took 46.089 seconds longer than `shell_only`, so this
+pilot is evidence that the current tool protocol can guide Codex through
+co-change and impact-aware work, not evidence of an elapsed-time win.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -53,15 +72,16 @@ entries and no `operation log unreadable` status.
 
 - Codex can be run non-interactively against controlled development tasks.
 - Codex can be prompted to use `workspace-cli` for real observation,
-  verification, and patch operations.
+  verification, patch, related-file, and impact operations.
 - The harness records enough evidence to compare success, overhead, command
   choice, final diffs, and workspace audit logs.
-- Simple tasks are currently worse for `workspace-cli` on elapsed time, so the
-  paper should not claim universal speedups from this pilot.
+- These pilot tasks are currently worse for `workspace-cli` on elapsed time, so
+  the paper should not claim universal speedups from them.
 
 ## Next Required Step
 
 The next evaluation should use larger, repository-like tasks where the tool is
-expected to help: multi-file edits, hidden related files, failing tests whose
-source is not obvious from a single stack trace, impact checks after a patch,
-and rollback from an intentionally bad first edit.
+expected to help enough to outweigh its overhead: multi-file edits with less
+obvious related files, failing tests whose source is not obvious from a single
+stack trace, broader impact checks after a patch, and rollback from an
+intentionally bad first edit.

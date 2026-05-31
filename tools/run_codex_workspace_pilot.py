@@ -13,17 +13,25 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Callable, NamedTuple
 
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT_DIR = ROOT / "target" / "codex-workspace-pilot"
-TASK_NAME = "discounted_tax_bug"
+DEFAULT_TASK = "discounted_tax_bug"
+TEST_COMMAND = "python3 -m unittest discover -s tests"
 
 
 class Condition(NamedTuple):
     name: str
     prompt: str
+
+
+class TaskSpec(NamedTuple):
+    name: str
+    prompt: str
+    workspace_extra: str
+    create_repo: Callable[[Path, Path], None]
 
 
 def write_text(path: Path, content: str) -> None:
@@ -64,7 +72,28 @@ def resolve_workspace_binary(path: Path | None) -> Path:
     )
 
 
-def create_fixture_repo(repo: Path, workspace_binary: Path) -> None:
+def install_workspace_binary(repo: Path, workspace_binary: Path) -> None:
+    bin_dir = repo / "bin"
+    bin_dir.mkdir()
+    copied_workspace = bin_dir / "workspace"
+    shutil.copy2(workspace_binary, copied_workspace)
+    copied_workspace.chmod(copied_workspace.stat().st_mode | 0o111)
+
+
+def init_repo(repo: Path) -> None:
+    run_command(["git", "init", "-q"], cwd=repo)
+    run_command(["git", "config", "user.email", "pilot@example.test"], cwd=repo)
+    run_command(["git", "config", "user.name", "Codex Pilot"], cwd=repo)
+
+
+def commit_all(repo: Path, message: str) -> None:
+    run_command(["git", "add", "."], cwd=repo)
+    result = run_command(["git", "commit", "-q", "-m", message], cwd=repo)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or result.stdout or "git commit failed")
+
+
+def create_checkout_fixture_repo(repo: Path, workspace_binary: Path) -> None:
     repo.mkdir(parents=True, exist_ok=True)
     write_text(
         repo / "src" / "checkout.py",
@@ -120,53 +149,195 @@ Discounts apply before tax. Shipping is added after tax.
     )
     write_text(
         repo / "README.md",
-        """\
+        f"""\
 # Checkout Fixture
 
 Run tests with:
 
 ```sh
-python3 -m unittest discover -s tests
+{TEST_COMMAND}
 ```
 """,
     )
-    bin_dir = repo / "bin"
-    bin_dir.mkdir()
-    copied_workspace = bin_dir / "workspace"
-    shutil.copy2(workspace_binary, copied_workspace)
-    copied_workspace.chmod(copied_workspace.stat().st_mode | 0o111)
-    run_command(["git", "init", "-q"], cwd=repo)
-    run_command(["git", "config", "user.email", "pilot@example.test"], cwd=repo)
-    run_command(["git", "config", "user.name", "Codex Pilot"], cwd=repo)
-    run_command(["git", "add", "."], cwd=repo)
-    run_command(["git", "commit", "-q", "-m", "Initial fixture"], cwd=repo)
+    install_workspace_binary(repo, workspace_binary)
+    init_repo(repo)
+    commit_all(repo, "Initial checkout fixture")
 
 
-def condition_prompts() -> list[Condition]:
-    task = (
-        "The repository has a failing checkout test. Fix the production bug with "
-        "the smallest reasonable change, run `python3 -m unittest discover -s "
-        "tests`, and leave the working tree with the fix applied."
+def write_policy_files(
+    repo: Path,
+    *,
+    max_discount_cents: int,
+    test_expected_cents: int,
+) -> None:
+    write_text(
+        repo / "src" / "discounts.py",
+        """\
+import json
+from pathlib import Path
+
+
+POLICY_PATH = Path(__file__).resolve().parent.parent / "config" / "discount_policy.json"
+
+
+def load_policy():
+    return json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+
+
+def premium_discount_cents(order_total_cents):
+    policy = load_policy()["premium"]
+    if order_total_cents < policy["minimum_order_cents"]:
+        return 0
+    raw_discount = round(order_total_cents * policy["rate_bps"] / 10_000)
+    return min(raw_discount, policy["max_discount_cents"])
+""",
     )
-    return [
-        Condition(
-            name="shell_only",
-            prompt=(
-                task
-                + "\nDo not use the `workspace` command. Use ordinary shell tools."
-            ),
-        ),
-        Condition(
-            name="workspace_cli",
-            prompt=(
-                task
-                + "\nUse `./bin/workspace` for workspace observation and "
+    write_text(repo / "src" / "__init__.py", "")
+    write_text(
+        repo / "config" / "discount_policy.json",
+        json.dumps(
+            {
+                "premium": {
+                    "minimum_order_cents": 5_000,
+                    "rate_bps": 2_500,
+                    "max_discount_cents": max_discount_cents,
+                }
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    dollars = f"${max_discount_cents / 100:.2f}"
+    write_text(
+        repo / "docs" / "discount_policy.md",
+        f"""\
+# Discount Policy
+
+Premium customers receive 25% off qualifying orders, capped at {dollars}.
+""",
+    )
+    expected_dollars = f"${test_expected_cents / 100:.2f}"
+    write_text(
+        repo / "tests" / "test_discounts.py",
+        f"""\
+import json
+import unittest
+from pathlib import Path
+
+from src.discounts import premium_discount_cents
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class DiscountPolicyTests(unittest.TestCase):
+    def test_premium_discount_cap_matches_current_policy(self):
+        self.assertEqual(premium_discount_cents(20_000), {test_expected_cents})
+
+    def test_policy_config_records_current_cap(self):
+        policy = json.loads((ROOT / "config" / "discount_policy.json").read_text())
+        self.assertEqual(policy["premium"]["max_discount_cents"], {test_expected_cents})
+
+    def test_docs_record_current_cap(self):
+        docs = (ROOT / "docs" / "discount_policy.md").read_text()
+        self.assertIn("{expected_dollars}", docs)
+
+
+if __name__ == "__main__":
+    unittest.main()
+""",
+    )
+    write_text(
+        repo / "README.md",
+        f"""\
+# Discount Policy Fixture
+
+Run tests with:
+
+```sh
+{TEST_COMMAND}
+```
+""",
+    )
+
+
+def create_policy_fixture_repo(repo: Path, workspace_binary: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    install_workspace_binary(repo, workspace_binary)
+    init_repo(repo)
+    write_policy_files(repo, max_discount_cents=1_500, test_expected_cents=1_500)
+    commit_all(repo, "Initial premium discount policy")
+    write_policy_files(repo, max_discount_cents=2_000, test_expected_cents=2_000)
+    commit_all(repo, "Raise premium discount cap to 20 dollars")
+    write_policy_files(repo, max_discount_cents=2_000, test_expected_cents=2_500)
+    commit_all(repo, "Add tests for 25 dollar premium cap")
+
+
+def create_fixture_repo(repo: Path, workspace_binary: Path) -> None:
+    create_checkout_fixture_repo(repo, workspace_binary)
+
+
+def task_specs() -> dict[str, TaskSpec]:
+    checkout_prompt = (
+        "The repository has a failing checkout test. Fix the production bug with "
+        f"the smallest reasonable change, run `{TEST_COMMAND}`, and leave the "
+        "working tree with the fix applied. Do not edit tests."
+    )
+    policy_prompt = (
+        "The repository has failing discount policy tests. The premium discount "
+        "cap has changed to $25.00. Synchronize the production policy and "
+        f"documentation, run `{TEST_COMMAND}`, and leave the working tree with "
+        "the fix applied. Do not edit tests."
+    )
+    return {
+        "discounted_tax_bug": TaskSpec(
+            name="discounted_tax_bug",
+            prompt=checkout_prompt,
+            workspace_extra=(
+                "Use `./bin/workspace` for workspace observation and "
                 "verification whenever possible. Start with "
                 "`./bin/workspace status --json`, use `read`, `search`, `diff`, "
                 "and run tests with `./bin/workspace run \"python3 -m unittest "
                 "discover -s tests\" --json`. If you edit files, prefer creating "
                 "a patch and applying it with `./bin/workspace patch`."
             ),
+            create_repo=create_checkout_fixture_repo,
+        ),
+        "policy_threshold_sync": TaskSpec(
+            name="policy_threshold_sync",
+            prompt=policy_prompt,
+            workspace_extra=(
+                "Use `./bin/workspace` for workspace observation and "
+                "verification whenever possible. Start with "
+                "`./bin/workspace status --json`, build the co-change index with "
+                "`./bin/workspace index cochange --json`, use "
+                "`./bin/workspace related tests/test_discounts.py --by cochange "
+                "--use-index --rank hybrid --json` to find related files, and "
+                "run tests with `./bin/workspace run \"python3 -m unittest "
+                "discover -s tests\" --json`. After editing, use "
+                "`./bin/workspace impact --diff --by cochange --use-index "
+                "--rank hybrid --json` and `./bin/workspace diff --json`. If "
+                "you edit files, prefer creating a patch and applying it with "
+                "`./bin/workspace patch`."
+            ),
+            create_repo=create_policy_fixture_repo,
+        ),
+    }
+
+
+def condition_prompts(task: TaskSpec) -> list[Condition]:
+    return [
+        Condition(
+            name="shell_only",
+            prompt=(
+                task.prompt
+                + "\nDo not use the `workspace` command. Use ordinary shell tools."
+            ),
+        ),
+        Condition(
+            name="workspace_cli",
+            prompt=task.prompt + "\n" + task.workspace_extra,
         ),
     ]
 
@@ -379,7 +550,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
     if shell and workspace and shell["test_passed"] and workspace["test_passed"]:
         delta = workspace["elapsed_seconds"] - shell["elapsed_seconds"]
         lines.append(
-            "Both conditions solved this pilot task. On this tiny fixture, "
+            "Both conditions solved this pilot task. On this pilot fixture, "
             f"`workspace_cli` took {delta:.3f}s longer than `shell_only`, which "
             "is evidence of overhead rather than an efficiency win for simple tasks."
         )
@@ -409,14 +580,16 @@ def render_markdown(summary: dict[str, Any]) -> str:
 def run_pilot(args: argparse.Namespace) -> dict[str, Any]:
     workspace_binary = resolve_workspace_binary(args.workspace_bin)
     codex_binary = args.codex_binary
+    tasks = task_specs()
+    task = tasks[args.task]
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="workspace-codex-pilot-") as tmp:
         tmp_root = Path(tmp)
         results = []
-        for condition in condition_prompts():
+        for condition in condition_prompts(task):
             repo = tmp_root / condition.name
-            create_fixture_repo(repo, workspace_binary)
+            task.create_repo(repo, workspace_binary)
             raw = run_codex_condition(
                 condition,
                 repo=repo,
@@ -437,7 +610,7 @@ def run_pilot(args: argparse.Namespace) -> dict[str, Any]:
 
     summary = {
         "schema_version": 1,
-        "task": TASK_NAME,
+        "task": task.name,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "codex_binary": codex_binary,
         "workspace_binary": str(workspace_binary),
@@ -456,6 +629,12 @@ def run_pilot(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--task",
+        choices=sorted(task_specs()),
+        default=DEFAULT_TASK,
+        help="pilot task to run",
+    )
     parser.add_argument(
         "--codex-binary",
         default=os.environ.get("CODEX_BINARY", "codex"),
