@@ -183,6 +183,30 @@ class CodexWorkspacePilotTests(unittest.TestCase):
                 {"patch": 1, "rollback": 1},
             )
 
+    def test_rollback_fixture_does_not_track_workspace_binary(self) -> None:
+        workspace_binary = ROOT / "target" / "debug" / "workspace"
+        if not workspace_binary.is_file():
+            self.skipTest("workspace binary has not been built")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo = Path(tmp_dir) / "fixture"
+            run_codex_workspace_pilot.create_rollback_fixture_repo(
+                repo,
+                workspace_binary,
+            )
+
+            tracked_result = subprocess.run(
+                ["git", "ls-files", "bin/workspace"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(tracked_result.returncode, 0, tracked_result.stderr)
+            self.assertEqual(tracked_result.stdout, "")
+            self.assertTrue((repo / "bin" / "workspace").is_file())
+
     def test_invoice_tax_fixture_exposes_related_policy_label_and_docs(self) -> None:
         workspace_binary = ROOT / "target" / "debug" / "workspace"
         if not workspace_binary.is_file():
@@ -421,8 +445,18 @@ if __name__ == "__main__":
         self.assertIn("docs/proposed_late_fee_fix.patch", workspace_prompt)
         self.assertIn("data.transaction_id", workspace_prompt)
         self.assertIn("rollback <transaction_id>", workspace_prompt)
+        self.assertIn("do not run `workspace status`", workspace_prompt)
+        self.assertIn("workspace read docs/proposed_late_fee_fix.patch", workspace_prompt)
+        self.assertIn("do not read `src/billing.py` or `docs/billing.md`", workspace_prompt)
+        self.assertNotIn("`./bin/workspace status --json`", workspace_prompt)
+        self.assertIn("patch --stdin", workspace_prompt)
+        self.assertIn("do not create or delete a temporary patch file", workspace_prompt)
+        self.assertIn("put the diff content literally", workspace_prompt)
+        self.assertIn("do not shell-escape `$` values", workspace_prompt)
+        self.assertIn("standard unified git diff", workspace_prompt)
+        self.assertIn("do not use a `--` separator", workspace_prompt)
         self.assertIn("do not spend time running", workspace_prompt)
-        self.assertIn("keeps the daily rate at 150 cents", workspace_prompt)
+        self.assertIn("keep the daily rate at 150 cents", workspace_prompt)
 
     def test_invoice_tax_prompt_requests_cochange_related_and_impact(self) -> None:
         task = run_codex_workspace_pilot.task_specs()["invoice_tax_sync"]

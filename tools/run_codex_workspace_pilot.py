@@ -85,6 +85,9 @@ def init_repo(repo: Path) -> None:
     run_command(["git", "init", "-q"], cwd=repo)
     run_command(["git", "config", "user.email", "pilot@example.test"], cwd=repo)
     run_command(["git", "config", "user.name", "Codex Pilot"], cwd=repo)
+    info_exclude = repo / ".git" / "info" / "exclude"
+    with info_exclude.open("a", encoding="utf-8") as exclude:
+        exclude.write("\n/bin/workspace\n")
 
 
 def commit_all(repo: Path, message: str) -> None:
@@ -656,19 +659,33 @@ def task_specs() -> dict[str, TaskSpec]:
                 "rollback, and verification whenever possible. The command "
                 "syntax below is complete; do not spend time running "
                 "`workspace --help`, command-specific `--help`, or inspecting "
-                "`.workspace` metadata. Use this sequence: "
-                "`./bin/workspace status --json`; "
+                "`.workspace` metadata, and do not run `workspace status` "
+                "before applying the proposed patch. Use this sequence: "
                 "`./bin/workspace patch --description \"Validate proposed "
                 "late-fee patch\" docs/proposed_late_fee_fix.patch --json`; "
                 f"`./bin/workspace run \"{TEST_COMMAND}\" --json`. If the tests "
                 "fail, read the patch response's `data.transaction_id` and run "
-                "`./bin/workspace rollback <transaction_id> --json`. Then read "
-                "only `src/billing.py` and `docs/billing.md` if needed, create "
-                "a correct patch that keeps the daily rate at 150 cents and "
-                "sets the cap to 1500 cents / $15.00, apply it with "
-                "`./bin/workspace patch --description \"Apply correct late-fee "
-                "cap fix\" <patch-file> --json`, run the test command through "
-                "`workspace run`, and finish with `./bin/workspace diff --json`."
+                "`./bin/workspace rollback <transaction_id> --json`. After "
+                "rollback, run exactly `./bin/workspace read "
+                "docs/proposed_late_fee_fix.patch --json` to inspect the bad "
+                "patch hunks; do not read `src/billing.py` or `docs/billing.md` "
+                "unless rollback itself failed. Reuse the proposed patch hunks "
+                "to change only the cap and documentation text, leaving "
+                "`LATE_FEE_RATE_CENTS = 150` unchanged. Apply the correct patch "
+                "with "
+                "`./bin/workspace patch --stdin --description \"Apply correct "
+                "late-fee cap fix\" --json` and a standard unified git diff on "
+                "stdin. Do not use Codex apply_patch format, and do not create "
+                "or delete a temporary patch file. If you use a heredoc, use "
+                "exactly `./bin/workspace patch --stdin --description \"Apply "
+                "correct late-fee cap fix\" --json <<'PATCH'` and put the diff "
+                "content literally; because the `PATCH` delimiter is quoted, do "
+                "not shell-escape `$` values in documentation text. The correct "
+                "patch must keep the daily rate at 150 cents and set the cap to "
+                "1500 cents / $15.00. Run the "
+                "test command exactly as `./bin/workspace run \""
+                f"{TEST_COMMAND}\" --json`; do not use a `--` separator for "
+                "`workspace run`. Then finish with `./bin/workspace diff --json`."
             ),
             create_repo=create_rollback_fixture_repo,
             expected_changed_files=("docs/billing.md", "src/billing.py"),
