@@ -34,6 +34,10 @@ python3 tools/run_codex_workspace_suite.py \
   --tasks invoice_tax_sync \
   --repetitions 2 \
   --output-dir target/codex-workspace-suite-invoice-tax
+python3 tools/run_codex_workspace_suite.py \
+  --tasks policy_threshold_sync invoice_tax_sync rollback_recovery \
+  --repetitions 2 \
+  --output-dir target/codex-workspace-suite-cross-task
 ```
 
 The pilot writes `summary.json`, `summary.md`, raw Codex JSONL, stderr logs,
@@ -46,8 +50,8 @@ operations observed in the workspace operation log.
 The suite runner repeats one or more pilot tasks and writes `suite_summary.json`
 and `suite_summary.md`, while preserving each per-run pilot artifact directory.
 It reports pass rate, expected-diff-scope correctness, elapsed-time bootstrap
-intervals, command counts, workspace log usage, rollback usage, and paired
-`workspace_cli - shell_only` timing deltas.
+intervals, command counts, workspace log usage, rollback usage, paired
+`workspace_cli - shell_only` timing deltas, and paired command-count deltas.
 
 ## Current Pilot Results
 
@@ -245,11 +249,29 @@ four-run invoice suite was:
 
 The paired timing delta was `workspace_cli - shell_only = -9.358s` with a
 bootstrap interval of `(-19.542, 1.188)`. `workspace_cli` was faster in three
-paired runs and `shell_only` was faster in one. This is the strongest pilot so
-far: workspace-assisted Codex maintained perfect pass rate and expected
-multi-file diff scope, cut mean command count by 5.5, and was faster on average.
-The interval still crosses zero, so this remains pilot evidence rather than a
-statistically powered elapsed-time claim.
+paired runs and `shell_only` was faster in one. Workspace-assisted Codex
+maintained perfect pass rate and expected multi-file diff scope, cut mean
+command count by 5.5, and was faster on average. The interval still crosses
+zero, so this remains pilot evidence rather than a statistically powered
+elapsed-time claim.
+
+After the fixture cleanup and protocol optimizations, a cross-task suite over
+`policy_threshold_sync`, `invoice_tax_sync`, and `rollback_recovery` produced a
+stronger aggregate result on the latest commit:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 6 | 1.000 | 1.000 | 50.509 (41.892, 58.606) | 9.833 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 6 | 1.000 | 1.000 | 42.439 (37.697, 46.349) | 5.333 | 5.333 | 5.667 | 0.333 |
+
+Across the six paired passing runs, `workspace_cli - shell_only` was `-8.070s`
+with a bootstrap interval of `(-14.308, -2.085)`. `workspace_cli` was faster in
+five runs and `shell_only` was faster in one. The paired command-count delta was
+`-4.500` commands with interval `(-6.500, -2.333)`. By task, the mean timing
+deltas were `invoice_tax_sync = -5.189s`, `policy_threshold_sync = -1.927s`,
+and `rollback_recovery = -17.094s`. This is still a small controlled suite, but
+it is the first multi-task Codex-in-the-loop result where the aggregate timing
+interval does not cross zero.
 
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
@@ -270,16 +292,19 @@ entries and no `operation log unreadable` status.
   `workspace-cli`, the optimized policy task moved to elapsed-time parity, and
   the larger invoice task used far fewer commands while showing a promising but
   still statistically weak timing improvement. The optimized rollback suite is
-  the first repeated Codex-in-the-loop result where `workspace_cli` was faster
-  in every paired run and the paired timing interval did not cross zero. The
-  paper can make a controlled-task speedup claim for transactional recovery,
-  while still framing broader elapsed-time claims as early pilot evidence.
+  the first repeated single-task Codex-in-the-loop result where `workspace_cli`
+  was faster in every paired run and the paired timing interval did not cross
+  zero. The latest three-task suite also shows an aggregate timing improvement
+  with a non-zero-crossing interval and substantially fewer commands. The paper
+  can now make controlled-task speedup claims for transactional recovery and
+  small-suite aggregate behavior, while still treating broader generalization as
+  early pilot evidence.
 
 ## Next Required Step
 
-The next evaluation should use larger repository-like tasks where the audit log,
-related-file discovery, impact checks, rollback, stdin patching, and batched
-observations remove enough wasted search or recovery work to pay for the tool
-overhead. The suite runner should then be run across more repetitions and tasks,
-reporting pass rate, elapsed time, command counts, rollback usage, and final
-diff correctness with bootstrap intervals.
+The next evaluation should increase repetitions on the three-task suite and add
+at least one larger repository-like task where the audit log, related-file
+discovery, impact checks, rollback, stdin patching, and batched observations
+remove enough wasted search or recovery work to pay for the tool overhead. The
+report should keep separating single-task claims from cross-task aggregate
+claims.
