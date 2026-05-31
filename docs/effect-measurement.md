@@ -62,7 +62,8 @@ residual gap clusters with missing targets split into parent-present predictable
 targets and parent-absent new targets, the rank of missed targets when they
 appear in a wider diagnostic hybrid ranking, and top non-targets occupying the
 method's top-k list, including predictable-only clusters retargeted from
-case-level ranking lists, into a compact machine-readable form.
+case-level ranking lists, plus structured threshold margin entries, into a
+compact machine-readable form.
 Paper artifact directories also include copies of the local holdout manifest and
 source holdout manifest when available. The run manifest records the exact
 generation commands,

@@ -1010,7 +1010,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
 
         summary = extract_effect_summary.extract_summary(report)
 
-        self.assertEqual(summary["schema_version"], 1)
+        self.assertEqual(summary["schema_version"], 2)
         self.assertEqual(summary["observation_recall"]["map_fact_recall"], 1.0)
         holdout = summary["repo_temporal_holdout"]
         self.assertEqual(holdout["temporal_leakage_audit"]["failure_count"], 0)
@@ -1447,6 +1447,45 @@ class EffectThresholdTests(unittest.TestCase):
             margins,
         )
 
+    def test_effect_threshold_margin_entries_are_structured(self) -> None:
+        entries = check_effect_thresholds.threshold_margin_entries(
+            self.passing_report(),
+            require_holdout=True,
+        )
+
+        by_label = {entry["label"]: entry for entry in entries}
+        hybrid_margin = by_label[
+            "repo_temporal_holdout_aggregate.workspace_related_hybrid"
+            ".mean_average_precision_at_5"
+        ]
+        self.assertEqual(hybrid_margin["gate"], "minimum")
+        self.assertEqual(hybrid_margin["kind"], "floor")
+        self.assertEqual(hybrid_margin["status"], "pass")
+        self.assertEqual(hybrid_margin["minimum"], 0.78)
+        self.assertAlmostEqual(hybrid_margin["margin"], 0.01)
+
+        holm_margin = by_label[
+            "repo_temporal_holdout_aggregate.paired_deltas"
+            ".max_holm_p_greater_average_precision_at_5"
+        ]
+        self.assertEqual(holm_margin["gate"], "maximum")
+        self.assertEqual(holm_margin["status"], "pass")
+        self.assertEqual(holm_margin["maximum"], 0.005)
+        self.assertAlmostEqual(holm_margin["headroom"], 0.004)
+
+    def test_extract_summary_includes_structured_threshold_margins(self) -> None:
+        summary = extract_effect_summary.extract_summary(self.passing_report())
+
+        by_label = {entry["label"]: entry for entry in summary["threshold_margins"]}
+        self.assertEqual(summary["schema_version"], 2)
+        self.assertEqual(
+            by_label[
+                "repo_temporal_holdout_aggregate.workspace_related_hybrid"
+                ".mean_average_precision_at_5"
+            ]["minimum"],
+            0.78,
+        )
+
     def test_effect_thresholds_allow_missing_holdout_by_default(self) -> None:
         report = self.passing_report()
         report["measurements"] = report["measurements"][:-1]
@@ -1773,7 +1812,11 @@ class EffectArtifactRunnerTests(unittest.TestCase):
 
 
 class EffectArtifactVerifierTests(unittest.TestCase):
-    SUMMARY_FIXTURE = {"schema_version": 1, "repo_temporal_holdout": {}}
+    SUMMARY_FIXTURE = {
+        "schema_version": 2,
+        "repo_temporal_holdout": {},
+        "threshold_margins": [],
+    }
     MARKDOWN_FIXTURE = "# Effect Report\n"
 
     def write_artifact_set(self, output_dir: Path) -> None:
@@ -1849,7 +1892,11 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         metadata: dict,
     ) -> dict:
         effect_report = {"metadata": metadata, "measurements": []}
-        summary = {"metadata": metadata, "schema_version": 1}
+        summary = {
+            "metadata": metadata,
+            "schema_version": 2,
+            "threshold_margins": [],
+        }
         (output_dir / "effect.json").write_text(
             json.dumps(effect_report) + "\n",
             encoding="utf-8",
@@ -1888,6 +1935,51 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 self.verify_with_patched_semantics(output_dir),
                 [],
             )
+
+    def test_artifact_verifier_rejects_incomplete_threshold_margin_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            summary = {
+                "schema_version": 2,
+                "repo_temporal_holdout": {},
+                "threshold_margins": [
+                    {
+                        "label": "repo_temporal_holdout_aggregate.hybrid",
+                        "status": "pass",
+                        "gate": "minimum",
+                        "value": 0.8,
+                        "minimum": 0.78,
+                    },
+                ],
+            }
+            (output_dir / "result_summary.json").write_text(
+                json.dumps(summary) + "\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["result_summary"] = (
+                verify_effect_artifacts.file_sha256(
+                    output_dir / "result_summary.json"
+                )
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+            )
+
+        self.assertTrue(
+            any(
+                "threshold_margins[0].margin must be numeric" in failure
+                for failure in failures
+            ),
+            failures,
+        )
 
     def test_artifact_verifier_accepts_clean_metadata_when_clean_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -2042,7 +2134,11 @@ class EffectArtifactVerifierTests(unittest.TestCase):
 
             failures = self.verify_with_patched_semantics(
                 output_dir,
-                extracted_summary={"schema_version": 1, "changed": True},
+                extracted_summary={
+                    "schema_version": 2,
+                    "changed": True,
+                    "threshold_margins": [],
+                },
             )
 
         self.assertTrue(
@@ -2079,7 +2175,8 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 1,
+                "schema_version": 2,
+                "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
                     "oracle_normalized": {
@@ -2138,7 +2235,8 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 1,
+                "schema_version": 2,
+                "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
                     "oracle_normalized": {

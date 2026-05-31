@@ -149,7 +149,8 @@ to a failing threshold.
 The artifact runner also writes `result_summary.json`, a compact machine-readable
 summary of the headline metrics, full weight sweep, best weight result, and
 per-repository holdout results, oracle-normalized AP gaps, residual gap
-clusters including predictable-only retargeted gaps, plus the leakage audit.
+clusters including predictable-only retargeted gaps, structured threshold
+margin entries, plus the leakage audit.
 Paper artifact directories include copies of the local holdout manifest and
 source holdout manifest when available.
 `run_manifest.json` records the exact commands and SHA-256 checksums for each

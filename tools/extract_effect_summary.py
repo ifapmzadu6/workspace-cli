@@ -10,7 +10,14 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+TOOLS_DIR = Path(__file__).resolve().parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+import check_effect_thresholds  # noqa: E402
+
+
+SCHEMA_VERSION = 2
 
 
 def load_report(path: str) -> dict[str, Any]:
@@ -651,6 +658,10 @@ def extract_summary(report: dict[str, Any]) -> dict[str, Any]:
         },
         "retrieval_suite": headline_retrieval_summary(report),
         "repo_temporal_holdout": holdout_summary,
+        "threshold_margins": check_effect_thresholds.threshold_margin_entries(
+            report,
+            require_holdout=holdout is not None,
+        ),
     }
 
 

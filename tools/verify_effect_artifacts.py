@@ -13,7 +13,7 @@ from typing import Any
 
 
 PASS_MARKER = "effect threshold check passed"
-EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 1
+EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 2
 
 ARTIFACT_FILES = {
     "json": "effect.json",
@@ -251,6 +251,47 @@ def verify_result_summary_schema(
             "result_summary.json schema_version must be "
             f"{EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION}, got {schema_version!r}"
         )
+    verify_threshold_margin_schema(result_summary, failures)
+
+
+def verify_threshold_margin_schema(
+    result_summary: dict[str, Any],
+    failures: list[str],
+) -> None:
+    margins = result_summary.get("threshold_margins")
+    if not isinstance(margins, list):
+        failures.append("result_summary.json threshold_margins must be a list")
+        return
+    for index, entry in enumerate(margins):
+        label = f"result_summary.json threshold_margins[{index}]"
+        if not isinstance(entry, dict):
+            failures.append(f"{label} must be an object")
+            continue
+        if not isinstance(entry.get("label"), str):
+            failures.append(f"{label}.label must be a string")
+        status = entry.get("status")
+        if status not in {"pass", "fail", "missing"}:
+            failures.append(f"{label}.status must be pass, fail, or missing")
+        if entry.get("missing"):
+            continue
+        gate = entry.get("gate")
+        if gate not in {"minimum", "maximum"}:
+            failures.append(f"{label}.gate must be minimum or maximum")
+            continue
+        if not is_json_number(entry.get("value")):
+            failures.append(f"{label}.value must be numeric")
+        if gate == "minimum":
+            for field in ("minimum", "margin"):
+                if not is_json_number(entry.get(field)):
+                    failures.append(f"{label}.{field} must be numeric")
+        else:
+            for field in ("maximum", "headroom"):
+                if not is_json_number(entry.get(field)):
+                    failures.append(f"{label}.{field} must be numeric")
+
+
+def is_json_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def verify_residual_gap_clusters(

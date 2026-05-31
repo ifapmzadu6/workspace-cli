@@ -516,12 +516,12 @@ def check_repo_macro_thresholds(
     )
 
 
-def threshold_margin_report(
+def threshold_margin_entries(
     report: dict[str, Any],
     *,
     require_holdout: bool = False,
-) -> list[str]:
-    lines: list[str] = []
+) -> list[dict[str, Any]]:
+    lines: list[dict[str, Any]] = []
     retrieval = measurement_by_name(report, "retrieval_suite")
     if retrieval:
         aggregate = retrieval.get("aggregate", {})
@@ -625,21 +625,41 @@ def threshold_margin_report(
         if isinstance(predictable, dict):
             lines.extend(repo_holdout_margin_report(predictable, predictable=True))
     elif require_holdout:
-        lines.append("repo_temporal_holdout_aggregate: missing")
+        lines.append(
+            {
+                "label": "repo_temporal_holdout_aggregate",
+                "status": "missing",
+                "missing": True,
+            }
+        )
     return lines
+
+
+def threshold_margin_report(
+    report: dict[str, Any],
+    *,
+    require_holdout: bool = False,
+) -> list[str]:
+    return [
+        format_threshold_margin_entry(entry)
+        for entry in threshold_margin_entries(
+            report,
+            require_holdout=require_holdout,
+        )
+    ]
 
 
 def repo_holdout_margin_report(
     holdout: dict[str, Any],
     *,
     predictable: bool,
-) -> list[str]:
+) -> list[dict[str, Any]]:
     label = "predictable repo_temporal_holdout_aggregate" if predictable else (
         "repo_temporal_holdout_aggregate"
     )
     thresholds = repo_holdout_thresholds(predictable)
     aggregate = holdout.get("aggregate", {})
-    lines: list[str] = []
+    lines: list[dict[str, Any]] = []
     if not predictable:
         append_count_margin(lines, f"{label}.repo_count", holdout.get("repo_count"), 3)
     append_count_margin(lines, f"{label}.case_count", holdout.get("case_count"), 45)
@@ -774,7 +794,7 @@ def repo_holdout_margin_report(
 
 
 def append_holdout_delta_margins(
-    lines: list[str],
+    lines: list[dict[str, Any]],
     aggregate: dict[str, Any],
     label_prefix: str,
     left: str,
@@ -795,7 +815,7 @@ def append_holdout_delta_margins(
 
 
 def append_mean_margin(
-    lines: list[str],
+    lines: list[dict[str, Any]],
     aggregate: dict[str, Any],
     label: str,
     method: str,
@@ -809,7 +829,7 @@ def append_mean_margin(
 
 
 def append_delta_margin(
-    lines: list[str],
+    lines: list[dict[str, Any]],
     aggregate: dict[str, Any],
     label: str,
     left: str,
@@ -828,7 +848,7 @@ def append_delta_margin(
 
 
 def append_weight_margin(
-    lines: list[str],
+    lines: list[dict[str, Any]],
     holdout: dict[str, Any],
     label: str,
     weight: float,
@@ -862,7 +882,7 @@ def append_weight_margin(
 
 
 def append_oracle_margin(
-    lines: list[str],
+    lines: list[dict[str, Any]],
     aggregate: dict[str, Any],
     label: str,
     method: str,
@@ -888,7 +908,7 @@ def append_oracle_margin(
 
 
 def append_count_margin(
-    lines: list[str],
+    lines: list[dict[str, Any]],
     label: str,
     value: Any,
     minimum: int,
@@ -896,35 +916,86 @@ def append_count_margin(
     if value is None:
         return
     count = int(value)
+    margin = count - minimum
     lines.append(
-        f"{label}: value={count}, minimum={minimum}, margin={count - minimum:+d}"
+        {
+            "label": label,
+            "value": count,
+            "minimum": minimum,
+            "margin": margin,
+            "gate": "minimum",
+            "kind": "count",
+            "status": "pass" if margin >= 0 else "fail",
+        }
     )
 
 
 def append_floor_margin(
-    lines: list[str],
+    lines: list[dict[str, Any]],
     label: str,
     value: float,
     minimum: float,
 ) -> None:
+    margin = value - minimum
     lines.append(
-        f"{label}: value={value:.3f}, minimum={minimum:.3f}, "
-        f"margin={value - minimum:+.3f}"
+        {
+            "label": label,
+            "value": value,
+            "minimum": minimum,
+            "margin": margin,
+            "gate": "minimum",
+            "kind": "floor",
+            "status": "pass" if margin + FLOAT_TOLERANCE >= 0.0 else "fail",
+        }
     )
 
 
 def append_ceiling_margin(
-    lines: list[str],
+    lines: list[dict[str, Any]],
     label: str,
     value: float | None,
     maximum: float,
 ) -> None:
     if value is None:
         return
+    headroom = maximum - value
     lines.append(
-        f"{label}: value={value:.4f}, maximum={maximum:.4f}, "
-        f"headroom={maximum - value:+.4f}"
+        {
+            "label": label,
+            "value": value,
+            "maximum": maximum,
+            "headroom": headroom,
+            "gate": "maximum",
+            "kind": "ceiling",
+            "status": "pass" if headroom + FLOAT_TOLERANCE >= 0.0 else "fail",
+        }
     )
+
+
+def format_threshold_margin_entry(entry: dict[str, Any]) -> str:
+    label = str(entry.get("label", ""))
+    if entry.get("missing"):
+        return f"{label}: missing"
+    gate = entry.get("gate")
+    if gate == "minimum":
+        if entry.get("kind") == "count":
+            return (
+                f"{label}: value={int(entry['value'])}, "
+                f"minimum={int(entry['minimum'])}, "
+                f"margin={int(entry['margin']):+d}"
+            )
+        return (
+            f"{label}: value={float(entry['value']):.3f}, "
+            f"minimum={float(entry['minimum']):.3f}, "
+            f"margin={float(entry['margin']):+.3f}"
+        )
+    if gate == "maximum":
+        return (
+            f"{label}: value={float(entry['value']):.4f}, "
+            f"maximum={float(entry['maximum']):.4f}, "
+            f"headroom={float(entry['headroom']):+.4f}"
+        )
+    return f"{label}: {entry.get('status', 'unknown')}"
 
 
 def max_holm_p_value(
