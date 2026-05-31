@@ -110,6 +110,22 @@ touched exactly the expected files. `workspace_cli` also used rollback exactly
 once per run, so the repeated result supports the auditability and recovery
 claim but not a speedup claim for this small task.
 
+The command logs showed that `workspace_cli` spent avoidable turns on
+`workspace --help`, command-specific help, and `.workspace` metadata inspection.
+After tightening the workspace prompt to state that the command syntax was
+complete and that help/metadata inspection should be skipped, the same two-run
+rollback suite improved:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 2 | 1.000 | 1.000 | 66.729 (64.549, 68.909) | 11.000 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 2 | 1.000 | 1.000 | 86.996 (72.233, 101.759) | 8.000 | 6.000 | 7.000 | 1.000 |
+
+This prompt-level optimization reduced `workspace_cli` mean time by 27.827
+seconds and mean command count from 13.000 to 8.000, while preserving pass rate,
+diff-scope correctness, and rollback usage. The paired timing delta was still
+positive at `+20.267s`, so the result is an overhead reduction, not a speedup.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -126,8 +142,9 @@ entries and no `operation log unreadable` status.
   choice, final diffs, and workspace audit logs.
 - The timing evidence is currently negative or mixed: simple checkout and
   co-change tasks were slower with `workspace-cli`, a single rollback run was
-  faster, and the bytecode-off two-run rollback suite was slower. The paper
-  should not claim speedups from these pilots.
+  faster, and the bytecode-off two-run rollback suites were slower. Tightening
+  the workspace prompt cut avoidable workspace overhead substantially, but the
+  paper should not claim speedups from these pilots.
 
 ## Next Required Step
 

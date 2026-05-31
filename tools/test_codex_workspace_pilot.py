@@ -343,6 +343,8 @@ if __name__ == "__main__":
         self.assertIn("docs/proposed_late_fee_fix.patch", workspace_prompt)
         self.assertIn("data.transaction_id", workspace_prompt)
         self.assertIn("rollback <transaction_id>", workspace_prompt)
+        self.assertIn("do not spend time running", workspace_prompt)
+        self.assertIn("keeps the daily rate at 150 cents", workspace_prompt)
 
 
 if __name__ == "__main__":

@@ -458,18 +458,22 @@ def task_specs() -> dict[str, TaskSpec]:
             prompt=rollback_prompt,
             workspace_extra=(
                 "Use `./bin/workspace` for workspace observation, patching, "
-                "rollback, and verification whenever possible. Start with "
-                "`./bin/workspace status --json`, apply the proposed patch with "
+                "rollback, and verification whenever possible. The command "
+                "syntax below is complete; do not spend time running "
+                "`workspace --help`, command-specific `--help`, or inspecting "
+                "`.workspace` metadata. Use this sequence: "
+                "`./bin/workspace status --json`; "
                 "`./bin/workspace patch --description \"Validate proposed "
-                "late-fee patch\" docs/proposed_late_fee_fix.patch --json`, "
-                "then run "
+                "late-fee patch\" docs/proposed_late_fee_fix.patch --json`; "
                 f"`./bin/workspace run \"{TEST_COMMAND}\" --json`. If the tests "
-                "fail, read the patch response's "
-                "`data.transaction_id` and roll it back with "
-                "`./bin/workspace rollback <transaction_id> --json` before "
-                "creating and applying the correct patch with "
-                "`./bin/workspace patch`. Finish with the test command through "
-                "`workspace run` and `./bin/workspace diff --json`."
+                "fail, read the patch response's `data.transaction_id` and run "
+                "`./bin/workspace rollback <transaction_id> --json`. Then read "
+                "only `src/billing.py` and `docs/billing.md` if needed, create "
+                "a correct patch that keeps the daily rate at 150 cents and "
+                "sets the cap to 1500 cents / $15.00, apply it with "
+                "`./bin/workspace patch --description \"Apply correct late-fee "
+                "cap fix\" <patch-file> --json`, run the test command through "
+                "`workspace run`, and finish with `./bin/workspace diff --json`."
             ),
             create_repo=create_rollback_fixture_repo,
             expected_changed_files=("docs/billing.md", "src/billing.py"),
