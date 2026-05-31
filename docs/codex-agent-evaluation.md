@@ -426,6 +426,27 @@ pairs. The command-count delta was `-5.750` commands with interval
 Rollback was slower in this two-run aggregate, but it still used fewer commands,
 and the aggregate interval did not cross zero.
 
+Trace inspection showed that rollback latency came from a four-step validation
+loop: apply the proposed patch, run tests, roll the patch back, then read the
+bad patch before constructing the correct fix. The CLI now includes
+`workspace trial`, which applies a patch, runs a verifier, rolls the patch back
+on failure, and returns the verifier output plus bounded patch content in one
+observation. A first real Codex run exposed an additional prompt/schema issue:
+Codex tried `old`/`new` replacement fields, then spent three commands inspecting
+`./bin/workspace`. Tightening the prompt to provide the exact `find`/`replace`
+JSON schema removed that detour. The clean four-run rollback suite at commit
+`28362d330cd0dd13064675c82750fe0ff60c8145` produced:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 4 | 1.000 | 1.000 | 61.258 (55.861, 68.512) | 11.250 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 4 | 1.000 | 1.000 | 33.816 (30.119, 37.057) | 4.000 | 4.000 | 4.000 | 1.000 |
+
+The paired timing delta was `-27.443s` with interval `(-35.891, -18.992)`;
+`workspace_cli` was faster in all four pairs. The paired command-count delta was
+`-7.250` commands with interval `(-9.500, -5.494)`. This directly fixes the
+rollback regression observed in the previous clean four-task aggregate.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -454,18 +475,16 @@ entries and no `operation log unreadable` status.
   manual multi-file patch construction; adding `workspace replace` converted that
   larger task from noisy/parity evidence into a clean four-run speedup with
   perfect workspace diff-scope correctness and a large command-count reduction.
+  Adding `workspace trial` then converted rollback recovery from the remaining
+  regression into a clean four-run speedup with a non-zero-crossing interval.
   The updated four-task same-commit aggregate also has a non-zero-crossing timing
   improvement. The paper can now make controlled-task speedup claims for
   transactional recovery, invoice-style multi-file synchronization, subscription
-  rollout synchronization, and same-commit aggregate behavior, while presenting
-  rollback variance in the latest four-task suite as a remaining optimization
-  target.
+  rollout synchronization, and same-commit aggregate behavior.
 
 ## Next Required Step
 
-The next evaluation should increase repetitions for the updated four-task
-aggregate and inspect the latest rollback traces, because rollback was the only
-task that regressed in the clean two-run aggregate after `workspace replace`
-fixed the larger subscription workflow. The report should keep separating
-single-task speed claims, larger-task safety claims, merged artifact claims, and
-same-commit cross-task aggregate claims.
+The next evaluation should rerun the four-task same-commit aggregate with
+`workspace trial` included, then increase repetitions on the combined task set.
+The report should keep separating single-task speed claims, larger-task safety
+claims, merged artifact claims, and same-commit cross-task aggregate claims.
