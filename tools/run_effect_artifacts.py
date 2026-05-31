@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TOOLS_DIR = ROOT / "tools"
 DEFAULT_OUTPUT_DIR = ROOT / "target" / "effect-artifacts"
 DEFAULT_PAPER_MANIFEST = TOOLS_DIR / "effect_paper_holdouts.json"
+RUN_MANIFEST_SCHEMA_VERSION = 1
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -185,6 +186,7 @@ def copy_manifest_artifacts(plan: dict[str, Any]) -> None:
 
 def write_run_manifest(plan: dict[str, Any]) -> None:
     payload = {
+        "schema_version": RUN_MANIFEST_SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "workspace_repo": str(ROOT),
         "output_dir": str(plan["output_dir"]),

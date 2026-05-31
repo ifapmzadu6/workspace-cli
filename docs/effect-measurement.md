@@ -69,13 +69,16 @@ retargeted from case-level ranking lists, and emits structured threshold margin
 entries in a compact machine-readable form.
 Paper artifact directories also include copies of the local holdout manifest and
 source holdout manifest when available. The run manifest records the exact
-generation commands, verifier command, artifact paths, and SHA-256 checksums for
-each generated artifact and copied manifest. `tools/run_effect_artifacts.py`
-runs the recorded verifier command after writing the manifest. The verifier
+generation commands, verifier command, artifact paths, SHA-256 checksums for
+each generated artifact and copied manifest, a run-manifest schema version, and
+an ISO-8601 UTC generation timestamp. `tools/run_effect_artifacts.py` runs the
+recorded verifier command after writing the manifest. The verifier
 checks required files, JSON parseability, a passing threshold log, manifest hash
 consistency against `effect.json` metadata, the expected effect report schema
-version, expected manifest artifact paths, expected generation and verification
-command records, copied holdout entries that match `effect.json` metadata,
+version, expected result-summary schema version, expected run-manifest schema
+version and timestamp shape, expected manifest artifact paths, expected
+generation and verification command records, copied holdout entries that match
+`effect.json` metadata,
 recomputed threshold gates, threshold-log re-render consistency with
 `effect.json`, Markdown re-render consistency with `effect.json`,
 result-summary consistency with `effect.json`, and

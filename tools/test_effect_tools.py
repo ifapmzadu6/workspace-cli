@@ -1842,6 +1842,11 @@ class EffectArtifactRunnerTests(unittest.TestCase):
             self.assertTrue(plan["result_summary_path"].exists())
             self.assertTrue(plan["threshold_path"].exists())
             run_manifest = json.loads(plan["run_manifest_path"].read_text())
+            self.assertEqual(run_manifest["schema_version"], 1)
+            self.assertRegex(
+                run_manifest["generated_at"],
+                r"^\d{4}-\d{2}-\d{2}T",
+            )
             self.assertEqual(
                 run_manifest["commands"]["measure"],
                 plan["measurement_command"],
@@ -1978,6 +1983,8 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             (output_dir / filename).write_text(content, encoding="utf-8")
 
         run_manifest = {
+            "schema_version": 1,
+            "generated_at": "2026-01-01T00:00:00+00:00",
             "json": str(output_dir / "effect.json"),
             "markdown": str(output_dir / "effect.md"),
             "result_summary": str(output_dir / "result_summary.json"),
@@ -2120,6 +2127,35 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 self.verify_with_patched_semantics(output_dir),
                 [],
             )
+
+    def test_artifact_verifier_requires_run_manifest_schema_and_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["schema_version"] = 0
+            run_manifest["generated_at"] = "2026-01-01T00:00:00"
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any(
+                "run_manifest.json schema_version must be 1" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "run_manifest.json generated_at must include a timezone" in failure
+                for failure in failures
+            ),
+            failures,
+        )
 
     def test_artifact_verifier_requires_recorded_verify_command(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

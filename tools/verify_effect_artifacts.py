@@ -8,11 +8,13 @@ import hashlib
 import importlib.util
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 
 PASS_MARKER = "effect threshold check passed"
+EXPECTED_RUN_MANIFEST_SCHEMA_VERSION = 1
 EXPECTED_EFFECT_METADATA_SCHEMA_VERSION = 2
 EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 4
 FLOAT_TOLERANCE = 1e-9
@@ -84,6 +86,28 @@ def verify_required_files(artifact_dir: Path, failures: list[str]) -> None:
 
 
 def verify_manifest_shape(manifest: dict[str, Any], failures: list[str]) -> None:
+    schema_version = manifest.get("schema_version")
+    if schema_version != EXPECTED_RUN_MANIFEST_SCHEMA_VERSION:
+        failures.append(
+            "run_manifest.json schema_version must be "
+            f"{EXPECTED_RUN_MANIFEST_SCHEMA_VERSION}, got {schema_version!r}"
+        )
+    generated_at = manifest.get("generated_at")
+    if not is_nonempty_string(generated_at):
+        failures.append("run_manifest.json generated_at must be a non-empty string")
+    else:
+        try:
+            parsed = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        except ValueError:
+            failures.append(
+                "run_manifest.json generated_at must be an ISO-8601 timestamp"
+            )
+        else:
+            if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
+                failures.append(
+                    "run_manifest.json generated_at must include a timezone"
+                )
+
     verify_manifest_artifact_paths(manifest, failures)
     for key in ("workspace_repo", "output_dir"):
         if not is_nonempty_string(manifest.get(key)):
