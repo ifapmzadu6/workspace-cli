@@ -98,6 +98,7 @@ const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.4;
 const RELATED_HYBRID_LOW_SIGNAL_METADATA_SCORE_MULTIPLIER: f64 = 0.3;
 const RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER: f64 = 0.3;
+const RELATED_HYBRID_CROSS_ECOSYSTEM_PACKAGE_METADATA_SCORE_MULTIPLIER: f64 = 0.45;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER: f64 = 6.0;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
 const RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER: f64 = 30.0;
@@ -4473,6 +4474,7 @@ fn rank_cochanges_hybrid_from_index(
             direct_edge_weight,
             direct_score,
         );
+        hit.score *= related_hybrid_repo_score_multiplier(index, &target, &hit.path);
     }
     normalize_pagerank_hit_scores(&mut hits);
     hits.sort_by(compare_pagerank_hit_by_score);
@@ -4944,6 +4946,37 @@ fn is_project_manifest_or_lock(path: &str) -> bool {
                 | "poetry.lock"
                 | "Gemfile.lock"
         )
+}
+
+fn related_hybrid_repo_score_multiplier(
+    index: &CochangeIndex,
+    target: &str,
+    candidate: &str,
+) -> f64 {
+    if is_cross_ecosystem_package_metadata_candidate(index, target, candidate) {
+        RELATED_HYBRID_CROSS_ECOSYSTEM_PACKAGE_METADATA_SCORE_MULTIPLIER
+    } else {
+        1.0
+    }
+}
+
+fn is_cross_ecosystem_package_metadata_candidate(
+    index: &CochangeIndex,
+    target: &str,
+    candidate: &str,
+) -> bool {
+    candidate == "package.json"
+        && index_contains_file(index, "Cargo.toml")
+        && index_contains_file(index, "package.json")
+        && !is_project_manifest_or_lock(target)
+        && !is_release_workflow_file(target)
+        && !is_javascript_source_code_file(target)
+        && !is_javascript_toolchain_config(target)
+        && !is_project_changelog(target)
+}
+
+fn index_contains_file(index: &CochangeIndex, path: &str) -> bool {
+    index.file_commit_counts.contains_key(path)
 }
 
 fn path_name_tokens(path: &str) -> BTreeSet<String> {
@@ -12055,6 +12088,44 @@ src/b.rs
         assert_eq!(
             related_hybrid_path_score_multiplier("tools/measure_effect.py", "README.md", 1.0, 1.0),
             related_path_score_multiplier("tools/measure_effect.py", "README.md")
+        );
+        let mixed_index = cochange_index_from_commits(
+            &[GitCommitFiles {
+                hash: "aaaaaaaaaaaa".to_string(),
+                files: vec![
+                    "Cargo.toml".to_string(),
+                    "package.json".to_string(),
+                    "src/main.rs".to_string(),
+                ],
+            }],
+            100,
+            10,
+            None,
+        );
+        assert_eq!(
+            related_hybrid_repo_score_multiplier(&mixed_index, "src/main.rs", "package.json"),
+            RELATED_HYBRID_CROSS_ECOSYSTEM_PACKAGE_METADATA_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_repo_score_multiplier(&mixed_index, "Cargo.toml", "package.json"),
+            1.0
+        );
+        let package_only_index = cochange_index_from_commits(
+            &[GitCommitFiles {
+                hash: "bbbbbbbbbbbb".to_string(),
+                files: vec!["package.json".to_string(), "src/index.ts".to_string()],
+            }],
+            100,
+            10,
+            None,
+        );
+        assert_eq!(
+            related_hybrid_repo_score_multiplier(
+                &package_only_index,
+                "src/index.ts",
+                "package.json",
+            ),
+            1.0
         );
         assert!(is_low_signal_repo_metadata_file(".gitignore"));
         assert!(!is_low_signal_repo_metadata_file(".gitattributes"));

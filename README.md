@@ -233,11 +233,12 @@ related history. Related PageRank applies a small path prior for close file
 siblings. `hybrid` combines that PageRank reachability with a direct co-change
 boost, preserving indirect discovery while improving temporal holdout ranking
 quality, and down-weights low-signal repository metadata such as `.gitignore`
-when it competes with source or test neighbors. Release workflow metadata is
-also down-weighted outside manifest and lockfile contexts so release automation
-churn does not crowd out behavior-level source or documentation neighbors. Use
-`--hybrid-direct-weight` with values from `0.0` to `1.0` for ablation runs; the
-default is `0.9` for `related`.
+when it competes with source or test neighbors. Release workflow metadata and
+cross-ecosystem package metadata in mixed Cargo/npm repositories are also
+down-weighted outside manifest, lockfile, release, and JavaScript contexts so
+automation and package-maintenance churn do not crowd out behavior-level source
+or documentation neighbors. Use `--hybrid-direct-weight` with values from `0.0`
+to `1.0` for ablation runs; the default is `0.9` for `related`.
 
 `workspace impact --diff --by cochange` uses the current Git diff as seed files
 and returns nearby files from history. This helps decide what to read next and
