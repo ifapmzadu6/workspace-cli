@@ -47,6 +47,7 @@ def load_sibling_tool(name: str) -> Any:
 
 check_effect_thresholds = load_sibling_tool("check_effect_thresholds")
 extract_effect_summary = load_sibling_tool("extract_effect_summary")
+summarize_effect = load_sibling_tool("summarize_effect")
 
 
 def file_sha256(path: Path) -> str:
@@ -258,6 +259,21 @@ def verify_result_summary_matches_report(
         )
 
 
+def verify_markdown_matches_report(
+    effect_report: dict[str, Any],
+    markdown_path: Path,
+    failures: list[str],
+) -> None:
+    try:
+        actual = markdown_path.read_text(encoding="utf-8")
+    except OSError as error:
+        failures.append(f"effect.md could not be read: {error}")
+        return
+    expected = summarize_effect.render_report(effect_report)
+    if actual != expected:
+        failures.append("effect.md does not match summarize_effect.py output")
+
+
 def verify_threshold_recheck(
     effect_report: dict[str, Any],
     manifest: dict[str, Any],
@@ -305,6 +321,7 @@ def verify_artifact_directory(artifact_dir: Path) -> list[str]:
     verify_result_summary_schema(result_summary, failures)
     verify_residual_gap_clusters(result_summary, failures)
     verify_result_summary_matches_report(effect_report, result_summary, failures)
+    verify_markdown_matches_report(effect_report, artifact_dir / "effect.md", failures)
     verify_manifest_shape(manifest, failures)
     verify_checksums(artifact_dir, manifest, failures)
     verify_holdout_manifest_hashes(effect_report, manifest, failures)

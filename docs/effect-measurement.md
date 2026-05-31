@@ -55,7 +55,8 @@ The JSON report includes reproducibility metadata: the workspace commit, dirty
 state, primary cutoff, resampling counts, sign-flip p-value method, holdout
 manifest path/hash, source manifest hash for prepared local manifests, pinned
 holdout repositories, and holdout remote URLs. The Markdown summary
-renders the same metadata before the metric tables, while
+renders the same metadata before the metric tables and residual gap clusters,
+while
 `result_summary.json` extracts the headline metrics, full weight sweep, best
 weight result, per-repository holdout results, oracle-normalized AP gaps, and
 residual gap clusters, including predictable-only clusters retargeted from
@@ -66,7 +67,8 @@ generation commands,
 verifier command, and SHA-256 checksums for each generated artifact and copied
 manifest. The verifier checks required files, JSON parseability, a passing
 threshold log, manifest hash consistency against `effect.json` metadata,
-recomputed threshold gates, and result-summary consistency with `effect.json`.
+recomputed threshold gates, Markdown re-render consistency with `effect.json`,
+and result-summary consistency with `effect.json`.
 For paper-style holdout reports, the threshold log gates case-weighted and
 repo-macro AP effect-size floors, oracle-normalized AP, plus Holm-adjusted
 paired sign-flip p-value ceilings for the key hybrid-vs-baseline deltas.
@@ -198,7 +200,8 @@ cutoff, which defaults to 5:
 - oracle-normalized AP and oracle gap for temporal holdout measurements that
   include the history-only oracle ceiling
 - residual gap clusters that group remaining hybrid-vs-oracle AP gaps by
-  repository and held-out commit, including predictable-only retargeted gaps
+  repository and held-out commit in both Markdown and result-summary JSON,
+  including predictable-only retargeted gaps
 - a default cutoff sweep at @1, @3, and @5
 - an optional hybrid direct-weight sweep for ablation
 - an optional leave-one-repo-out direct-weight selection check when multiple

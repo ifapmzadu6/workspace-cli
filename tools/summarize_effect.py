@@ -799,6 +799,172 @@ def render_case_delta_table(
     )
 
 
+def residual_gap_cluster_entries(
+    report: dict[str, Any],
+    *,
+    expected_key: str = "expected",
+    retarget_metrics: bool = False,
+    method: str = "workspace_related_hybrid",
+    oracle_method: str = "history_oracle_ceiling",
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
+    if holdout is None:
+        return []
+    k = holdout["k"]
+    metric = f"average_precision_at_{k}"
+    clusters: dict[tuple[str, str], dict[str, Any]] = {}
+
+    for measurement in report["measurements"]:
+        if measurement.get("metric") != "repo_temporal_holdout":
+            continue
+        for case in measurement.get("cases", []):
+            expected = set(case.get(expected_key, []))
+            if not expected:
+                continue
+            methods = case.get("methods", {})
+            method_summary = methods.get(method)
+            oracle_summary = methods.get(oracle_method)
+            if not method_summary or not oracle_summary:
+                continue
+            method_top = [str(path) for path in method_summary.get("top", [])]
+            oracle_top = [str(path) for path in oracle_summary.get("top", [])]
+            if retarget_metrics:
+                method_ap = average_precision_at_k(method_top, expected, k)
+                oracle_ap = average_precision_at_k(oracle_top, expected, k)
+            else:
+                method_ap = float(method_summary[metric])
+                oracle_ap = float(oracle_summary[metric])
+            gap = round(oracle_ap - method_ap, 3)
+            if gap <= 0.0:
+                continue
+
+            repo = repo_label(str(case.get("repo", measurement.get("repo", ""))))
+            commit = short_commit(case.get("heldout_commit"))
+            cluster = clusters.setdefault(
+                (repo, commit),
+                {
+                    "repo": repo,
+                    "commit": commit,
+                    "case_count": 0,
+                    "seeds": set(),
+                    "target_count": 0,
+                    "gap": 0.0,
+                    "method_ap_sum": 0.0,
+                    "oracle_ap_sum": 0.0,
+                    "cases": [],
+                },
+            )
+            hits = set(hits_at_k(method_top, expected, k))
+            missing = sorted(expected - hits)
+            cluster["case_count"] += 1
+            cluster["seeds"].add(str(case.get("seed", "")))
+            cluster["target_count"] += len(expected)
+            cluster["gap"] += gap
+            cluster["method_ap_sum"] += method_ap
+            cluster["oracle_ap_sum"] += oracle_ap
+            cluster["cases"].append(
+                {
+                    "seed": str(case.get("seed", "")),
+                    "gap": gap,
+                    "missing": missing,
+                    "method_top": method_top[:k],
+                }
+            )
+
+    rows = []
+    for cluster in clusters.values():
+        case_count = int(cluster["case_count"])
+        if case_count == 0:
+            continue
+        cases = sorted(
+            cluster["cases"],
+            key=lambda case: (-case["gap"], case["seed"]),
+        )
+        top_case = cases[0]
+        rows.append(
+            {
+                "repo": cluster["repo"],
+                "commit": cluster["commit"],
+                "case_count": case_count,
+                "seed_count": len(cluster["seeds"]),
+                "target_count": cluster["target_count"],
+                "gap": round(cluster["gap"], 3),
+                "mean_gap": round(cluster["gap"] / case_count, 3),
+                "mean_method_ap": round(cluster["method_ap_sum"] / case_count, 3),
+                "mean_oracle_ap": round(cluster["oracle_ap_sum"] / case_count, 3),
+                "top_seed": top_case["seed"],
+                "top_missing": top_case["missing"],
+                "top_method_top": top_case["method_top"],
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (-row["gap"], row["repo"], row["commit"]),
+    )[:limit]
+
+
+def render_residual_gap_cluster_table(
+    report: dict[str, Any],
+    title: str,
+    *,
+    expected_key: str = "expected",
+    retarget_metrics: bool = False,
+    limit: int = 8,
+) -> str:
+    holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
+    if holdout is None:
+        return ""
+    k = holdout["k"]
+    entries = residual_gap_cluster_entries(
+        report,
+        expected_key=expected_key,
+        retarget_metrics=retarget_metrics,
+        limit=limit,
+    )
+    if not entries:
+        return ""
+    rows = [
+        [
+            entry["repo"],
+            entry["commit"],
+            str(entry["case_count"]),
+            str(entry["seed_count"]),
+            str(entry["target_count"]),
+            fmt_number(entry["gap"]),
+            fmt_number(entry["mean_gap"]),
+            fmt_number(entry["mean_method_ap"]),
+            fmt_number(entry["mean_oracle_ap"]),
+            entry["top_seed"],
+            fmt_path_list(entry["top_missing"], limit=3),
+            fmt_path_list(entry["top_method_top"], limit=3),
+        ]
+        for entry in entries
+    ]
+    return "\n".join(
+        [
+            f"## {title} Residual Gap Clusters @{k}",
+            markdown_table(
+                [
+                    "repo",
+                    "commit",
+                    "cases",
+                    "seeds",
+                    "targets",
+                    "oracle gap",
+                    "mean gap",
+                    "hybrid AP",
+                    "oracle AP",
+                    "top seed",
+                    "missing targets",
+                    "hybrid top",
+                ],
+                rows,
+            ),
+        ]
+    )
+
+
 def render_holdout_dataset_table(
     report: dict[str, Any],
     aggregate: dict[str, Any],
@@ -1057,6 +1223,12 @@ def render_report(report: dict[str, Any]) -> str:
         )
         if oracle_normalized:
             sections.append(oracle_normalized)
+        residual_clusters = render_residual_gap_cluster_table(
+            report,
+            "Cross-Repo Temporal Holdout",
+        )
+        if residual_clusters:
+            sections.append(residual_clusters)
         case_deltas = render_case_delta_table(
             report,
             "Cross-Repo Temporal Holdout",
@@ -1148,6 +1320,14 @@ def render_report(report: dict[str, Any]) -> str:
             )
             if predictable_oracle_normalized:
                 sections.append(predictable_oracle_normalized)
+            predictable_residual_clusters = render_residual_gap_cluster_table(
+                report,
+                "Predictable Cross-Repo Temporal Holdout",
+                expected_key="predictable_expected",
+                retarget_metrics=True,
+            )
+            if predictable_residual_clusters:
+                sections.append(predictable_residual_clusters)
             predictable_case_deltas = render_case_delta_table(
                 report,
                 "Predictable Cross-Repo Temporal Holdout",

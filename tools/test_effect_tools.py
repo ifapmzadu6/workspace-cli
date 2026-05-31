@@ -586,6 +586,76 @@ class SummaryFormattingTests(unittest.TestCase):
         self.assertIn("AP/oracle", table)
         self.assertIn("| related hybrid | 0.600 | 0.800 | 0.750 | 0.200 |", table)
 
+    def test_residual_gap_cluster_table_groups_by_commit(self) -> None:
+        report = {
+            "measurements": [
+                {
+                    "metric": "repo_temporal_holdout_aggregate",
+                    "k": 5,
+                },
+                {
+                    "metric": "repo_temporal_holdout",
+                    "repo": "/tmp/example",
+                    "cases": [
+                        {
+                            "repo": "/tmp/example",
+                            "heldout_commit": "abcdef123456",
+                            "seed": "package.json",
+                            "expected": ["README.md", ".github/workflows/ci.yml"],
+                            "predictable_expected": [".github/workflows/ci.yml"],
+                            "methods": {
+                                "workspace_related_hybrid": {
+                                    "average_precision_at_5": 0.25,
+                                    "top": ["README.md", "Cargo.toml"],
+                                },
+                                "history_oracle_ceiling": {
+                                    "average_precision_at_5": 1.0,
+                                    "top": [
+                                        ".github/workflows/ci.yml",
+                                        "README.md",
+                                    ],
+                                },
+                            },
+                        },
+                        {
+                            "repo": "/tmp/example",
+                            "heldout_commit": "abcdef123456",
+                            "seed": "Cargo.toml",
+                            "expected": ["Cargo.lock"],
+                            "predictable_expected": [],
+                            "methods": {
+                                "workspace_related_hybrid": {
+                                    "average_precision_at_5": 1.0,
+                                    "top": ["Cargo.lock"],
+                                },
+                                "history_oracle_ceiling": {
+                                    "average_precision_at_5": 1.0,
+                                    "top": ["Cargo.lock"],
+                                },
+                            },
+                        },
+                    ],
+                },
+            ],
+        }
+
+        table = summarize_effect.render_residual_gap_cluster_table(
+            report,
+            "Holdout",
+        )
+        self.assertIn("Holdout Residual Gap Clusters @5", table)
+        self.assertIn("| example | abcdef1234 | 1 | 1 | 2 | 0.750 |", table)
+        self.assertIn(".github/workflows/ci.yml", table)
+
+        predictable_table = summarize_effect.render_residual_gap_cluster_table(
+            report,
+            "Predictable Holdout",
+            expected_key="predictable_expected",
+            retarget_metrics=True,
+        )
+        self.assertIn("Predictable Holdout Residual Gap Clusters @5", predictable_table)
+        self.assertIn("| example | abcdef1234 | 1 | 1 | 1 | 1.000 |", predictable_table)
+
     def test_per_repo_holdout_table_includes_static_baselines(self) -> None:
         def method(ap: float) -> dict:
             return {
@@ -1544,12 +1614,13 @@ class EffectArtifactRunnerTests(unittest.TestCase):
 
 class EffectArtifactVerifierTests(unittest.TestCase):
     SUMMARY_FIXTURE = {"schema_version": 1, "repo_temporal_holdout": {}}
+    MARKDOWN_FIXTURE = "# Effect Report\n"
 
     def write_artifact_set(self, output_dir: Path) -> None:
         output_dir.mkdir()
         artifacts = {
             "effect.json": json.dumps({"measurements": []}) + "\n",
-            "effect.md": "# Effect Report\n",
+            "effect.md": self.MARKDOWN_FIXTURE,
             "result_summary.json": json.dumps(self.SUMMARY_FIXTURE) + "\n",
             "thresholds.txt": "effect threshold check passed\n",
         }
@@ -1583,9 +1654,11 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         *,
         threshold_failures: list[str] | None = None,
         extracted_summary: dict | None = None,
+        rendered_markdown: str | None = None,
     ) -> list[str]:
         threshold_failures = threshold_failures or []
         extracted_summary = extracted_summary or self.SUMMARY_FIXTURE
+        rendered_markdown = rendered_markdown or self.MARKDOWN_FIXTURE
         with mock.patch.object(
             verify_effect_artifacts.check_effect_thresholds,
             "check_report",
@@ -1594,6 +1667,10 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             verify_effect_artifacts.extract_effect_summary,
             "extract_summary",
             return_value=extracted_summary,
+        ), mock.patch.object(
+            verify_effect_artifacts.summarize_effect,
+            "render_report",
+            return_value=rendered_markdown,
         ):
             return verify_effect_artifacts.verify_artifact_directory(output_dir)
 
@@ -1651,6 +1728,30 @@ class EffectArtifactVerifierTests(unittest.TestCase):
 
         self.assertTrue(
             any("result_summary.json does not match" in failure for failure in failures),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_markdown_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            (output_dir / "effect.md").write_text(
+                "# Stale Report\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["markdown"] = verify_effect_artifacts.file_sha256(
+                output_dir / "effect.md"
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any("effect.md does not match" in failure for failure in failures),
             failures,
         )
 

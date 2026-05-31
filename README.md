@@ -139,10 +139,10 @@ of only checking that commands run. The rendered effect summary also reports
 holdout dataset composition, skipped commit reasons, target-label
 distributions, history-only oracle ceilings, and case-level win/loss
 diagnostics for paper-style reproducibility checks. It also reports
-oracle-normalized AP, oracle gaps, and leave-one-repo-out hybrid weight
-selection when sweep weights are provided. Paper holdout threshold checks gate
-case-weighted and repo-macro effect sizes, oracle-normalized AP, plus the
-corrected paired significance of the key deltas.
+oracle-normalized AP, oracle gaps, residual gap clusters, and
+leave-one-repo-out hybrid weight selection when sweep weights are provided.
+Paper holdout threshold checks gate case-weighted and repo-macro effect sizes,
+oracle-normalized AP, plus the corrected paired significance of the key deltas.
 The artifact runner also writes `result_summary.json`, a compact machine-readable
 summary of the headline metrics, full weight sweep, best weight result, and
 per-repository holdout results, oracle-normalized AP gaps, residual gap
@@ -154,8 +154,9 @@ generated artifact and copied manifest. `tools/verify_effect_artifacts.py`
 checks that the artifact directory has all required files, parseable JSON
 outputs, a passing threshold log, SHA-256 hashes that match the run manifest,
 holdout manifest hashes that match `effect.json` metadata, a recomputed
-threshold pass, and a result summary that matches `effect.json`. The manifest
-also records the verifier command for artifact consumers.
+threshold pass, a Markdown summary that re-renders from `effect.json`, and a
+result summary that matches `effect.json`. The manifest also records the
+verifier command for artifact consumers.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`. `tools/prepare_effect_holdouts.py`
