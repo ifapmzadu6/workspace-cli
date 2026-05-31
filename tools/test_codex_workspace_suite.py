@@ -173,6 +173,9 @@ class CodexWorkspaceSuiteTests(unittest.TestCase):
         self.assertIn("# Codex Workspace Suite", rendered)
         self.assertIn("workspace_cli - shell_only", rendered)
         self.assertIn("-20.000 (-20.000, -20.000)", rendered)
+        self.assertIn("## Paired Command Counts", rendered)
+        self.assertIn("-7.000 (-7.000, -7.000)", rendered)
+        self.assertIn("mean command delta", rendered)
         self.assertIn("`rollback_recovery`", rendered)
 
     def test_resolve_tasks_supports_all_and_rejects_unknown(self) -> None:

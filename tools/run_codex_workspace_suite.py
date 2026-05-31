@@ -273,6 +273,13 @@ def elapsed_ci(summary: dict[str, Any]) -> str:
     )
 
 
+def delta_ci(delta: dict[str, Any]) -> str:
+    return (
+        f"{delta['mean']:.3f} "
+        f"({delta['ci95_low']:.3f}, {delta['ci95_high']:.3f})"
+    )
+
+
 def render_suite_markdown(summary: dict[str, Any]) -> str:
     lines = [
         "# Codex Workspace Suite",
@@ -307,6 +314,7 @@ def render_suite_markdown(summary: dict[str, Any]) -> str:
         )
 
     paired = summary["paired"]["workspace_minus_shell_elapsed_seconds"]
+    command_paired = summary["paired"]["workspace_minus_shell_command_count"]
     lines.extend(
         [
             "",
@@ -330,26 +338,45 @@ def render_suite_markdown(summary: dict[str, Any]) -> str:
             "",
             "Negative seconds mean `workspace_cli` was faster on paired passing runs.",
             "",
+            "## Paired Command Counts",
+            "",
+            "| comparison | paired passing runs | mean commands (95% CI) | median commands |",
+            "| --- | ---: | ---: | ---: |",
+            (
+                "| workspace_cli - shell_only | {pairs} | {mean:.3f} ({low:.3f}, {high:.3f}) | "
+                "{median:.3f} |"
+            ).format(
+                pairs=summary["paired"]["paired_passed_runs"],
+                mean=command_paired["mean"],
+                low=command_paired["ci95_low"],
+                high=command_paired["ci95_high"],
+                median=command_paired["median"],
+            ),
+            "",
+            "Negative commands mean `workspace_cli` used fewer total commands on "
+            "paired passing runs.",
+            "",
             "## By Task",
             "",
         ]
     )
     for task, task_summary in summary["by_task"].items():
         task_paired = task_summary["paired"]["workspace_minus_shell_elapsed_seconds"]
+        task_command_paired = task_summary["paired"][
+            "workspace_minus_shell_command_count"
+        ]
         lines.extend(
             [
                 f"### `{task}`",
                 "",
-                "| paired passing runs | mean seconds delta | workspace faster | shell faster |",
-                "| ---: | ---: | ---: | ---: |",
+                "| paired passing runs | mean seconds delta | mean command delta | workspace faster | shell faster |",
+                "| ---: | ---: | ---: | ---: | ---: |",
                 (
-                    "| {pairs} | {mean:.3f} ({low:.3f}, {high:.3f}) | "
-                    "{wins} | {losses} |"
+                    "| {pairs} | {seconds} | {commands} | {wins} | {losses} |"
                 ).format(
                     pairs=task_summary["paired"]["paired_passed_runs"],
-                    mean=task_paired["mean"],
-                    low=task_paired["ci95_low"],
-                    high=task_paired["ci95_high"],
+                    seconds=delta_ci(task_paired),
+                    commands=delta_ci(task_command_paired),
                     wins=task_paired["wins"],
                     losses=task_paired["losses"],
                 ),
