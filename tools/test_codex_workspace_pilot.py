@@ -367,6 +367,43 @@ class CodexWorkspacePilotTests(unittest.TestCase):
             ["./bin/workspace status --json", "python3 -m unittest"],
         )
 
+    def test_workspace_trial_rollback_count_reads_command_output(self) -> None:
+        events = [
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "aggregated_output": json.dumps(
+                        {
+                            "kind": "workspace_trial",
+                            "data": {"rolled_back": True},
+                        }
+                    ),
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "aggregated_output": json.dumps(
+                        {
+                            "kind": "workspace_trial",
+                            "data": {"rolled_back": False},
+                        }
+                    ),
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {"type": "command_execution", "aggregated_output": "not json"},
+            },
+        ]
+
+        self.assertEqual(
+            run_codex_workspace_pilot.workspace_trial_rollback_count(events),
+            1,
+        )
+
     def test_collect_condition_result_marks_expected_diff_scope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             repo = Path(tmp_dir) / "fixture"
@@ -525,12 +562,17 @@ if __name__ == "__main__":
         self.assertIn("Do not read `src/billing.py` or `docs/billing.md`", workspace_prompt)
         self.assertNotIn("`./bin/workspace status --json`", workspace_prompt)
         self.assertIn("replace --stdin", workspace_prompt)
+        self.assertIn("using `find` and `replace` field names", workspace_prompt)
+        self.assertIn("do not use `old`, `new`", workspace_prompt)
+        self.assertIn("do not inspect `./bin/workspace`", workspace_prompt)
         self.assertIn('"replacements"', workspace_prompt)
+        self.assertIn('"find":"LATE_FEE_CAP_CENTS = 1_000"', workspace_prompt)
+        self.assertIn('"replace":"LATE_FEE_CAP_CENTS = 1500"', workspace_prompt)
         self.assertIn("LATE_FEE_CAP_CENTS = 1500", workspace_prompt)
-        self.assertIn("do not shell-escape `$` values", workspace_prompt)
+        self.assertIn("do not shell-escape or split the dollar values", workspace_prompt)
         self.assertIn("do not use a `--` separator", workspace_prompt)
         self.assertIn("do not spend time running", workspace_prompt)
-        self.assertIn("daily rate at 150 cents", workspace_prompt)
+        self.assertIn("daily late-fee rate must stay 150 cents", workspace_prompt)
 
     def test_invoice_tax_prompt_requests_cochange_related_and_impact(self) -> None:
         task = run_codex_workspace_pilot.task_specs()["invoice_tax_sync"]

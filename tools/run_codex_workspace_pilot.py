@@ -1010,17 +1010,21 @@ def task_specs() -> dict[str, TaskSpec]:
                 "documentation text, leaving `LATE_FEE_RATE_CENTS = 150` "
                 "unchanged. Apply the correct fix with `./bin/workspace "
                 "replace --stdin --description \"Apply correct late-fee cap "
-                "fix\" --json` using JSON shaped as "
-                "`{\"replacements\":[...]}`. Use exact replacements for "
-                "`src/billing.py` and `docs/billing.md`: replace "
-                "`LATE_FEE_CAP_CENTS = 1_000` with "
-                "`LATE_FEE_CAP_CENTS = 1500`, and replace the `$10.00` cap text "
-                "with `$15.00` while keeping the daily rate at 150 cents. If "
-                "you use a heredoc, use exactly `./bin/workspace replace "
-                "--stdin --description \"Apply correct late-fee cap fix\" "
-                "--json <<'JSON'` and put the JSON content literally; because "
-                "the `JSON` delimiter is quoted, do not shell-escape `$` values "
-                "in documentation text. Run the "
+                "fix\" --json` using `find` and `replace` field names; do not "
+                "use `old`, `new`, `old_text`, or `new_text`, and do not "
+                "inspect `./bin/workspace` to discover the schema. If you use a "
+                "heredoc, use this exact JSON shape: "
+                "`./bin/workspace replace --stdin --description \"Apply correct "
+                "late-fee cap fix\" --json <<'JSON'\n"
+                "{\"replacements\":[{\"path\":\"src/billing.py\",\"find\":"
+                "\"LATE_FEE_CAP_CENTS = 1_000\",\"replace\":"
+                "\"LATE_FEE_CAP_CENTS = 1500\"},{\"path\":\"docs/billing.md\","
+                "\"find\":\"Late fees are 150 cents per day and capped at "
+                "$10.00.\",\"replace\":\"Late fees are 150 cents per day and "
+                "capped at $15.00.\"}]}\nJSON`. Put the JSON content literally; "
+                "because the `JSON` delimiter is quoted, write `$10.00` and "
+                "`$15.00` literally and do not shell-escape or split the dollar "
+                "values. Run the "
                 "test command exactly as `./bin/workspace run \""
                 f"{TEST_COMMAND}\" --json`; do not use a `--` separator for "
                 "`workspace run`. Then finish with `./bin/workspace diff --json`."
@@ -1231,6 +1235,31 @@ def command_like_values(events: list[dict[str, Any]]) -> list[str]:
     return deduped
 
 
+def workspace_trial_rollback_count(events: list[dict[str, Any]]) -> int:
+    count = 0
+    for event in events:
+        for value in walk_values(event):
+            if not isinstance(value, dict):
+                continue
+            output = value.get("aggregated_output")
+            if not isinstance(output, str):
+                continue
+            try:
+                observation = json.loads(output)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(observation, dict):
+                continue
+            data = observation.get("data")
+            if (
+                observation.get("kind") == "workspace_trial"
+                and isinstance(data, dict)
+                and data.get("rolled_back") is True
+            ):
+                count += 1
+    return count
+
+
 def count_workspace_log_entries(repo: Path) -> int:
     log_path = repo / ".workspace" / "log.jsonl"
     if not log_path.is_file():
@@ -1267,6 +1296,7 @@ def collect_condition_result(
     events = load_jsonl_events(str(raw.get("codex_stdout", "")))
     commands = command_like_values(events)
     operation_counts = workspace_operation_counts(repo)
+    trial_rollback_count = workspace_trial_rollback_count(events)
     test = run_command(
         ["sh", "-c", TEST_COMMAND],
         cwd=repo,
@@ -1296,7 +1326,9 @@ def collect_condition_result(
         "commands": commands,
         "workspace_log_entries": count_workspace_log_entries(repo),
         "workspace_operation_counts": operation_counts,
-        "workspace_rollback_count": operation_counts.get("rollback", 0),
+        "workspace_rollback_count": operation_counts.get("rollback", 0)
+        + trial_rollback_count,
+        "workspace_trial_rollback_count": trial_rollback_count,
         "test_exit_code": test.returncode,
         "test_passed": test.returncode == 0,
         "test_stdout": test.stdout,
