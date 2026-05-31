@@ -14,7 +14,7 @@ from typing import Any
 
 
 PASS_MARKER = "effect threshold check passed"
-EXPECTED_RUN_MANIFEST_SCHEMA_VERSION = 1
+EXPECTED_RUN_MANIFEST_SCHEMA_VERSION = 2
 EXPECTED_EFFECT_METADATA_SCHEMA_VERSION = 2
 EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 7
 FLOAT_TOLERANCE = 1e-9
@@ -23,6 +23,7 @@ ARTIFACT_FILES = {
     "json": "effect.json",
     "markdown": "effect.md",
     "result_summary": "result_summary.json",
+    "paper_summary": "paper_summary.md",
     "thresholds": "thresholds.txt",
 }
 OPTIONAL_ARTIFACT_FILES = {
@@ -36,6 +37,7 @@ REQUIRED_COMMANDS = {
     "check_thresholds",
     "summarize",
     "extract_result_summary",
+    "render_paper_summary",
     "verify_artifacts",
 }
 
@@ -52,6 +54,7 @@ def load_sibling_tool(name: str) -> Any:
 
 check_effect_thresholds = load_sibling_tool("check_effect_thresholds")
 extract_effect_summary = load_sibling_tool("extract_effect_summary")
+render_paper_artifact_summary = load_sibling_tool("render_paper_artifact_summary")
 summarize_effect = load_sibling_tool("summarize_effect")
 
 
@@ -205,6 +208,7 @@ def verify_manifest_commands(
         "check_thresholds": "check_effect_thresholds.py",
         "summarize": "summarize_effect.py",
         "extract_result_summary": "extract_effect_summary.py",
+        "render_paper_summary": "render_paper_artifact_summary.py",
         "verify_artifacts": "verify_effect_artifacts.py",
     }
     for key in sorted(REQUIRED_COMMANDS & set(commands)):
@@ -1084,6 +1088,24 @@ def verify_markdown_matches_report(
         failures.append("effect.md does not match summarize_effect.py output")
 
 
+def verify_paper_summary_matches_result_summary(
+    result_summary: dict[str, Any],
+    paper_summary_path: Path,
+    failures: list[str],
+) -> None:
+    try:
+        actual = paper_summary_path.read_text(encoding="utf-8")
+    except OSError as error:
+        failures.append(f"paper_summary.md could not be read: {error}")
+        return
+    expected = render_paper_artifact_summary.render_summary(result_summary)
+    if actual != expected:
+        failures.append(
+            "paper_summary.md does not match "
+            "render_paper_artifact_summary.py output"
+        )
+
+
 def verify_markdown_residual_count_tables(
     result_summary: dict[str, Any],
     markdown_path: Path,
@@ -1286,6 +1308,11 @@ def verify_artifact_directory(
     verify_residual_pair_conflicts(result_summary, failures)
     verify_result_summary_matches_report(effect_report, result_summary, failures)
     verify_markdown_matches_report(effect_report, artifact_dir / "effect.md", failures)
+    verify_paper_summary_matches_result_summary(
+        result_summary,
+        artifact_dir / "paper_summary.md",
+        failures,
+    )
     verify_markdown_residual_count_tables(
         result_summary,
         artifact_dir / "effect.md",

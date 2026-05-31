@@ -45,9 +45,10 @@ python3 tools/compare_effect_summaries.py \
 The `Paper Effect Artifacts` GitHub workflow runs the clean-machine path on
 demand and weekly. It prepares the public holdout remotes, generates
 `target/effect-paper` with `--require-clean-workspace`, verifies the artifact
-directory, uploads it as a workflow artifact, and writes the headline AP,
-threshold, residual-cluster, and residual pair-conflict diagnostics to the
-GitHub step summary beside the artifact id and digest.
+directory, uploads it as a workflow artifact, and copies the artifact's
+`paper_summary.md` headline AP, threshold, residual-cluster, and residual
+pair-conflict diagnostics to the GitHub step summary beside the artifact id and
+digest.
 
 If those pinned repositories are not already checked out at the manifest paths,
 prepare a local manifest from the recorded remotes before generating artifacts:
@@ -82,7 +83,8 @@ p-values to zero, includes predictable-only clusters retargeted from case-level
 ranking lists, reports residual pair conflicts where the same ordered
 seed/candidate pair appears both as a target and as a residual false positive,
 and emits structured threshold margin entries in a compact machine-readable
-form.
+form. `paper_summary.md` re-renders those headline metrics into a compact
+checksummed Markdown table that travels with downloaded paper artifacts.
 Paper artifact directories also include copies of the local holdout manifest and
 source holdout manifest when available. The run manifest records the exact
 generation commands, verifier command, artifact paths, SHA-256 checksums for
@@ -97,6 +99,7 @@ generation and verification command records, copied holdout entries that match
 `effect.json` metadata,
 recomputed threshold gates, threshold-log re-render consistency with
 `effect.json`, Markdown re-render consistency with `effect.json`,
+paper-summary re-render consistency with `result_summary.json`,
 result-summary consistency with `effect.json`, and
 residual-cluster diagnostic fields for missing predictable/new targets,
 missed-target ranks and scores, score-ranked top-k candidates, and top

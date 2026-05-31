@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render compact GitHub-step-summary metrics for paper effect artifacts."""
+"""Render compact metrics for paper effect artifacts."""
 
 from __future__ import annotations
 

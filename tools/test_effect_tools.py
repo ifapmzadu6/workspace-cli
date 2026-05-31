@@ -50,7 +50,7 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertIn("artifact-digest", workflow)
         self.assertIn("GITHUB_STEP_SUMMARY", workflow)
         self.assertIn("--require-clean-workspace", workflow)
-        self.assertIn("tools/render_paper_artifact_summary.py", workflow)
+        self.assertIn("cat target/effect-paper/paper_summary.md", workflow)
 
     def test_paper_artifact_summary_renders_headline_metrics(self) -> None:
         summary = {
@@ -2194,6 +2194,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
         self.assertEqual(plan["json_path"].name, "effect.json")
         self.assertEqual(plan["markdown_path"].name, "effect.md")
         self.assertEqual(plan["result_summary_path"].name, "result_summary.json")
+        self.assertEqual(plan["paper_summary_path"].name, "paper_summary.md")
         self.assertEqual(plan["threshold_path"].name, "thresholds.txt")
         self.assertNotIn("--require-clean-workspace", plan["verify_command"])
 
@@ -2240,14 +2241,16 @@ class EffectArtifactRunnerTests(unittest.TestCase):
                 plan["threshold_command"],
                 plan["summary_command"],
                 plan["result_summary_command"],
+                plan["paper_summary_command"],
                 plan["verify_command"],
             ])
             self.assertTrue(plan["json_path"].exists())
             self.assertTrue(plan["markdown_path"].exists())
             self.assertTrue(plan["result_summary_path"].exists())
+            self.assertTrue(plan["paper_summary_path"].exists())
             self.assertTrue(plan["threshold_path"].exists())
             run_manifest = json.loads(plan["run_manifest_path"].read_text())
-            self.assertEqual(run_manifest["schema_version"], 1)
+            self.assertEqual(run_manifest["schema_version"], 2)
             self.assertRegex(
                 run_manifest["generated_at"],
                 r"^\d{4}-\d{2}-\d{2}T",
@@ -2261,12 +2264,20 @@ class EffectArtifactRunnerTests(unittest.TestCase):
                 plan["result_summary_command"],
             )
             self.assertEqual(
+                run_manifest["commands"]["render_paper_summary"],
+                plan["paper_summary_command"],
+            )
+            self.assertEqual(
                 run_manifest["commands"]["verify_artifacts"],
                 plan["verify_command"],
             )
             self.assertEqual(
                 run_manifest["result_summary"],
                 str(plan["result_summary_path"]),
+            )
+            self.assertEqual(
+                run_manifest["paper_summary"],
+                str(plan["paper_summary_path"]),
             )
             self.assertEqual(
                 run_manifest["sha256"]["json"],
@@ -2279,6 +2290,10 @@ class EffectArtifactRunnerTests(unittest.TestCase):
             self.assertEqual(
                 run_manifest["sha256"]["result_summary"],
                 run_effect_artifacts.file_sha256(plan["result_summary_path"]),
+            )
+            self.assertEqual(
+                run_manifest["sha256"]["paper_summary"],
+                run_effect_artifacts.file_sha256(plan["paper_summary_path"]),
             )
             self.assertEqual(
                 run_manifest["sha256"]["thresholds"],
@@ -2382,17 +2397,21 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             + "\n",
             "effect.md": self.MARKDOWN_FIXTURE,
             "result_summary.json": json.dumps(self.SUMMARY_FIXTURE) + "\n",
+            "paper_summary.md": render_paper_artifact_summary.render_summary(
+                self.SUMMARY_FIXTURE
+            ),
             "thresholds.txt": "effect threshold check passed\n",
         }
         for filename, content in artifacts.items():
             (output_dir / filename).write_text(content, encoding="utf-8")
 
         run_manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "generated_at": "2026-01-01T00:00:00+00:00",
             "json": str(output_dir / "effect.json"),
             "markdown": str(output_dir / "effect.md"),
             "result_summary": str(output_dir / "result_summary.json"),
+            "paper_summary": str(output_dir / "paper_summary.md"),
             "thresholds": str(output_dir / "thresholds.txt"),
             "holdout_manifest": str(output_dir / "holdout_manifest.json"),
             "paper_manifest": "holdouts.json",
@@ -2414,6 +2433,10 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 "extract_result_summary": [
                     "python3",
                     "tools/extract_effect_summary.py",
+                ],
+                "render_paper_summary": [
+                    "python3",
+                    "tools/render_paper_artifact_summary.py",
                 ],
                 "verify_artifacts": [
                     "python3",
@@ -2502,12 +2525,19 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             json.dumps(summary) + "\n",
             encoding="utf-8",
         )
+        (output_dir / "paper_summary.md").write_text(
+            render_paper_artifact_summary.render_summary(summary),
+            encoding="utf-8",
+        )
         run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
         run_manifest["sha256"]["json"] = verify_effect_artifacts.file_sha256(
             output_dir / "effect.json"
         )
         run_manifest["sha256"]["result_summary"] = (
             verify_effect_artifacts.file_sha256(output_dir / "result_summary.json")
+        )
+        run_manifest["sha256"]["paper_summary"] = verify_effect_artifacts.file_sha256(
+            output_dir / "paper_summary.md"
         )
         (output_dir / "run_manifest.json").write_text(
             json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
@@ -2533,6 +2563,30 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 [],
             )
 
+    def test_artifact_verifier_rejects_stale_paper_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            (output_dir / "paper_summary.md").write_text(
+                "### stale summary\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["paper_summary"] = (
+                verify_effect_artifacts.file_sha256(output_dir / "paper_summary.md")
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any("paper_summary.md does not match" in failure for failure in failures),
+            failures,
+        )
+
     def test_artifact_verifier_requires_run_manifest_schema_and_timestamp(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "artifacts"
@@ -2549,7 +2603,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
 
         self.assertTrue(
             any(
-                "run_manifest.json schema_version must be 1" in failure
+                "run_manifest.json schema_version must be 2" in failure
                 for failure in failures
             ),
             failures,

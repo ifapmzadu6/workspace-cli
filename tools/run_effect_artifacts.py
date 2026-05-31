@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TOOLS_DIR = ROOT / "tools"
 DEFAULT_OUTPUT_DIR = ROOT / "target" / "effect-artifacts"
 DEFAULT_PAPER_MANIFEST = TOOLS_DIR / "effect_paper_holdouts.json"
-RUN_MANIFEST_SCHEMA_VERSION = 1
+RUN_MANIFEST_SCHEMA_VERSION = 2
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -48,6 +48,7 @@ def build_plan(
     json_path = output_dir / "effect.json"
     markdown_path = output_dir / "effect.md"
     result_summary_path = output_dir / "result_summary.json"
+    paper_summary_path = output_dir / "paper_summary.md"
     threshold_path = output_dir / "thresholds.txt"
     run_manifest_path = output_dir / "run_manifest.json"
     holdout_manifest_path = output_dir / "holdout_manifest.json"
@@ -78,6 +79,11 @@ def build_plan(
         str(TOOLS_DIR / "extract_effect_summary.py"),
         str(json_path),
     ]
+    paper_summary_command = [
+        sys.executable,
+        str(TOOLS_DIR / "render_paper_artifact_summary.py"),
+        str(result_summary_path),
+    ]
     verify_command = [
         sys.executable,
         str(TOOLS_DIR / "verify_effect_artifacts.py"),
@@ -91,6 +97,7 @@ def build_plan(
         "json_path": json_path,
         "markdown_path": markdown_path,
         "result_summary_path": result_summary_path,
+        "paper_summary_path": paper_summary_path,
         "threshold_path": threshold_path,
         "run_manifest_path": run_manifest_path,
         "holdout_manifest_path": holdout_manifest_path,
@@ -99,6 +106,7 @@ def build_plan(
         "threshold_command": threshold_command,
         "summary_command": summary_command,
         "result_summary_command": result_summary_command,
+        "paper_summary_command": paper_summary_command,
         "verify_command": verify_command,
         "manifest": manifest,
         "require_holdout_thresholds": manifest is not None,
@@ -138,6 +146,7 @@ def artifact_checksums(plan: dict[str, Any]) -> dict[str, str]:
         "json": file_sha256(plan["json_path"]),
         "markdown": file_sha256(plan["markdown_path"]),
         "result_summary": file_sha256(plan["result_summary_path"]),
+        "paper_summary": file_sha256(plan["paper_summary_path"]),
         "thresholds": file_sha256(plan["threshold_path"]),
     }
     if plan["manifest"] is not None:
@@ -193,6 +202,7 @@ def write_run_manifest(plan: dict[str, Any]) -> None:
         "json": repo_relative(plan["json_path"]),
         "markdown": repo_relative(plan["markdown_path"]),
         "result_summary": repo_relative(plan["result_summary_path"]),
+        "paper_summary": repo_relative(plan["paper_summary_path"]),
         "thresholds": repo_relative(plan["threshold_path"]),
         "paper_manifest": (
             repo_relative(plan["manifest"]) if plan["manifest"] is not None else None
@@ -215,6 +225,7 @@ def write_run_manifest(plan: dict[str, Any]) -> None:
             "check_thresholds": plan["threshold_command"],
             "summarize": plan["summary_command"],
             "extract_result_summary": plan["result_summary_command"],
+            "render_paper_summary": plan["paper_summary_command"],
             "verify_artifacts": plan["verify_command"],
         },
     }
@@ -244,6 +255,11 @@ def run_plan(
         plan["result_summary_path"],
         runner=runner,
     )
+    run_stdout_to_file(
+        plan["paper_summary_command"],
+        plan["paper_summary_path"],
+        runner=runner,
+    )
     write_run_manifest(plan)
     runner(plan["verify_command"], cwd=ROOT, check=True, text=True)
 
@@ -266,7 +282,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_OUTPUT_DIR,
         help=(
             "directory for effect.json, effect.md, result_summary.json, "
-            "thresholds.txt, and run_manifest.json"
+            "paper_summary.md, thresholds.txt, and run_manifest.json"
         ),
     )
     parser.add_argument(

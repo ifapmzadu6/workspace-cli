@@ -54,8 +54,7 @@ jobs:
 
       - name: Summarize paper artifact upload
         run: |
-          python3 tools/render_paper_artifact_summary.py \
-            target/effect-paper/result_summary.json >> "$GITHUB_STEP_SUMMARY"
+          cat target/effect-paper/paper_summary.md >> "$GITHUB_STEP_SUMMARY"
           {
             echo "### Paper effect artifact"
             echo "- artifact id: ${{ steps.upload-paper-artifacts.outputs.artifact-id }}"

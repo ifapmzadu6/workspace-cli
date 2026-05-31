@@ -96,8 +96,8 @@ including minimum AP deltas against static, activity, centrality, direct, and
 PageRank baselines, repo-macro checks that prevent one repository from
 dominating the aggregate, plus Holm-adjusted paired sign-flip p-value ceilings.
 `tools/run_effect_artifacts.py --paper` runs measurement, threshold checking,
-Markdown rendering, and headline JSON extraction into one reproducible artifact
-directory:
+Markdown rendering, headline JSON extraction, and compact paper-summary
+rendering into one reproducible artifact directory:
 
 ```sh
 python3 tools/run_effect_artifacts.py --paper --output-dir target/effect-paper
@@ -155,7 +155,9 @@ cases, with missing counts split into parent-present predictable targets and
 parent-absent new targets, residual pair-conflict diagnostics that flag
 seed/candidate pairs appearing as both targets and residual false positives,
 significant-digit paired p-values, structured threshold margin entries, plus
-the leakage audit.
+the leakage audit. It also writes `paper_summary.md`, a checksummed compact
+Markdown table for reviewers with the headline AP, oracle-normalized AP,
+threshold status, residual clusters, and residual pair-conflict diagnostics.
 Paper artifact directories include copies of the local holdout manifest and
 source holdout manifest when available.
 `run_manifest.json` records the exact commands, artifact paths, and SHA-256
@@ -167,7 +169,8 @@ manifest,
 holdout manifest hashes and holdout entries that match `effect.json` metadata,
 a recorded effect report schema version, a recomputed threshold pass and
 threshold log that re-renders from `effect.json`, a Markdown summary that
-re-renders from `effect.json`, and a result summary that matches `effect.json`,
+re-renders from `effect.json`, a paper summary that re-renders from
+`result_summary.json`, and a result summary that matches `effect.json`,
 including score-ranked residual diagnostics and residual pair-conflict
 diagnostics that line up with each method top-k list. The manifest also records
 the verifier command for artifact consumers.
@@ -176,9 +179,8 @@ used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`. `tools/prepare_effect_holdouts.py`
 can clone or refresh those repositories from their recorded public HTTPS remotes
 and write a local manifest for the artifact runner. The GitHub paper workflow
-also writes a compact step summary with headline AP, threshold status,
-residual-cluster counts, and residual pair-conflict counts beside the artifact
-id and digest.
+also copies `paper_summary.md` into the step summary beside the artifact id and
+digest.
 Effect reports include reproducibility metadata with the workspace commit,
 dirty state, effect report schema version, resampling counts, exact sign-flip
 p-value method, holdout manifest hash, source manifest hash for prepared local
