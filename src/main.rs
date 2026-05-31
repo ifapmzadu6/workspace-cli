@@ -306,6 +306,9 @@ struct RelatedArgs {
     /// Use .workspace/index/cochange.json instead of scanning git log.
     #[arg(long)]
     use_index: bool,
+    /// Create or refresh the co-change index before index-backed ranking.
+    #[arg(long)]
+    ensure_index: bool,
     /// Include bounded content for top related files in the JSON response.
     #[arg(long)]
     include_content: bool,
@@ -345,6 +348,9 @@ struct ImpactArgs {
     /// Use .workspace/index/cochange.json instead of scanning git log.
     #[arg(long)]
     use_index: bool,
+    /// Create or refresh the co-change index before index-backed ranking.
+    #[arg(long)]
+    ensure_index: bool,
 }
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -2321,7 +2327,7 @@ fn observed_related(
             target,
             &args.by,
             args.rank,
-            args.use_index,
+            args.use_index || args.ensure_index,
             args.max_commits,
             args.max_files_per_commit,
         ))
@@ -2376,7 +2382,7 @@ fn observed_impact(workspace: &Workspace, args: &ImpactArgs) -> Result<ImpactDat
         Ok(impact_data_for_non_repo(
             &args.by,
             args.rank,
-            args.use_index,
+            args.use_index || args.ensure_index,
             args.max_commits,
             args.max_files_per_commit,
         ))
@@ -3559,7 +3565,7 @@ fn related_by_cochange(
     args: &RelatedArgs,
     hybrid_direct_weight: Option<f64>,
 ) -> Result<RelatedData> {
-    let should_use_index = uses_cochange_index(args.use_index, args.rank);
+    let should_use_index = uses_cochange_index(args.use_index || args.ensure_index, args.rank);
     if !should_use_index && let Some(cli) = RelatedCli::detect() {
         let output = cli.query(
             &workspace.root,
@@ -3580,7 +3586,12 @@ fn related_by_cochange(
     }
 
     if should_use_index {
-        let index = read_cochange_index(workspace)?;
+        let index = cochange_index_for_query(
+            workspace,
+            args.ensure_index,
+            args.max_commits,
+            args.max_files_per_commit,
+        )?;
         let ranking = match args.rank {
             RankingMethod::Direct => rank_cochanges_from_index(&index, target, args.max_results),
             RankingMethod::Pagerank => {
@@ -3888,6 +3899,53 @@ fn read_cochange_index(workspace: &Workspace) -> Result<CochangeIndex> {
     read_cochange_index_from_path(&path)
 }
 
+fn cochange_index_for_query(
+    workspace: &Workspace,
+    ensure_index: bool,
+    max_commits: usize,
+    max_files_per_commit: usize,
+) -> Result<CochangeIndex> {
+    if ensure_index {
+        ensure_fresh_cochange_index(workspace, max_commits, max_files_per_commit)
+    } else {
+        read_cochange_index(workspace)
+    }
+}
+
+fn ensure_fresh_cochange_index(
+    workspace: &Workspace,
+    max_commits: usize,
+    max_files_per_commit: usize,
+) -> Result<CochangeIndex> {
+    let current_head = git_current_head(workspace)?;
+    if let Ok(index) = read_cochange_index(workspace)
+        && cochange_index_matches_options(
+            &index,
+            current_head.as_deref(),
+            max_commits,
+            max_files_per_commit,
+        )
+    {
+        return Ok(index);
+    }
+
+    ensure_log_writable(workspace)?;
+    let index = build_cochange_index(workspace, max_commits, max_files_per_commit)?;
+    write_workspace_cochange_index(workspace, &index)?;
+    Ok(index)
+}
+
+fn cochange_index_matches_options(
+    index: &CochangeIndex,
+    current_head: Option<&str>,
+    max_commits: usize,
+    max_files_per_commit: usize,
+) -> bool {
+    index.head.as_deref() == current_head
+        && index.max_commits == max_commits
+        && index.max_files_per_commit == max_files_per_commit
+}
+
 fn read_cochange_index_from_path(path: &Path) -> Result<CochangeIndex> {
     let file = fs::File::open(path)
         .with_context(|| format!("failed to read co-change index {}", path.display()))?;
@@ -3973,7 +4031,7 @@ fn impact_by_cochange(
 ) -> Result<ImpactData> {
     let seed_files = git_changed_files(workspace)?;
     let seed_summary = SeedFileSummary::from_seed_files(&seed_files, MAX_CHANGED_FILES);
-    let should_use_index = uses_cochange_index(args.use_index, args.rank);
+    let should_use_index = uses_cochange_index(args.use_index || args.ensure_index, args.rank);
     if !should_use_index
         && let Some(cli) = RelatedCli::detect()
         && let Some(data) = impact_by_related_cli(
@@ -3990,7 +4048,12 @@ fn impact_by_cochange(
     }
 
     if should_use_index {
-        let index = read_cochange_index(workspace)?;
+        let index = cochange_index_for_query(
+            workspace,
+            args.ensure_index,
+            args.max_commits,
+            args.max_files_per_commit,
+        )?;
         let ranking = match args.rank {
             RankingMethod::Direct => {
                 rank_cochange_impact_from_index(&index, &seed_files, args.max_results)
@@ -8849,6 +8912,7 @@ rename to new name.txt
             rank: RankingMethod::Pagerank,
             hybrid_direct_weight: None,
             use_index: false,
+            ensure_index: false,
             include_content: false,
             max_content_files: DEFAULT_RELATED_CONTENT_FILES,
             path: PathBuf::from("src/main.rs"),
@@ -8883,6 +8947,7 @@ rename to new name.txt
             rank: RankingMethod::Direct,
             hybrid_direct_weight: None,
             use_index: true,
+            ensure_index: false,
         };
         let impact =
             observed_impact_args(&workspace, &impact_args).expect("impact data should be built");
@@ -8908,6 +8973,7 @@ rename to new name.txt
             rank: RankingMethod::Direct,
             hybrid_direct_weight: None,
             use_index: true,
+            ensure_index: false,
         };
         let error = match observed_impact_args(&workspace, &invalid_impact_args) {
             Ok(_) => panic!("impact without --diff should fail"),

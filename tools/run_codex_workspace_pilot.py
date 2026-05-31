@@ -666,11 +666,12 @@ def task_specs() -> dict[str, TaskSpec]:
                 "Use `./bin/workspace` for workspace observation and verification. "
                 "The command syntax below is complete; do not spend time running "
                 "`workspace --help`, command-specific `--help`, or inspecting "
-                "`.workspace` metadata. Start with "
-                "`./bin/workspace status --json`, build the co-change index with "
-                "`./bin/workspace index cochange --json`, and use "
+                "`.workspace` metadata. Do not run `workspace status` or "
+                "`workspace index cochange` before the related-file query; "
+                "`--ensure-index` creates or refreshes the co-change index in "
+                "the same command. Start with "
                 "`./bin/workspace related tests/test_invoice_pipeline.py --by "
-                "cochange --use-index --rank hybrid --max-results 4 "
+                "cochange --ensure-index --max-commits 1000 --rank hybrid --max-results 4 "
                 "--include-content --max-content-files 4 --json` to find and "
                 "read the policy, label, and documentation files that usually "
                 "change with this test. Use returned `data.included_content` "
@@ -684,8 +685,9 @@ def task_specs() -> dict[str, TaskSpec]:
                 "temporary patch file after it applies. Run the test command "
                 f"exactly as `./bin/workspace run \"{TEST_COMMAND}\" --json`; "
                 "do not use a `--` separator for `workspace run`. Then finish with "
-                "`./bin/workspace impact --diff --by cochange --use-index --rank "
-                "hybrid --json` and `./bin/workspace diff --json`."
+                "`./bin/workspace impact --diff --by cochange --ensure-index "
+                "--max-commits 1000 --rank hybrid --json` and "
+                "`./bin/workspace diff --json`."
             ),
             create_repo=create_invoice_tax_fixture_repo,
             expected_changed_files=(

@@ -135,10 +135,10 @@ Codex to update tax configuration, invoice-label configuration, and two
 documentation files after an EU digital VAT policy change. The fixture includes
 shipping and promotion decoys, and its history co-changes
 `tests/test_invoice_pipeline.py` with the four target files. The workspace run
-uses `workspace index cochange`, `workspace related
-tests/test_invoice_pipeline.py --by cochange --use-index --rank hybrid
---include-content`, `workspace patch`, `workspace run`, `workspace impact
---diff`, and `workspace diff`.
+uses `workspace related tests/test_invoice_pipeline.py --by cochange
+--ensure-index --max-commits 1000 --rank hybrid --include-content`,
+`workspace patch`, `workspace run`, `workspace impact --diff --ensure-index`,
+and `workspace diff`.
 
 An initial single run solved the task in both conditions but showed avoidable
 workspace overhead: `workspace_cli` took 122.310 seconds and 15 commands versus
@@ -178,6 +178,26 @@ a bootstrap interval of `(7.270, 10.277)`, and `workspace_cli` used four fewer
 commands on average than `shell_only`. This is a real overhead reduction and a
 clearer agent-efficiency path, but it is still not an elapsed-time win.
 
+The remaining avoidable overhead was the separate `workspace status` and
+`workspace index cochange` setup before the related-file query. The CLI now
+supports `--ensure-index` on `workspace related` and `workspace impact`, creating
+or refreshing the co-change index inside the same observation. A single invoice
+run with `related --ensure-index --include-content` improved `workspace_cli` to
+57.373 seconds, 6 total commands, and 5 workspace commands. The four-run suite
+then showed stable command-count savings and elapsed-time parity:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 4 | 1.000 | 1.000 | 64.912 (58.788, 73.880) | 11.750 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 4 | 1.000 | 1.000 | 65.351 (56.602, 72.290) | 6.250 | 5.000 | 5.000 | 0.000 |
+
+The paired timing delta was `workspace_cli - shell_only = +0.439s` with a
+bootstrap interval of `(-9.344, 10.223)`; `workspace_cli` was faster in two
+paired runs and `shell_only` was faster in two. The elapsed-time result is
+therefore neutral, not a statistically supported speedup. The command-count
+result is stronger: `workspace_cli` used 5.5 fewer commands on average while
+maintaining perfect pass rate and expected diff scope.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -195,10 +215,11 @@ entries and no `operation log unreadable` status.
 - The timing evidence is currently negative or mixed: simple checkout and
   co-change tasks were slower with `workspace-cli`, a single rollback run was
   faster, and the bytecode-off two-run rollback suites were slower. Tightening
-  prompts and adding `related --include-content` cut avoidable workspace
-  overhead substantially, and the larger invoice task confirmed multi-file scope
-  correctness, but the paper should not claim elapsed-time speedups from these
-  pilots yet.
+  prompts plus adding `related --include-content` and `--ensure-index` cut
+  avoidable workspace overhead substantially. On the larger invoice task,
+  `workspace_cli` reached elapsed-time parity while using far fewer commands and
+  preserving multi-file diff-scope correctness, but the paper should not claim a
+  statistically supported elapsed-time speedup from these pilots yet.
 
 ## Next Required Step
 

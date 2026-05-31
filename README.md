@@ -243,6 +243,7 @@ workspace related src/config.rs --by cochange --use-index
 workspace related src/config.rs --by cochange --rank pagerank
 workspace related src/config.rs --by cochange --rank hybrid
 workspace related src/config.rs --by cochange --rank hybrid --hybrid-direct-weight 0.25
+workspace related src/config.rs --by cochange --rank hybrid --ensure-index --json
 workspace related src/config.rs --by cochange --rank hybrid --include-content --max-content-files 4 --json
 ```
 
@@ -252,6 +253,9 @@ bounded summary of the saved index; the full edge list is persisted under
 `.workspace/index/cochange.json` for later related/impact queries.
 Use `--include-content` when an agent needs to inspect the top related files in
 the same observation; content is bounded with the same limit as `workspace read`.
+Use `--ensure-index` to create or refresh the co-change index inside the
+`related` or `impact` call instead of issuing a separate
+`workspace index cochange` command.
 
 `--use-index`, `--rank pagerank`, and `--rank hybrid` use the saved co-change
 graph to propagate from seed files through the graph. This can surface files

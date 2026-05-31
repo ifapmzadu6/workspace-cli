@@ -193,13 +193,6 @@ class CodexWorkspacePilotTests(unittest.TestCase):
                 capture_output=True,
                 check=False,
             )
-            index_result = subprocess.run(
-                ["./bin/workspace", "index", "cochange", "--json"],
-                cwd=repo,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
             related_result = subprocess.run(
                 [
                     "./bin/workspace",
@@ -207,7 +200,9 @@ class CodexWorkspacePilotTests(unittest.TestCase):
                     "tests/test_invoice_pipeline.py",
                     "--by",
                     "cochange",
-                    "--use-index",
+                    "--ensure-index",
+                    "--max-commits",
+                    "1000",
                     "--rank",
                     "hybrid",
                     "--max-results",
@@ -225,8 +220,8 @@ class CodexWorkspacePilotTests(unittest.TestCase):
 
             self.assertNotEqual(test_result.returncode, 0)
             self.assertIn("2100 != 2200", test_result.stderr)
-            self.assertEqual(index_result.returncode, 0, index_result.stderr)
             self.assertEqual(related_result.returncode, 0, related_result.stderr)
+            self.assertTrue((repo / ".workspace" / "index" / "cochange.json").is_file())
             related = json.loads(related_result.stdout)
             included_content = {
                 item["path"]: item["content"]
@@ -420,7 +415,9 @@ if __name__ == "__main__":
             prompt.prompt for prompt in prompts if prompt.name == "workspace_cli"
         )
 
-        self.assertIn("index cochange", workspace_prompt)
+        self.assertIn("--ensure-index", workspace_prompt)
+        self.assertNotIn("`./bin/workspace status --json`", workspace_prompt)
+        self.assertNotIn("`./bin/workspace index cochange --json`", workspace_prompt)
         self.assertIn("related tests/test_invoice_pipeline.py", workspace_prompt)
         self.assertIn("--include-content", workspace_prompt)
         self.assertIn("data.included_content", workspace_prompt)

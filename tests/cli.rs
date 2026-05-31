@@ -582,6 +582,45 @@ fn index_related_impact_and_status_cover_cochange_flow() {
     let missing_status = run_workspace(root, &["status", "--json"]);
     assert_eq!(missing_status["data"]["index_status"]["status"], "missing");
 
+    let ensured_related = run_workspace(
+        root,
+        &[
+            "related",
+            "src/a.rs",
+            "--by",
+            "cochange",
+            "--rank",
+            "hybrid",
+            "--ensure-index",
+            "--max-commits",
+            "1000",
+            "--max-results",
+            "1",
+            "--include-content",
+            "--max-content-files",
+            "1",
+            "--json",
+        ],
+    );
+    assert_eq!(
+        ensured_related["data"]["relationship_source"],
+        "cochange-index"
+    );
+    assert_eq!(ensured_related["data"]["ranking"], "hybrid");
+    assert_eq!(
+        ensured_related["data"]["included_content"][0]["path"],
+        "src/b.rs"
+    );
+    assert!(
+        ensured_related["data"]["included_content"][0]["content"]
+            .as_str()
+            .expect("included content should be a string")
+            .contains("b3")
+    );
+    let ensured_status = run_workspace(root, &["status", "--json"]);
+    assert_eq!(ensured_status["data"]["index_status"]["status"], "fresh");
+    assert_eq!(ensured_status["data"]["index_status"]["fresh"], true);
+
     let index = run_workspace(root, &["index", "cochange", "--json"]);
     assert_eq!(index["kind"], "workspace_index_cochange");
     assert_eq!(index["data"]["commits_indexed"], 3);
