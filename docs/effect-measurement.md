@@ -76,8 +76,10 @@ predictable/new target provenance, false-positive counts, and top non-targets
 occupying the method's top-k list. It preserves paired
 sign-flip p-values with significant digits instead of rounding very small
 p-values to zero, includes predictable-only clusters retargeted from case-level
-ranking lists, and emits structured threshold margin entries in a compact
-machine-readable form.
+ranking lists, reports residual pair conflicts where the same ordered
+seed/candidate pair appears both as a target and as a residual false positive,
+and emits structured threshold margin entries in a compact machine-readable
+form.
 Paper artifact directories also include copies of the local holdout manifest and
 source holdout manifest when available. The run manifest records the exact
 generation commands, verifier command, artifact paths, SHA-256 checksums for
@@ -777,9 +779,15 @@ the same failure mode: it recovers the predictable CI target for the
 the same repo/commit residual gap clusters with missing predictable/new target
 splits, missed-target diagnostic ranks/scores, score-ranked top-k candidates,
 top non-targets, and aggregate missing/false-positive counts split by
-predictable/new target provenance, plus the
-predictable-only retargeted clusters, so this diagnosis is reproducible
-directly from the paper artifact.
+predictable/new target provenance. They also emit residual pair-conflict
+diagnostics; in the current artifact, for example, the ordered
+`package.json -> package-lock.json` pair is a true target in
+`0387cf308499` and `6a2977eb724e` but a residual false positive in
+`21764e9cfbe3` and `9631a65ab479`, while the `src/index.ts -> README.md`
+and `test/extract.test.ts -> README.md` pairs are targets in `21764e9cfbe3`
+and residual false positives in `0387cf308499`. This makes the remaining
+static-prior tradeoff reproducible directly from the paper artifact, including
+the predictable-only retargeted slice.
 
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and

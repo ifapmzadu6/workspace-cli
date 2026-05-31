@@ -486,6 +486,114 @@ def residual_gap_clusters(
     )[:limit]
 
 
+def residual_pair_conflicts(
+    measurements: list[dict[str, Any]],
+    *,
+    expected_key: str = "expected",
+    retarget_metrics: bool = False,
+    method: str = "workspace_related_hybrid",
+    oracle_method: str = "history_oracle_ceiling",
+    limit: int = 12,
+    commit_limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Find seed/candidate pairs that are both targets and residual false positives."""
+
+    true_targets: dict[tuple[str, str, str], set[str]] = {}
+    false_positives: dict[tuple[str, str, str], set[str]] = {}
+    repos: dict[tuple[str, str, str], tuple[str | None, str | None]] = {}
+
+    for measurement in measurements:
+        if measurement.get("metric") != "repo_temporal_holdout":
+            continue
+        k = int(measurement.get("k", 5))
+        metric = f"average_precision_at_{k}"
+        for case in measurement.get("cases", []):
+            seed = case.get("seed")
+            commit = case.get("heldout_commit")
+            if not isinstance(seed, str) or not isinstance(commit, str) or not commit:
+                continue
+            expected = [
+                path for path in case.get(expected_key, []) if isinstance(path, str)
+            ]
+            if not expected:
+                continue
+            methods = case.get("methods")
+            if not isinstance(methods, dict):
+                continue
+            method_summary = methods.get(method)
+            oracle_summary = methods.get(oracle_method)
+            if not isinstance(method_summary, dict) or not isinstance(
+                oracle_summary,
+                dict,
+            ):
+                continue
+            method_top = [
+                path for path in method_summary.get("top", []) if isinstance(path, str)
+            ]
+            oracle_top = [
+                path for path in oracle_summary.get("top", []) if isinstance(path, str)
+            ]
+            if retarget_metrics:
+                method_ap = average_precision_at_k(method_top, expected, k)
+                oracle_ap = average_precision_at_k(oracle_top, expected, k)
+                if method_ap is None or oracle_ap is None:
+                    continue
+            else:
+                if metric not in method_summary or metric not in oracle_summary:
+                    continue
+                method_ap = float(method_summary[metric])
+                oracle_ap = float(oracle_summary[metric])
+
+            repo = case.get("repo") or measurement.get("repo")
+            repo_key = repo if isinstance(repo, str) else ""
+            expected_set = set(expected)
+            for candidate in expected_set:
+                key = (repo_key, seed, candidate)
+                true_targets.setdefault(key, set()).add(commit)
+                repos[key] = (repo if isinstance(repo, str) else None, repo_name(repo))
+
+            if float(oracle_ap) - float(method_ap) <= 0.0:
+                continue
+            for candidate in method_top[:k]:
+                if candidate in expected_set:
+                    continue
+                key = (repo_key, seed, candidate)
+                false_positives.setdefault(key, set()).add(commit)
+                repos[key] = (repo if isinstance(repo, str) else None, repo_name(repo))
+
+    rows = []
+    for key in sorted(set(true_targets) & set(false_positives)):
+        repo_key, seed, candidate = key
+        repo, repo_name_value = repos.get(key, (repo_key or None, repo_name(repo_key)))
+        true_commits = sorted(true_targets[key])
+        false_commits = sorted(false_positives[key])
+        rows.append(
+            {
+                "repo": repo,
+                "repo_name": repo_name_value,
+                "seed": seed,
+                "candidate": candidate,
+                "expected_key": expected_key,
+                "method": method,
+                "true_target_count": len(true_commits),
+                "residual_false_positive_count": len(false_commits),
+                "true_target_commits": true_commits[:commit_limit],
+                "residual_false_positive_commits": false_commits[:commit_limit],
+            }
+        )
+
+    return sorted(
+        rows,
+        key=lambda row: (
+            -row["residual_false_positive_count"],
+            -row["true_target_count"],
+            str(row.get("repo_name") or ""),
+            row["seed"],
+            row["candidate"],
+        ),
+    )[:limit]
+
+
 def path_count_rows(
     cases: list[dict[str, Any]],
     field: str,
@@ -703,6 +811,9 @@ def headline_holdout_summary(holdout: dict[str, Any]) -> dict[str, Any]:
     clusters = residual_gap_clusters([holdout])
     if clusters:
         result["residual_gap_clusters"] = clusters
+    pair_conflicts = residual_pair_conflicts([holdout])
+    if pair_conflicts:
+        result["residual_pair_conflicts"] = pair_conflicts
     predictable = holdout.get("predictable_only")
     if isinstance(predictable, dict):
         result["predictable_only"] = headline_holdout_summary(predictable)
@@ -730,10 +841,20 @@ def extract_summary(report: dict[str, Any]) -> dict[str, Any]:
                 )
                 if clusters:
                     predictable["residual_gap_clusters"] = clusters
+                pair_conflicts = residual_pair_conflicts(
+                    [measurement],
+                    expected_key="predictable_expected",
+                    retarget_metrics=True,
+                )
+                if pair_conflicts:
+                    predictable["residual_pair_conflicts"] = pair_conflicts
             holdout_summary["per_repo"].append(repo_summary)
         clusters = residual_gap_clusters(repo_measurements)
         if clusters:
             holdout_summary["residual_gap_clusters"] = clusters
+        pair_conflicts = residual_pair_conflicts(repo_measurements)
+        if pair_conflicts:
+            holdout_summary["residual_pair_conflicts"] = pair_conflicts
         predictable = holdout_summary.get("predictable_only")
         if isinstance(predictable, dict):
             clusters = residual_gap_clusters(
@@ -743,6 +864,13 @@ def extract_summary(report: dict[str, Any]) -> dict[str, Any]:
             )
             if clusters:
                 predictable["residual_gap_clusters"] = clusters
+            pair_conflicts = residual_pair_conflicts(
+                repo_measurements,
+                expected_key="predictable_expected",
+                retarget_metrics=True,
+            )
+            if pair_conflicts:
+                predictable["residual_pair_conflicts"] = pair_conflicts
     return {
         "schema_version": SCHEMA_VERSION,
         "metadata": report.get("metadata", {}),

@@ -1096,6 +1096,142 @@ def residual_gap_cluster_entries(
     )[:limit]
 
 
+def residual_pair_conflict_entries(
+    report: dict[str, Any],
+    *,
+    expected_key: str = "expected",
+    retarget_metrics: bool = False,
+    method: str = "workspace_related_hybrid",
+    oracle_method: str = "history_oracle_ceiling",
+    limit: int = 12,
+    commit_limit: int = 4,
+) -> list[dict[str, Any]]:
+    holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
+    if holdout is None:
+        return []
+    k = holdout["k"]
+    metric = f"average_precision_at_{k}"
+    true_targets: dict[tuple[str, str, str], set[str]] = {}
+    false_positives: dict[tuple[str, str, str], set[str]] = {}
+
+    for measurement in report["measurements"]:
+        if measurement.get("metric") != "repo_temporal_holdout":
+            continue
+        repo = repo_label(str(measurement.get("repo", "")))
+        for case in measurement.get("cases", []):
+            seed = case.get("seed")
+            commit = short_commit(case.get("heldout_commit"))
+            if not isinstance(seed, str) or not commit:
+                continue
+            expected = set(case.get(expected_key, []))
+            if not expected:
+                continue
+            methods = case.get("methods", {})
+            method_summary = methods.get(method)
+            oracle_summary = methods.get(oracle_method)
+            if not method_summary or not oracle_summary:
+                continue
+            method_top = [str(path) for path in method_summary.get("top", [])]
+            oracle_top = [str(path) for path in oracle_summary.get("top", [])]
+            if retarget_metrics:
+                method_ap = average_precision_at_k(method_top, expected, k)
+                oracle_ap = average_precision_at_k(oracle_top, expected, k)
+            else:
+                method_ap = float(method_summary[metric])
+                oracle_ap = float(oracle_summary[metric])
+
+            for candidate in expected:
+                true_targets.setdefault((repo, seed, str(candidate)), set()).add(
+                    commit
+                )
+
+            if oracle_ap - method_ap <= 0.0:
+                continue
+            for candidate in method_top[:k]:
+                if candidate not in expected:
+                    false_positives.setdefault((repo, seed, candidate), set()).add(
+                        commit
+                    )
+
+    rows = []
+    for key in sorted(set(true_targets) & set(false_positives)):
+        repo, seed, candidate = key
+        true_commits = sorted(true_targets[key])
+        false_commits = sorted(false_positives[key])
+        rows.append(
+            {
+                "repo": repo,
+                "seed": seed,
+                "candidate": candidate,
+                "true_target_count": len(true_commits),
+                "residual_false_positive_count": len(false_commits),
+                "true_target_commits": true_commits[:commit_limit],
+                "residual_false_positive_commits": false_commits[:commit_limit],
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            -row["residual_false_positive_count"],
+            -row["true_target_count"],
+            row["repo"],
+            row["seed"],
+            row["candidate"],
+        ),
+    )[:limit]
+
+
+def render_residual_pair_conflict_table(
+    report: dict[str, Any],
+    title: str,
+    *,
+    expected_key: str = "expected",
+    retarget_metrics: bool = False,
+    limit: int = 12,
+) -> str:
+    holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
+    if holdout is None:
+        return ""
+    k = holdout["k"]
+    entries = residual_pair_conflict_entries(
+        report,
+        expected_key=expected_key,
+        retarget_metrics=retarget_metrics,
+        limit=limit,
+    )
+    if not entries:
+        return ""
+    rows = [
+        [
+            entry["repo"],
+            entry["seed"],
+            entry["candidate"],
+            str(entry["true_target_count"]),
+            str(entry["residual_false_positive_count"]),
+            fmt_path_list(entry["true_target_commits"], limit=3),
+            fmt_path_list(entry["residual_false_positive_commits"], limit=3),
+        ]
+        for entry in entries
+    ]
+    return "\n".join(
+        [
+            f"## {title} Residual Pair Conflicts @{k}",
+            markdown_table(
+                [
+                    "repo",
+                    "seed",
+                    "candidate",
+                    "true targets",
+                    "residual false positives",
+                    "true commits",
+                    "false-positive commits",
+                ],
+                rows,
+            ),
+        ]
+    )
+
+
 def render_residual_gap_cluster_table(
     report: dict[str, Any],
     title: str,
@@ -1443,6 +1579,12 @@ def render_report(report: dict[str, Any]) -> str:
         )
         if residual_clusters:
             sections.append(residual_clusters)
+        residual_pair_conflicts = render_residual_pair_conflict_table(
+            report,
+            "Cross-Repo Temporal Holdout",
+        )
+        if residual_pair_conflicts:
+            sections.append(residual_pair_conflicts)
         case_deltas = render_case_delta_table(
             report,
             "Cross-Repo Temporal Holdout",
@@ -1542,6 +1684,14 @@ def render_report(report: dict[str, Any]) -> str:
             )
             if predictable_residual_clusters:
                 sections.append(predictable_residual_clusters)
+            predictable_residual_pair_conflicts = render_residual_pair_conflict_table(
+                report,
+                "Predictable Cross-Repo Temporal Holdout",
+                expected_key="predictable_expected",
+                retarget_metrics=True,
+            )
+            if predictable_residual_pair_conflicts:
+                sections.append(predictable_residual_pair_conflicts)
             predictable_case_deltas = render_case_delta_table(
                 report,
                 "Predictable Cross-Repo Temporal Holdout",

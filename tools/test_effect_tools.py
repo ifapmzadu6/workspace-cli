@@ -743,6 +743,67 @@ class SummaryFormattingTests(unittest.TestCase):
             predictable_table,
         )
 
+    def test_residual_pair_conflict_table_reports_ambiguous_pairs(self) -> None:
+        report = {
+            "measurements": [
+                {
+                    "metric": "repo_temporal_holdout_aggregate",
+                    "k": 5,
+                },
+                {
+                    "metric": "repo_temporal_holdout",
+                    "repo": "/tmp/example",
+                    "cases": [
+                        {
+                            "repo": "/tmp/example",
+                            "heldout_commit": "aaa111",
+                            "seed": "package.json",
+                            "expected": ["package-lock.json"],
+                            "predictable_expected": ["package-lock.json"],
+                            "methods": {
+                                "workspace_related_hybrid": {
+                                    "average_precision_at_5": 1.0,
+                                    "top": ["package-lock.json"],
+                                },
+                                "history_oracle_ceiling": {
+                                    "average_precision_at_5": 1.0,
+                                    "top": ["package-lock.json"],
+                                },
+                            },
+                        },
+                        {
+                            "repo": "/tmp/example",
+                            "heldout_commit": "bbb222",
+                            "seed": "package.json",
+                            "expected": ["README.md"],
+                            "predictable_expected": ["README.md"],
+                            "methods": {
+                                "workspace_related_hybrid": {
+                                    "average_precision_at_5": 0.5,
+                                    "top": ["package-lock.json", "README.md"],
+                                },
+                                "history_oracle_ceiling": {
+                                    "average_precision_at_5": 1.0,
+                                    "top": ["README.md"],
+                                },
+                            },
+                        },
+                    ],
+                },
+            ],
+        }
+
+        table = summarize_effect.render_residual_pair_conflict_table(
+            report,
+            "Holdout",
+        )
+
+        self.assertIn("Holdout Residual Pair Conflicts @5", table)
+        self.assertIn(
+            "| example | package.json | package-lock.json | 1 | 1 | aaa111 | bbb222 |",
+            table,
+        )
+
     def test_per_repo_holdout_table_includes_static_baselines(self) -> None:
         def method(ap: float) -> dict:
             return {
@@ -829,6 +890,80 @@ class SummaryFormattingTests(unittest.TestCase):
 
 
 class EffectSummaryExtractionTests(unittest.TestCase):
+    def test_extract_summary_includes_residual_pair_conflicts(self) -> None:
+        report = {
+            "metadata": {},
+            "measurements": [
+                {
+                    "metric": "repo_temporal_holdout_aggregate",
+                    "k": 5,
+                    "aggregate": {},
+                },
+                {
+                    "metric": "repo_temporal_holdout",
+                    "repo": "/tmp/example",
+                    "k": 5,
+                    "cases": [
+                        {
+                            "repo": "/tmp/example",
+                            "heldout_commit": "aaa111",
+                            "seed": "package.json",
+                            "expected": ["package-lock.json"],
+                            "predictable_expected": ["package-lock.json"],
+                            "methods": {
+                                "workspace_related_hybrid": {
+                                    "average_precision_at_5": 1.0,
+                                    "top": ["package-lock.json"],
+                                },
+                                "history_oracle_ceiling": {
+                                    "average_precision_at_5": 1.0,
+                                    "top": ["package-lock.json"],
+                                },
+                            },
+                        },
+                        {
+                            "repo": "/tmp/example",
+                            "heldout_commit": "bbb222",
+                            "seed": "package.json",
+                            "expected": ["README.md"],
+                            "predictable_expected": ["README.md"],
+                            "methods": {
+                                "workspace_related_hybrid": {
+                                    "average_precision_at_5": 0.5,
+                                    "top": ["package-lock.json", "README.md"],
+                                },
+                                "history_oracle_ceiling": {
+                                    "average_precision_at_5": 1.0,
+                                    "top": ["README.md"],
+                                },
+                            },
+                        },
+                    ],
+                },
+            ],
+        }
+
+        summary = extract_effect_summary.extract_summary(report)
+        conflicts = summary["repo_temporal_holdout"]["residual_pair_conflicts"]
+
+        self.assertEqual(
+            conflicts,
+            [
+                {
+                    "repo": "/tmp/example",
+                    "repo_name": "example",
+                    "seed": "package.json",
+                    "candidate": "package-lock.json",
+                    "expected_key": "expected",
+                    "method": "workspace_related_hybrid",
+                    "true_target_count": 1,
+                    "residual_false_positive_count": 1,
+                    "true_target_commits": ["aaa111"],
+                    "residual_false_positive_commits": ["bbb222"],
+                }
+            ],
+        )
+
     def test_extract_summary_includes_headline_holdout_metrics(self) -> None:
         report = {
             "metadata": {"workspace_commit": "abcdef"},

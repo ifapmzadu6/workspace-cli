@@ -152,8 +152,10 @@ per-repository holdout results, oracle-normalized AP gaps, residual gap
 clusters including predictable-only retargeted gaps, score-ranked top-k
 diagnostics and aggregate missing/false-positive counts for the worst residual
 cases, with missing counts split into parent-present predictable targets and
-parent-absent new targets, significant-digit paired p-values, structured
-threshold margin entries, plus the leakage audit.
+parent-absent new targets, residual pair-conflict diagnostics that flag
+seed/candidate pairs appearing as both targets and residual false positives,
+significant-digit paired p-values, structured threshold margin entries, plus
+the leakage audit.
 Paper artifact directories include copies of the local holdout manifest and
 source holdout manifest when available.
 `run_manifest.json` records the exact commands, artifact paths, and SHA-256
