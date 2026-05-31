@@ -97,6 +97,7 @@ const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.9;
 const RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER: f64 = 1.5;
+const RELATED_HYBRID_SOURCE_CHANGELOG_SCORE_MULTIPLIER: f64 = 1.4;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
@@ -4672,6 +4673,9 @@ fn related_hybrid_path_score_multiplier(
     {
         multiplier *= RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0 && is_source_changelog_pair(target, candidate) {
+        multiplier *= RELATED_HYBRID_SOURCE_CHANGELOG_SCORE_MULTIPLIER;
+    }
     if direct_edge_weight > 0.0 && shares_parent_and_name_token(target, candidate) {
         multiplier *= RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER;
     }
@@ -4774,8 +4778,20 @@ fn is_root_documentation_pair(target: &str, candidate: &str) -> bool {
     is_root_markdown_document(target) && is_root_markdown_document(candidate)
 }
 
+fn is_source_changelog_pair(target: &str, candidate: &str) -> bool {
+    (is_javascript_source_code_file(target) && is_project_changelog(candidate))
+        || (is_project_changelog(target) && is_javascript_source_code_file(candidate))
+}
+
 fn is_root_markdown_document(path: &str) -> bool {
     path_parent(path).is_empty() && matches!(path_extension(path), Some("md" | "MD"))
+}
+
+fn is_javascript_source_code_file(path: &str) -> bool {
+    matches!(
+        path_extension(path),
+        Some("ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs")
+    )
 }
 
 fn shares_parent_and_name_token(target: &str, candidate: &str) -> bool {
@@ -11779,6 +11795,22 @@ src/b.rs
         assert_eq!(
             related_hybrid_path_score_multiplier("README.md", "docs/guide.md", 1.0, 1.0),
             related_path_score_multiplier("README.md", "docs/guide.md")
+        );
+        assert!(
+            related_hybrid_path_score_multiplier("src/index.ts", "CHANGELOG.md", 1.0, 0.1)
+                >= RELATED_HYBRID_SOURCE_CHANGELOG_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("src/index.ts", "README.md", 1.0, 0.1),
+            related_path_score_multiplier("src/index.ts", "README.md")
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("src/main.rs", "CHANGELOG.md", 1.0, 0.1),
+            related_path_score_multiplier("src/main.rs", "CHANGELOG.md")
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("src/index.ts", "CHANGELOG.md", 0.0, 0.0),
+            related_path_score_multiplier("src/index.ts", "CHANGELOG.md")
         );
         assert!(
             related_hybrid_path_score_multiplier(
