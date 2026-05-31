@@ -269,6 +269,72 @@ class CodexWorkspacePilotTests(unittest.TestCase):
                 self.assertIn(path, related_result.stdout)
                 self.assertIn(path, included_content)
 
+    def test_subscription_rollout_fixture_exposes_related_configs_docs_and_template(
+        self,
+    ) -> None:
+        workspace_binary = ROOT / "target" / "debug" / "workspace"
+        if not workspace_binary.is_file():
+            self.skipTest("workspace binary has not been built")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo = Path(tmp_dir) / "fixture"
+            run_codex_workspace_pilot.create_subscription_rollout_fixture_repo(
+                repo,
+                workspace_binary,
+            )
+
+            test_result = subprocess.run(
+                ["sh", "-c", run_codex_workspace_pilot.TEST_COMMAND],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            related_result = subprocess.run(
+                [
+                    "./bin/workspace",
+                    "related",
+                    "tests/test_plan_rollout.py",
+                    "--by",
+                    "cochange",
+                    "--ensure-index",
+                    "--max-commits",
+                    "1000",
+                    "--rank",
+                    "hybrid",
+                    "--max-results",
+                    "6",
+                    "--include-content",
+                    "--max-content-files",
+                    "6",
+                    "--json",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(test_result.returncode, 0)
+            self.assertIn("250 != 500", test_result.stderr)
+            self.assertEqual(related_result.returncode, 0, related_result.stderr)
+            self.assertTrue((repo / ".workspace" / "index" / "cochange.json").is_file())
+            related = json.loads(related_result.stdout)
+            included_content = {
+                item["path"]: item["content"]
+                for item in related["data"]["included_content"]
+            }
+            for path in [
+                "config/billing_catalog.json",
+                "config/feature_flags.json",
+                "config/plan_limits.json",
+                "docs/api_contract.md",
+                "docs/plans.md",
+                "templates/enterprise_welcome_email.txt",
+            ]:
+                self.assertIn(path, related_result.stdout)
+                self.assertIn(path, included_content)
+
     def test_command_like_values_extracts_codex_command_events(self) -> None:
         events = [
             {
@@ -480,6 +546,26 @@ if __name__ == "__main__":
         self.assertIn("impact --diff", workspace_prompt)
         self.assertIn("do not spend time running", workspace_prompt)
         self.assertIn("standard unified git diff", workspace_prompt)
+        self.assertIn("do not use a `--` separator", workspace_prompt)
+
+    def test_subscription_prompt_requests_cochange_content_and_impact(self) -> None:
+        task = run_codex_workspace_pilot.task_specs()["subscription_rollout_sync"]
+        prompts = run_codex_workspace_pilot.condition_prompts(task)
+        workspace_prompt = next(
+            prompt.prompt for prompt in prompts if prompt.name == "workspace_cli"
+        )
+
+        self.assertIn("--ensure-index", workspace_prompt)
+        self.assertNotIn("`./bin/workspace status --json`", workspace_prompt)
+        self.assertNotIn("`./bin/workspace index cochange --json`", workspace_prompt)
+        self.assertIn("related tests/test_plan_rollout.py", workspace_prompt)
+        self.assertIn("--max-results 6", workspace_prompt)
+        self.assertIn("--include-content", workspace_prompt)
+        self.assertIn("data.included_content", workspace_prompt)
+        self.assertIn("patch --stdin --json", workspace_prompt)
+        self.assertIn("do not create or delete a temporary patch file", workspace_prompt)
+        self.assertIn("impact --diff", workspace_prompt)
+        self.assertIn("standard unified", workspace_prompt)
         self.assertIn("do not use a `--` separator", workspace_prompt)
 
 

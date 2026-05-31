@@ -568,6 +568,331 @@ def create_invoice_tax_fixture_repo(repo: Path, workspace_binary: Path) -> None:
     commit_all(repo, "Add tests for 22 percent EU digital VAT")
 
 
+def write_subscription_plan_files(
+    repo: Path,
+    *,
+    seat_limit: int,
+    audit_retention_days: int,
+    advanced_audit_exports: bool,
+    display_name: str,
+    monthly_price_cents: int,
+    test_expected_seat_limit: int,
+    test_expected_audit_retention_days: int,
+    test_expected_advanced_audit_exports: bool,
+    test_expected_display_name: str,
+    test_expected_monthly_price_cents: int,
+) -> None:
+    write_text(
+        repo / "src" / "plans.py",
+        """\
+import json
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+LIMITS_PATH = ROOT / "config" / "plan_limits.json"
+FEATURES_PATH = ROOT / "config" / "feature_flags.json"
+CATALOG_PATH = ROOT / "config" / "billing_catalog.json"
+
+
+def read_json(path):
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def plan_limits(plan):
+    return read_json(LIMITS_PATH)["plans"][plan]
+
+
+def plan_features(plan):
+    return read_json(FEATURES_PATH)["plans"][plan]
+
+
+def catalog_entry(plan):
+    return read_json(CATALOG_PATH)["plans"][plan]
+
+
+def plan_summary(plan):
+    limits = plan_limits(plan)
+    features = plan_features(plan)
+    catalog = catalog_entry(plan)
+    return {
+        "display_name": catalog["display_name"],
+        "monthly_price_cents": catalog["monthly_price_cents"],
+        "seat_limit": limits["seat_limit"],
+        "audit_retention_days": limits["audit_retention_days"],
+        "advanced_audit_exports": features["advanced_audit_exports"],
+    }
+
+
+def welcome_email(plan):
+    return (ROOT / "templates" / f"{plan}_welcome_email.txt").read_text(
+        encoding="utf-8"
+    )
+""",
+    )
+    write_text(repo / "src" / "__init__.py", "")
+    write_text(
+        repo / "config" / "plan_limits.json",
+        json.dumps(
+            {
+                "plans": {
+                    "starter": {
+                        "seat_limit": 5,
+                        "audit_retention_days": 30,
+                    },
+                    "growth": {
+                        "seat_limit": 50,
+                        "audit_retention_days": 180,
+                    },
+                    "enterprise": {
+                        "seat_limit": seat_limit,
+                        "audit_retention_days": audit_retention_days,
+                    },
+                }
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    write_text(
+        repo / "config" / "feature_flags.json",
+        json.dumps(
+            {
+                "plans": {
+                    "starter": {"advanced_audit_exports": False, "sso": False},
+                    "growth": {"advanced_audit_exports": False, "sso": True},
+                    "enterprise": {
+                        "advanced_audit_exports": advanced_audit_exports,
+                        "sso": seat_limit >= 250,
+                    },
+                }
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    write_text(
+        repo / "config" / "billing_catalog.json",
+        json.dumps(
+            {
+                "plans": {
+                    "starter": {
+                        "display_name": "Starter",
+                        "monthly_price_cents": 1900,
+                    },
+                    "growth": {
+                        "display_name": "Growth",
+                        "monthly_price_cents": 9900,
+                    },
+                    "enterprise": {
+                        "display_name": display_name,
+                        "monthly_price_cents": monthly_price_cents,
+                    },
+                }
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    price_dollars = monthly_price_cents // 100
+    advanced_text = (
+        "includes advanced audit exports"
+        if advanced_audit_exports
+        else "does not include advanced audit exports"
+    )
+    write_text(
+        repo / "docs" / "plans.md",
+        f"""\
+# Plans
+
+{display_name} includes {seat_limit} seats, {audit_retention_days} days of audit retention, and {advanced_text}.
+""",
+    )
+    write_text(
+        repo / "docs" / "api_contract.md",
+        f"""\
+# API Contract
+
+The enterprise plan response exposes display_name="{display_name}", seat_limit={seat_limit}, audit_retention_days={audit_retention_days}, and monthly_price_cents={monthly_price_cents}.
+""",
+    )
+    write_text(
+        repo / "templates" / "enterprise_welcome_email.txt",
+        f"""\
+Welcome to {display_name}.
+
+Your plan supports {seat_limit} seats and {audit_retention_days} days of audit history for ${price_dollars}/month.
+""",
+    )
+    expected_advanced = str(test_expected_advanced_audit_exports)
+    expected_price_dollars = test_expected_monthly_price_cents // 100
+    write_text(
+        repo / "tests" / "test_plan_rollout.py",
+        f"""\
+import json
+import unittest
+from pathlib import Path
+
+from src.plans import plan_summary, welcome_email
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class PlanRolloutTests(unittest.TestCase):
+    def test_enterprise_plus_runtime_summary(self):
+        summary = plan_summary("enterprise")
+        self.assertEqual(summary["display_name"], "{test_expected_display_name}")
+        self.assertEqual(summary["seat_limit"], {test_expected_seat_limit})
+        self.assertEqual(summary["audit_retention_days"], {test_expected_audit_retention_days})
+        self.assertEqual(
+            summary["advanced_audit_exports"],
+            {expected_advanced},
+        )
+        self.assertEqual(
+            summary["monthly_price_cents"],
+            {test_expected_monthly_price_cents},
+        )
+
+    def test_enterprise_plus_configs_are_synchronized(self):
+        limits = json.loads((ROOT / "config" / "plan_limits.json").read_text())
+        features = json.loads((ROOT / "config" / "feature_flags.json").read_text())
+        catalog = json.loads((ROOT / "config" / "billing_catalog.json").read_text())
+        self.assertEqual(
+            limits["plans"]["enterprise"]["seat_limit"],
+            {test_expected_seat_limit},
+        )
+        self.assertEqual(
+            limits["plans"]["enterprise"]["audit_retention_days"],
+            {test_expected_audit_retention_days},
+        )
+        self.assertEqual(
+            features["plans"]["enterprise"]["advanced_audit_exports"],
+            {expected_advanced},
+        )
+        self.assertEqual(
+            catalog["plans"]["enterprise"]["display_name"],
+            "{test_expected_display_name}",
+        )
+
+    def test_enterprise_plus_docs_and_templates_are_synchronized(self):
+        plan_docs = (ROOT / "docs" / "plans.md").read_text()
+        api_docs = (ROOT / "docs" / "api_contract.md").read_text()
+        email = welcome_email("enterprise")
+        for text in [plan_docs, api_docs, email]:
+            self.assertIn("{test_expected_display_name}", text)
+            self.assertIn("{test_expected_seat_limit}", text)
+            self.assertIn("{test_expected_audit_retention_days}", text)
+        self.assertIn("${expected_price_dollars}/month", email)
+
+
+if __name__ == "__main__":
+    unittest.main()
+""",
+    )
+    write_text(
+        repo / "README.md",
+        f"""\
+# Subscription Plan Fixture
+
+Run tests with:
+
+```sh
+{TEST_COMMAND}
+```
+""",
+    )
+
+
+def write_subscription_decoy_files(repo: Path) -> None:
+    write_text(
+        repo / "src" / "support.py",
+        """\
+def support_tier(plan):
+    return "standard" if plan != "enterprise" else "dedicated"
+""",
+    )
+    write_text(
+        repo / "config" / "support_tiers.json",
+        json.dumps({"enterprise": "dedicated", "growth": "standard"}, indent=2)
+        + "\n",
+    )
+    write_text(
+        repo / "config" / "trial_limits.json",
+        json.dumps({"starter_trial_days": 14, "growth_trial_days": 30}, indent=2)
+        + "\n",
+    )
+    write_text(
+        repo / "docs" / "support_policy.md",
+        "# Support Policy\n\nEnterprise accounts receive dedicated support.\n",
+    )
+    write_text(
+        repo / "docs" / "trial_policy.md",
+        "# Trial Policy\n\nStarter trials last 14 days.\n",
+    )
+    write_text(
+        repo / "templates" / "trial_welcome_email.txt",
+        "Welcome to your trial.\n",
+    )
+
+
+def create_subscription_rollout_fixture_repo(
+    repo: Path,
+    workspace_binary: Path,
+) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    install_workspace_binary(repo, workspace_binary)
+    init_repo(repo)
+    write_subscription_plan_files(
+        repo,
+        seat_limit=100,
+        audit_retention_days=365,
+        advanced_audit_exports=False,
+        display_name="Enterprise",
+        monthly_price_cents=19900,
+        test_expected_seat_limit=100,
+        test_expected_audit_retention_days=365,
+        test_expected_advanced_audit_exports=False,
+        test_expected_display_name="Enterprise",
+        test_expected_monthly_price_cents=19900,
+    )
+    write_subscription_decoy_files(repo)
+    commit_all(repo, "Initial enterprise plan")
+    write_subscription_plan_files(
+        repo,
+        seat_limit=250,
+        audit_retention_days=365,
+        advanced_audit_exports=False,
+        display_name="Enterprise",
+        monthly_price_cents=21900,
+        test_expected_seat_limit=250,
+        test_expected_audit_retention_days=365,
+        test_expected_advanced_audit_exports=False,
+        test_expected_display_name="Enterprise",
+        test_expected_monthly_price_cents=21900,
+    )
+    write_subscription_decoy_files(repo)
+    commit_all(repo, "Raise enterprise plan capacity")
+    write_subscription_plan_files(
+        repo,
+        seat_limit=250,
+        audit_retention_days=365,
+        advanced_audit_exports=False,
+        display_name="Enterprise",
+        monthly_price_cents=21900,
+        test_expected_seat_limit=500,
+        test_expected_audit_retention_days=730,
+        test_expected_advanced_audit_exports=True,
+        test_expected_display_name="Enterprise Plus",
+        test_expected_monthly_price_cents=24900,
+    )
+    write_subscription_decoy_files(repo)
+    commit_all(repo, "Add tests for Enterprise Plus rollout")
+
+
 def create_fixture_repo(repo: Path, workspace_binary: Path) -> None:
     create_checkout_fixture_repo(repo, workspace_binary)
 
@@ -598,6 +923,14 @@ def task_specs() -> dict[str, TaskSpec]:
         "changed to 22%. Synchronize the production tax configuration, invoice "
         f"label configuration, and documentation, run `{TEST_COMMAND}`, and "
         "leave the working tree with the fix applied. Do not edit tests."
+    )
+    subscription_rollout_prompt = (
+        "The repository has failing subscription plan rollout tests. The "
+        "enterprise plan is launching as Enterprise Plus with 500 seats, 730 "
+        "days of audit retention, advanced audit exports enabled, and a $249 "
+        f"monthly price. Synchronize the runtime configs, documentation, and "
+        f"welcome template, run `{TEST_COMMAND}`, and leave the working tree "
+        "with the fix applied. Do not edit tests."
     )
     return {
         "discounted_tax_bug": TaskSpec(
@@ -727,6 +1060,46 @@ def task_specs() -> dict[str, TaskSpec]:
                 "config/tax_regions.json",
                 "docs/invoice_templates.md",
                 "docs/tax_policy.md",
+            ),
+        ),
+        "subscription_rollout_sync": TaskSpec(
+            name="subscription_rollout_sync",
+            prompt=subscription_rollout_prompt,
+            workspace_extra=(
+                "Use `./bin/workspace` for workspace observation and verification. "
+                "The command syntax below is complete; do not spend time running "
+                "`workspace --help`, command-specific `--help`, or inspecting "
+                "`.workspace` metadata. Do not run `workspace status` or "
+                "`workspace index cochange` before the related-file query; "
+                "`--ensure-index` creates or refreshes the co-change index in "
+                "the same command. Start with "
+                "`./bin/workspace related tests/test_plan_rollout.py --by "
+                "cochange --ensure-index --max-commits 1000 --rank hybrid "
+                "--max-results 6 --include-content --max-content-files 6 --json` "
+                "to find and read the plan limit, feature flag, billing catalog, "
+                "documentation, and template files that usually change with this "
+                "test. Use returned `data.included_content` instead of separate "
+                "`workspace read` calls for files whose content is already "
+                "included. Apply the fix with "
+                "`./bin/workspace patch --stdin --json` and a standard unified "
+                "git diff on stdin. Do not use Codex apply_patch format, and do "
+                "not create or delete a temporary patch file. If you use a "
+                "heredoc, use exactly `./bin/workspace patch --stdin --json "
+                "<<'PATCH'` and put the diff content literally. Run the test command "
+                f"exactly as `./bin/workspace run \"{TEST_COMMAND}\" --json`; "
+                "do not use a `--` separator for `workspace run`. Then finish with "
+                "`./bin/workspace impact --diff --by cochange --ensure-index "
+                "--max-commits 1000 --rank hybrid --json` and "
+                "`./bin/workspace diff --json`."
+            ),
+            create_repo=create_subscription_rollout_fixture_repo,
+            expected_changed_files=(
+                "config/billing_catalog.json",
+                "config/feature_flags.json",
+                "config/plan_limits.json",
+                "docs/api_contract.md",
+                "docs/plans.md",
+                "templates/enterprise_welcome_email.txt",
             ),
         ),
     }
