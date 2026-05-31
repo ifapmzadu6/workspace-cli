@@ -71,11 +71,12 @@ weight result, per-repository holdout results, oracle-normalized AP gaps, and
 residual gap clusters with missing targets split into parent-present predictable
 targets and parent-absent new targets, the rank of missed targets when they
 appear in a wider diagnostic hybrid ranking, scores for ranked top-k candidates
-and ranked missed targets, and top non-targets occupying the method's top-k
-list. It preserves paired sign-flip p-values with significant digits instead of
-rounding very small p-values to zero, includes predictable-only clusters
-retargeted from case-level ranking lists, and emits structured threshold margin
-entries in a compact machine-readable form.
+and ranked missed targets, aggregated missing-target and false-positive counts,
+and top non-targets occupying the method's top-k list. It preserves paired
+sign-flip p-values with significant digits instead of rounding very small
+p-values to zero, includes predictable-only clusters retargeted from case-level
+ranking lists, and emits structured threshold margin entries in a compact
+machine-readable form.
 Paper artifact directories also include copies of the local holdout manifest and
 source holdout manifest when available. The run manifest records the exact
 generation commands, verifier command, artifact paths, SHA-256 checksums for
@@ -743,7 +744,7 @@ the same failure mode: it recovers the predictable CI target for the
 `result_summary.json` now emit
 the same repo/commit residual gap clusters with missing predictable/new target
 splits, missed-target diagnostic ranks/scores, score-ranked top-k candidates,
-and top non-targets, plus the
+top non-targets, and aggregate missing/false-positive counts, plus the
 predictable-only retargeted clusters, so this diagnosis is reproducible
 directly from the paper artifact.
 

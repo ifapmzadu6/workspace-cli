@@ -10,6 +10,7 @@ from typing import Any
 
 
 METRICS: list[tuple[str, tuple[Any, ...]]] = [
+    ("result summary schema", ("schema_version",)),
     ("holdout cases", ("repo_temporal_holdout", "case_count")),
     ("holdout targets", ("repo_temporal_holdout", "target_count")),
     (

@@ -16,7 +16,7 @@ from typing import Any
 PASS_MARKER = "effect threshold check passed"
 EXPECTED_RUN_MANIFEST_SCHEMA_VERSION = 1
 EXPECTED_EFFECT_METADATA_SCHEMA_VERSION = 2
-EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 4
+EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 5
 FLOAT_TOLERANCE = 1e-9
 
 ARTIFACT_FILES = {
@@ -756,6 +756,12 @@ def verify_residual_gap_cluster_schema(
                 "missing top_residual_cases"
             )
             continue
+        for field in ("missing_expected_counts", "method_false_positive_counts"):
+            verify_path_count_rows(
+                cluster.get(field),
+                f"{label}.residual_gap_clusters[{cluster_index}].{field}",
+                failures,
+            )
         for case_index, case in enumerate(cases):
             case_label = (
                 f"{label}.residual_gap_clusters[{cluster_index}]"
@@ -765,6 +771,25 @@ def verify_residual_gap_cluster_schema(
                 case,
                 case_label,
                 failures,
+            )
+
+
+def verify_path_count_rows(value: Any, label: str, failures: list[str]) -> None:
+    if not isinstance(value, list):
+        failures.append(f"result_summary.json {label} must be a list")
+        return
+    for index, entry in enumerate(value):
+        entry_label = f"{label}[{index}]"
+        if not isinstance(entry, dict):
+            failures.append(f"result_summary.json {entry_label} must be an object")
+            continue
+        path = entry.get("path")
+        if not isinstance(path, str):
+            failures.append(f"result_summary.json {entry_label}.path must be a string")
+        count = entry.get("count")
+        if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+            failures.append(
+                f"result_summary.json {entry_label}.count must be a positive integer"
             )
 
 

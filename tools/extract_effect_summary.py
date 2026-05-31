@@ -17,7 +17,7 @@ if str(TOOLS_DIR) not in sys.path:
 import check_effect_thresholds  # noqa: E402
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 P_VALUE_SIGNIFICANT_DIGITS = 6
 
 
@@ -459,6 +459,11 @@ def residual_gap_clusters(
             f"mean_oracle_{metric}": rounded(
                 cluster["_oracle_ap_sum"] / case_count
             ),
+            "missing_expected_counts": path_count_rows(cases, "missing_expected"),
+            "method_false_positive_counts": path_count_rows(
+                cases,
+                "method_false_positives",
+            ),
             "top_residual_cases": cases[:case_limit],
         }
         rows.append(row)
@@ -471,6 +476,29 @@ def residual_gap_clusters(
             str(row.get("heldout_commit") or ""),
         ),
     )[:limit]
+
+
+def path_count_rows(
+    cases: list[dict[str, Any]],
+    field: str,
+    *,
+    limit: int = 12,
+) -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for case in cases:
+        paths = case.get(field)
+        if not isinstance(paths, list):
+            continue
+        for path in paths:
+            if isinstance(path, str):
+                counts[path] = counts.get(path, 0) + 1
+    return [
+        {"path": path, "count": count}
+        for path, count in sorted(
+            counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[:limit]
+    ]
 
 
 def best_weight_sweep(measurement: dict[str, Any], group: str) -> dict[str, Any]:

@@ -1080,7 +1080,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
 
         summary = extract_effect_summary.extract_summary(report)
 
-        self.assertEqual(summary["schema_version"], 4)
+        self.assertEqual(summary["schema_version"], 5)
         self.assertEqual(summary["observation_recall"]["map_fact_recall"], 1.0)
         holdout = summary["repo_temporal_holdout"]
         self.assertEqual(holdout["temporal_leakage_audit"]["failure_count"], 0)
@@ -1180,6 +1180,19 @@ class EffectSummaryExtractionTests(unittest.TestCase):
         self.assertEqual(
             residual_clusters[0]["top_residual_cases"][0]["method_false_positives"],
             ["README.md", "Cargo.lock", "tests/cli.rs", ".gitignore"],
+        )
+        self.assertEqual(
+            residual_clusters[0]["missing_expected_counts"],
+            [{"path": "src/main.rs", "count": 1}],
+        )
+        self.assertEqual(
+            residual_clusters[0]["method_false_positive_counts"],
+            [
+                {"path": ".gitignore", "count": 1},
+                {"path": "Cargo.lock", "count": 1},
+                {"path": "README.md", "count": 1},
+                {"path": "tests/cli.rs", "count": 1},
+            ],
         )
         self.assertEqual(
             residual_clusters[1]["top_residual_cases"][0][
@@ -1699,7 +1712,7 @@ class EffectThresholdTests(unittest.TestCase):
         summary = extract_effect_summary.extract_summary(self.passing_report())
 
         by_label = {entry["label"]: entry for entry in summary["threshold_margins"]}
-        self.assertEqual(summary["schema_version"], 4)
+        self.assertEqual(summary["schema_version"], 5)
         self.assertEqual(
             by_label[
                 "repo_temporal_holdout_aggregate.workspace_related_hybrid"
@@ -2040,7 +2053,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
 
 class EffectArtifactVerifierTests(unittest.TestCase):
     SUMMARY_FIXTURE = {
-        "schema_version": 4,
+        "schema_version": 5,
         "repo_temporal_holdout": {},
         "threshold_margins": [],
     }
@@ -2181,7 +2194,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         effect_report = {"metadata": merged_metadata, "measurements": []}
         summary = {
             "metadata": merged_metadata,
-            "schema_version": 4,
+            "schema_version": 5,
             "threshold_margins": [],
         }
         (output_dir / "effect.json").write_text(
@@ -2432,7 +2445,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 4,
+                "schema_version": 5,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2477,7 +2490,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 4,
+                "schema_version": 5,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2741,7 +2754,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures = self.verify_with_patched_semantics(
                 output_dir,
                 extracted_summary={
-                    "schema_version": 4,
+                    "schema_version": 5,
                     "changed": True,
                     "threshold_margins": [],
                 },
@@ -2781,7 +2794,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 4,
+                "schema_version": 5,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -2870,7 +2883,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 4,
+                "schema_version": 5,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -2945,7 +2958,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 4,
+                "schema_version": 5,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
