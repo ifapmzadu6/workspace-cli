@@ -17,7 +17,7 @@ if str(TOOLS_DIR) not in sys.path:
 import check_effect_thresholds  # noqa: E402
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 P_VALUE_SIGNIFICANT_DIGITS = 6
 
 

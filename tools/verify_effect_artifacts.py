@@ -16,7 +16,7 @@ from typing import Any
 PASS_MARKER = "effect threshold check passed"
 EXPECTED_RUN_MANIFEST_SCHEMA_VERSION = 1
 EXPECTED_EFFECT_METADATA_SCHEMA_VERSION = 2
-EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 6
+EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 7
 FLOAT_TOLERANCE = 1e-9
 
 ARTIFACT_FILES = {
@@ -709,6 +709,130 @@ def verify_residual_gap_clusters(
         )
 
 
+def verify_residual_pair_conflicts(
+    result_summary: dict[str, Any],
+    failures: list[str],
+) -> None:
+    holdout = result_summary.get("repo_temporal_holdout")
+    if not isinstance(holdout, dict):
+        return
+    verify_holdout_residual_pair_conflicts(
+        holdout,
+        "repo_temporal_holdout",
+        failures,
+    )
+    predictable = holdout.get("predictable_only")
+    if isinstance(predictable, dict):
+        verify_holdout_residual_pair_conflicts(
+            predictable,
+            "repo_temporal_holdout.predictable_only",
+            failures,
+        )
+
+
+def verify_holdout_residual_pair_conflicts(
+    holdout: dict[str, Any],
+    label: str,
+    failures: list[str],
+) -> None:
+    conflicts = holdout.get("residual_pair_conflicts")
+    if conflicts is None:
+        return
+    if not isinstance(conflicts, list):
+        failures.append(
+            f"result_summary.json {label}.residual_pair_conflicts must be a list"
+        )
+        return
+    for conflict_index, conflict in enumerate(conflicts):
+        conflict_label = f"{label}.residual_pair_conflicts[{conflict_index}]"
+        verify_residual_pair_conflict_schema(conflict, conflict_label, failures)
+
+
+def verify_residual_pair_conflict_schema(
+    conflict: Any,
+    label: str,
+    failures: list[str],
+) -> None:
+    if not isinstance(conflict, dict):
+        failures.append(f"result_summary.json {label} must be an object")
+        return
+
+    for field in ("seed", "candidate", "expected_key", "method"):
+        value = conflict.get(field)
+        if not isinstance(value, str) or not value:
+            failures.append(
+                f"result_summary.json {label}.{field} must be a non-empty string"
+            )
+    for field in ("repo", "repo_name"):
+        value = conflict.get(field)
+        if value is not None and not isinstance(value, str):
+            failures.append(
+                f"result_summary.json {label}.{field} must be a string or null"
+            )
+
+    true_count = verify_positive_integer_field(
+        conflict,
+        "true_target_count",
+        label,
+        failures,
+    )
+    false_count = verify_positive_integer_field(
+        conflict,
+        "residual_false_positive_count",
+        label,
+        failures,
+    )
+    true_commits = verify_non_empty_string_list_field(
+        conflict,
+        "true_target_commits",
+        label,
+        failures,
+    )
+    false_commits = verify_non_empty_string_list_field(
+        conflict,
+        "residual_false_positive_commits",
+        label,
+        failures,
+    )
+    if true_count is not None and true_commits is not None and len(true_commits) > true_count:
+        failures.append(
+            f"result_summary.json {label}.true_target_commits cannot exceed "
+            "true_target_count"
+        )
+    if false_count is not None and false_commits is not None and len(false_commits) > false_count:
+        failures.append(
+            f"result_summary.json {label}.residual_false_positive_commits cannot exceed "
+            "residual_false_positive_count"
+        )
+
+
+def verify_positive_integer_field(
+    value: dict[str, Any],
+    field: str,
+    label: str,
+    failures: list[str],
+) -> int | None:
+    field_value = value.get(field)
+    if not isinstance(field_value, int) or isinstance(field_value, bool) or field_value <= 0:
+        failures.append(
+            f"result_summary.json {label}.{field} must be a positive integer"
+        )
+        return None
+    return field_value
+
+
+def verify_non_empty_string_list_field(
+    value: dict[str, Any],
+    field: str,
+    label: str,
+    failures: list[str],
+) -> list[str] | None:
+    values = verify_string_list_field(value, field, label, failures)
+    if values is not None and not values:
+        failures.append(f"result_summary.json {label}.{field} must be non-empty")
+    return values
+
+
 def verify_holdout_residual_gap_clusters(
     holdout: dict[str, Any],
     label: str,
@@ -980,9 +1104,21 @@ def verify_markdown_residual_count_tables(
         markdown,
         failures,
     )
+    verify_holdout_markdown_residual_pair_conflict_table(
+        holdout,
+        "repo_temporal_holdout",
+        markdown,
+        failures,
+    )
     predictable = holdout.get("predictable_only")
     if isinstance(predictable, dict):
         verify_holdout_markdown_residual_count_table(
+            predictable,
+            "repo_temporal_holdout.predictable_only",
+            markdown,
+            failures,
+        )
+        verify_holdout_markdown_residual_pair_conflict_table(
             predictable,
             "repo_temporal_holdout.predictable_only",
             markdown,
@@ -1022,6 +1158,59 @@ def verify_holdout_markdown_residual_count_table(
             text = format_residual_path_counts(cluster.get(field))
             if text and text not in markdown:
                 failures.append(f"effect.md missing {cluster_label}.{field}: {text}")
+
+
+def verify_holdout_markdown_residual_pair_conflict_table(
+    holdout: dict[str, Any],
+    label: str,
+    markdown: str,
+    failures: list[str],
+) -> None:
+    conflicts = holdout.get("residual_pair_conflicts")
+    if not isinstance(conflicts, list) or not conflicts:
+        return
+    if "Residual Pair Conflicts" not in markdown:
+        failures.append(f"effect.md missing residual pair conflict table for {label}")
+    if "residual false positives" not in markdown:
+        failures.append(
+            f"effect.md missing residual false positives column for {label}"
+        )
+    for conflict_index, conflict in enumerate(conflicts):
+        if not isinstance(conflict, dict):
+            continue
+        conflict_label = f"{label}.residual_pair_conflicts[{conflict_index}]"
+        seed = conflict.get("seed")
+        candidate = conflict.get("candidate")
+        if isinstance(seed, str) and seed and seed not in markdown:
+            failures.append(f"effect.md missing {conflict_label}.seed: {seed}")
+        if isinstance(candidate, str) and candidate and candidate not in markdown:
+            failures.append(
+                f"effect.md missing {conflict_label}.candidate: {candidate}"
+            )
+        for field in (
+            "true_target_commits",
+            "residual_false_positive_commits",
+        ):
+            text = format_residual_commit_list(conflict.get(field))
+            if text and text not in markdown:
+                failures.append(f"effect.md missing {conflict_label}.{field}: {text}")
+
+
+def format_residual_commit_list(value: Any, *, limit: int = 3) -> str:
+    if not isinstance(value, list) or not value:
+        return ""
+    commits = [
+        short_residual_commit(commit)
+        for commit in value[:limit]
+        if isinstance(commit, str)
+    ]
+    if len(value) > limit:
+        commits.append(f"+{len(value) - limit} more")
+    return ", ".join(commits)
+
+
+def short_residual_commit(commit: str) -> str:
+    return commit[:10]
 
 
 def format_residual_path_counts(value: Any, *, limit: int = 4) -> str:
@@ -1094,6 +1283,7 @@ def verify_artifact_directory(
         verify_clean_workspace_metadata(effect_report, result_summary, failures)
         verify_clean_workspace_manifest_command(manifest, failures)
     verify_residual_gap_clusters(result_summary, failures)
+    verify_residual_pair_conflicts(result_summary, failures)
     verify_result_summary_matches_report(effect_report, result_summary, failures)
     verify_markdown_matches_report(effect_report, artifact_dir / "effect.md", failures)
     verify_markdown_residual_count_tables(

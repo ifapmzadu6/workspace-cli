@@ -1225,7 +1225,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
 
         summary = extract_effect_summary.extract_summary(report)
 
-        self.assertEqual(summary["schema_version"], 6)
+        self.assertEqual(summary["schema_version"], 7)
         self.assertEqual(summary["observation_recall"]["map_fact_recall"], 1.0)
         holdout = summary["repo_temporal_holdout"]
         self.assertEqual(holdout["temporal_leakage_audit"]["failure_count"], 0)
@@ -1907,7 +1907,7 @@ class EffectThresholdTests(unittest.TestCase):
         summary = extract_effect_summary.extract_summary(self.passing_report())
 
         by_label = {entry["label"]: entry for entry in summary["threshold_margins"]}
-        self.assertEqual(summary["schema_version"], 6)
+        self.assertEqual(summary["schema_version"], 7)
         self.assertEqual(
             by_label[
                 "repo_temporal_holdout_aggregate.workspace_related_hybrid"
@@ -2248,7 +2248,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
 
 class EffectArtifactVerifierTests(unittest.TestCase):
     SUMMARY_FIXTURE = {
-        "schema_version": 6,
+        "schema_version": 7,
         "repo_temporal_holdout": {},
         "threshold_margins": [],
     }
@@ -2389,7 +2389,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         effect_report = {"metadata": merged_metadata, "measurements": []}
         summary = {
             "metadata": merged_metadata,
-            "schema_version": 6,
+            "schema_version": 7,
             "threshold_margins": [],
         }
         (output_dir / "effect.json").write_text(
@@ -2640,7 +2640,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 6,
+                "schema_version": 7,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2685,7 +2685,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 6,
+                "schema_version": 7,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2949,7 +2949,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures = self.verify_with_patched_semantics(
                 output_dir,
                 extracted_summary={
-                    "schema_version": 6,
+                    "schema_version": 7,
                     "changed": True,
                     "threshold_margins": [],
                 },
@@ -2989,7 +2989,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 6,
+                "schema_version": 7,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -3049,7 +3049,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 6,
+                "schema_version": 7,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -3171,6 +3171,165 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures,
         )
 
+    def test_artifact_verifier_rejects_incomplete_residual_pair_conflict_schema(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            summary = {
+                "schema_version": 7,
+                "threshold_margins": [],
+                "repo_temporal_holdout": {
+                    "residual_pair_conflicts": [
+                        {
+                            "seed": "",
+                            "candidate": 42,
+                            "expected_key": "expected",
+                            "method": "workspace_related_hybrid",
+                            "true_target_count": 0,
+                            "residual_false_positive_count": 1,
+                            "true_target_commits": [],
+                            "residual_false_positive_commits": [123],
+                        },
+                    ],
+                },
+            }
+            (output_dir / "result_summary.json").write_text(
+                json.dumps(summary) + "\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["result_summary"] = (
+                verify_effect_artifacts.file_sha256(
+                    output_dir / "result_summary.json"
+                )
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+            )
+
+        self.assertTrue(
+            any(".seed must be a non-empty string" in failure for failure in failures),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                ".candidate must be a non-empty string" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                ".true_target_count must be a positive integer" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                ".true_target_commits must be non-empty" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                ".residual_false_positive_commits[0] must be a string" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_missing_markdown_pair_conflicts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            summary = {
+                "schema_version": 7,
+                "threshold_margins": [],
+                "repo_temporal_holdout": {
+                    "residual_pair_conflicts": [
+                        {
+                            "repo": "/tmp/example",
+                            "repo_name": "example",
+                            "seed": "package.json",
+                            "candidate": "package-lock.json",
+                            "expected_key": "expected",
+                            "method": "workspace_related_hybrid",
+                            "true_target_count": 1,
+                            "residual_false_positive_count": 1,
+                            "true_target_commits": ["aaa111"],
+                            "residual_false_positive_commits": ["bbb222"],
+                        },
+                    ],
+                },
+            }
+            stale_markdown = "# Effect Report\n"
+            (output_dir / "result_summary.json").write_text(
+                json.dumps(summary) + "\n",
+                encoding="utf-8",
+            )
+            (output_dir / "effect.md").write_text(
+                stale_markdown,
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["result_summary"] = (
+                verify_effect_artifacts.file_sha256(
+                    output_dir / "result_summary.json"
+                )
+            )
+            run_manifest["sha256"]["markdown"] = verify_effect_artifacts.file_sha256(
+                output_dir / "effect.md"
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+                rendered_markdown=stale_markdown,
+            )
+
+        self.assertTrue(
+            any(
+                "missing residual pair conflict table" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any("package-lock.json" in failure for failure in failures),
+            failures,
+        )
+        self.assertTrue(any("aaa111" in failure for failure in failures), failures)
+        self.assertTrue(any("bbb222" in failure for failure in failures), failures)
+
+    def test_artifact_verifier_formats_residual_pair_commits_like_markdown(
+        self,
+    ) -> None:
+        self.assertEqual(
+            verify_effect_artifacts.format_residual_commit_list(
+                [
+                    "0387cf308499",
+                    "21764e9cfbe3",
+                    "36c427171c57",
+                    "6a2977eb724e",
+                ],
+            ),
+            "0387cf3084, 21764e9cfb, 36c427171c, +1 more",
+        )
+
     def test_artifact_verifier_rejects_effect_schema_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "artifacts"
@@ -3205,7 +3364,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 6,
+                "schema_version": 7,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -3280,7 +3439,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 6,
+                "schema_version": 7,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
