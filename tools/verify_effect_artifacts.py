@@ -14,6 +14,7 @@ from typing import Any
 
 PASS_MARKER = "effect threshold check passed"
 EXPECTED_RESULT_SUMMARY_SCHEMA_VERSION = 2
+FLOAT_TOLERANCE = 1e-9
 
 ARTIFACT_FILES = {
     "json": "effect.json",
@@ -262,36 +263,106 @@ def verify_threshold_margin_schema(
     if not isinstance(margins, list):
         failures.append("result_summary.json threshold_margins must be a list")
         return
+    seen_labels: set[str] = set()
     for index, entry in enumerate(margins):
         label = f"result_summary.json threshold_margins[{index}]"
         if not isinstance(entry, dict):
             failures.append(f"{label} must be an object")
             continue
-        if not isinstance(entry.get("label"), str):
+        margin_label = entry.get("label")
+        if not isinstance(margin_label, str):
             failures.append(f"{label}.label must be a string")
+        elif margin_label in seen_labels:
+            failures.append(f"{label}.label must be unique: {margin_label}")
+        else:
+            seen_labels.add(margin_label)
         status = entry.get("status")
         if status not in {"pass", "fail", "missing"}:
             failures.append(f"{label}.status must be pass, fail, or missing")
         if entry.get("missing"):
+            if status != "missing":
+                failures.append(f"{label}.status must be missing when missing is true")
             continue
+        if status == "missing":
+            failures.append(f"{label}.status cannot be missing without missing=true")
         gate = entry.get("gate")
         if gate not in {"minimum", "maximum"}:
             failures.append(f"{label}.gate must be minimum or maximum")
             continue
-        if not is_json_number(entry.get("value")):
+        value = entry.get("value")
+        if not is_json_number(value):
             failures.append(f"{label}.value must be numeric")
         if gate == "minimum":
             for field in ("minimum", "margin"):
                 if not is_json_number(entry.get(field)):
                     failures.append(f"{label}.{field} must be numeric")
+            if all(
+                is_json_number(entry.get(field))
+                for field in ("value", "minimum", "margin")
+            ):
+                verify_threshold_floor_margin(entry, label, failures)
         else:
             for field in ("maximum", "headroom"):
                 if not is_json_number(entry.get(field)):
                     failures.append(f"{label}.{field} must be numeric")
+            if all(
+                is_json_number(entry.get(field))
+                for field in ("value", "maximum", "headroom")
+            ):
+                verify_threshold_ceiling_margin(entry, label, failures)
 
 
 def is_json_number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def verify_threshold_floor_margin(
+    entry: dict[str, Any],
+    label: str,
+    failures: list[str],
+) -> None:
+    value = float(entry["value"])
+    minimum = float(entry["minimum"])
+    margin = float(entry["margin"])
+    expected_margin = value - minimum
+    if abs(margin - expected_margin) > FLOAT_TOLERANCE:
+        failures.append(
+            f"{label}.margin must equal value - minimum: "
+            f"{margin} != {expected_margin}"
+        )
+    verify_threshold_status(entry, label, margin, failures, field="margin")
+
+
+def verify_threshold_ceiling_margin(
+    entry: dict[str, Any],
+    label: str,
+    failures: list[str],
+) -> None:
+    value = float(entry["value"])
+    maximum = float(entry["maximum"])
+    headroom = float(entry["headroom"])
+    expected_headroom = maximum - value
+    if abs(headroom - expected_headroom) > FLOAT_TOLERANCE:
+        failures.append(
+            f"{label}.headroom must equal maximum - value: "
+            f"{headroom} != {expected_headroom}"
+        )
+    verify_threshold_status(entry, label, headroom, failures, field="headroom")
+
+
+def verify_threshold_status(
+    entry: dict[str, Any],
+    label: str,
+    margin: float,
+    failures: list[str],
+    *,
+    field: str,
+) -> None:
+    expected_status = "pass" if margin + FLOAT_TOLERANCE >= 0.0 else "fail"
+    if entry.get("status") != expected_status:
+        failures.append(
+            f"{label}.status must be {expected_status} for {field}={margin}"
+        )
 
 
 def verify_residual_gap_clusters(

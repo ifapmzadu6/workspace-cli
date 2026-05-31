@@ -1981,6 +1981,97 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures,
         )
 
+    def test_artifact_verifier_rejects_inconsistent_threshold_margins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            summary = {
+                "schema_version": 2,
+                "repo_temporal_holdout": {},
+                "threshold_margins": [
+                    {
+                        "label": "bad.floor",
+                        "status": "pass",
+                        "gate": "minimum",
+                        "value": 0.7,
+                        "minimum": 0.8,
+                        "margin": -0.1,
+                    },
+                    {
+                        "label": "bad.ceiling",
+                        "status": "pass",
+                        "gate": "maximum",
+                        "value": 0.01,
+                        "maximum": 0.005,
+                        "headroom": -0.005,
+                    },
+                    {
+                        "label": "bad.margin",
+                        "status": "pass",
+                        "gate": "minimum",
+                        "value": 0.8,
+                        "minimum": 0.78,
+                        "margin": 0.05,
+                    },
+                    {
+                        "label": "bad.margin",
+                        "status": "pass",
+                        "gate": "minimum",
+                        "value": 0.8,
+                        "minimum": 0.78,
+                        "margin": 0.02,
+                    },
+                ],
+            }
+            (output_dir / "result_summary.json").write_text(
+                json.dumps(summary) + "\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["result_summary"] = (
+                verify_effect_artifacts.file_sha256(
+                    output_dir / "result_summary.json"
+                )
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+            )
+
+        self.assertTrue(
+            any(
+                "threshold_margins[0].status must be fail" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "threshold_margins[1].status must be fail" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "threshold_margins[2].margin must equal" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "threshold_margins[3].label must be unique" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+
     def test_artifact_verifier_accepts_clean_metadata_when_clean_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "artifacts"
