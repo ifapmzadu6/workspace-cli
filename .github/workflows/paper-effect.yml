@@ -44,9 +44,19 @@ jobs:
           python3 tools/verify_effect_artifacts.py target/effect-paper
 
       - name: Upload paper artifacts
+        id: upload-paper-artifacts
         uses: actions/upload-artifact@v7
         with:
           name: effect-paper-artifacts
           path: target/effect-paper
           if-no-files-found: error
           retention-days: 30
+
+      - name: Summarize paper artifact upload
+        run: |
+          {
+            echo "### Paper effect artifact"
+            echo "- artifact id: ${{ steps.upload-paper-artifacts.outputs.artifact-id }}"
+            echo "- artifact digest: ${{ steps.upload-paper-artifacts.outputs.artifact-digest }}"
+            echo "- artifact url: ${{ steps.upload-paper-artifacts.outputs.artifact-url }}"
+          } >> "$GITHUB_STEP_SUMMARY"

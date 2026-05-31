@@ -44,6 +44,9 @@ class WorkflowConfigurationTests(unittest.TestCase):
         self.assertIn("actions/upload-artifact@v7", workflow)
         self.assertNotIn("actions/upload-artifact@v5", workflow)
         self.assertNotIn("FORCE_JAVASCRIPT_ACTIONS_TO_NODE24", workflow)
+        self.assertIn("id: upload-paper-artifacts", workflow)
+        self.assertIn("artifact-digest", workflow)
+        self.assertIn("GITHUB_STEP_SUMMARY", workflow)
 
 
 class ExactSignFlipTests(unittest.TestCase):
