@@ -94,6 +94,8 @@ const RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT: f64 = 0.3;
 const RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER: f64 = 1.2;
 const RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER: f64 = 3.5;
 const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
+const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
+const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.9;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
@@ -4456,7 +4458,12 @@ fn rank_cochanges_hybrid_from_index(
             .unwrap_or_default();
         let direct_score = normalized_direct_score(direct_edge_weight, max_direct_weight);
         hit.score = hybrid_rank_score(hit.score, direct_score, direct_weight);
-        hit.score *= related_hybrid_path_score_multiplier(&target, &hit.path, direct_edge_weight);
+        hit.score *= related_hybrid_path_score_multiplier(
+            &target,
+            &hit.path,
+            direct_edge_weight,
+            direct_score,
+        );
     }
     normalize_pagerank_hit_scores(&mut hits);
     hits.sort_by(compare_pagerank_hit_by_score);
@@ -4638,6 +4645,7 @@ fn related_hybrid_path_score_multiplier(
     target: &str,
     candidate: &str,
     direct_edge_weight: f64,
+    direct_score: f64,
 ) -> f64 {
     let mut multiplier = related_path_score_multiplier(target, candidate);
     if direct_edge_weight >= RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT
@@ -4653,6 +4661,11 @@ fn related_hybrid_path_score_multiplier(
     }
     if direct_edge_weight > 0.0 && is_changelog_manifest_pair(target, candidate) {
         multiplier *= RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER;
+    }
+    if direct_score >= RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE
+        && is_root_documentation_pair(target, candidate)
+    {
+        multiplier *= RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER;
     }
     multiplier
 }
@@ -4747,6 +4760,14 @@ fn is_changelog_manifest_pair(target: &str, candidate: &str) -> bool {
 
 fn is_project_changelog(path: &str) -> bool {
     path_parent(path).is_empty() && path.eq_ignore_ascii_case("CHANGELOG.md")
+}
+
+fn is_root_documentation_pair(target: &str, candidate: &str) -> bool {
+    is_root_markdown_document(target) && is_root_markdown_document(candidate)
+}
+
+fn is_root_markdown_document(path: &str) -> bool {
+    path_parent(path).is_empty() && matches!(path_extension(path), Some("md" | "MD"))
 }
 
 fn path_parent(path: &str) -> &str {
@@ -11590,11 +11611,13 @@ src/b.rs
             "src/main.rs",
             "src/filters.rs",
             RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT / 2.0,
+            1.0,
         );
         let hybrid_multiplier = related_hybrid_path_score_multiplier(
             "src/main.rs",
             "src/filters.rs",
             RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT,
+            1.0,
         );
 
         assert_eq!(weak_hybrid_multiplier, pagerank_multiplier);
@@ -11603,29 +11626,43 @@ src/b.rs
                 >= pagerank_multiplier * RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER
         );
         assert_eq!(
-            related_hybrid_path_score_multiplier("src/main.rs", "Cargo.toml", 1.0),
+            related_hybrid_path_score_multiplier("src/main.rs", "Cargo.toml", 1.0, 1.0),
             related_path_score_multiplier("src/main.rs", "Cargo.toml")
         );
         assert_eq!(
-            related_hybrid_path_score_multiplier("Cargo.toml", "Cargo.lock", 0.0),
+            related_hybrid_path_score_multiplier("Cargo.toml", "Cargo.lock", 0.0, 0.0),
             related_path_score_multiplier("Cargo.toml", "Cargo.lock")
         );
         assert!(
-            related_hybrid_path_score_multiplier("Cargo.toml", "Cargo.lock", 1.0)
+            related_hybrid_path_score_multiplier("Cargo.toml", "Cargo.lock", 1.0, 1.0)
                 >= related_path_score_multiplier("Cargo.toml", "Cargo.lock")
                     * RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER
         );
         assert_eq!(
-            related_hybrid_path_score_multiplier(".github/workflows/ci.yml", "package.json", 0.0),
+            related_hybrid_path_score_multiplier(
+                ".github/workflows/ci.yml",
+                "package.json",
+                0.0,
+                0.0
+            ),
             related_path_score_multiplier(".github/workflows/ci.yml", "package.json")
         );
         assert!(
-            related_hybrid_path_score_multiplier(".github/workflows/ci.yml", "package.json", 1.0)
-                >= related_path_score_multiplier(".github/workflows/ci.yml", "package.json")
-                    * RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER
+            related_hybrid_path_score_multiplier(
+                ".github/workflows/ci.yml",
+                "package.json",
+                1.0,
+                1.0
+            ) >= related_path_score_multiplier(".github/workflows/ci.yml", "package.json")
+                * RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER
         );
         assert_eq!(
-            related_hybrid_path_score_multiplier("package.json", ".github/workflows/ci.yml", 1.0),
+            related_hybrid_path_score_multiplier(
+                "package.json",
+                ".github/workflows/ci.yml",
+                1.0,
+                1.0
+            ),
             related_path_score_multiplier("package.json", ".github/workflows/ci.yml")
         );
         assert!(!is_ci_workflow_manifest_pair(
@@ -11637,18 +11674,35 @@ src/b.rs
             "Cargo.toml"
         ));
         assert!(
-            related_hybrid_path_score_multiplier("package.json", "CHANGELOG.md", 1.0)
+            related_hybrid_path_score_multiplier("package.json", "CHANGELOG.md", 1.0, 1.0)
                 >= related_path_score_multiplier("package.json", "CHANGELOG.md")
                     * RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER
         );
         assert!(
-            related_hybrid_path_score_multiplier("CHANGELOG.md", "package.json", 1.0)
+            related_hybrid_path_score_multiplier("CHANGELOG.md", "package.json", 1.0, 1.0)
                 >= related_path_score_multiplier("CHANGELOG.md", "package.json")
                     * RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER
         );
         assert_eq!(
-            related_hybrid_path_score_multiplier("docs/CHANGELOG.md", "package.json", 1.0),
+            related_hybrid_path_score_multiplier("docs/CHANGELOG.md", "package.json", 1.0, 1.0),
             related_path_score_multiplier("docs/CHANGELOG.md", "package.json")
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("README.md", "CHANGELOG.md", 0.0, 0.0),
+            related_path_score_multiplier("README.md", "CHANGELOG.md")
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("README.md", "CHANGELOG.md", 1.0, 0.5),
+            related_path_score_multiplier("README.md", "CHANGELOG.md")
+        );
+        assert!(
+            related_hybrid_path_score_multiplier("README.md", "CHANGELOG.md", 1.0, 1.0)
+                >= related_path_score_multiplier("README.md", "CHANGELOG.md")
+                    * RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("README.md", "docs/guide.md", 1.0, 1.0),
+            related_path_score_multiplier("README.md", "docs/guide.md")
         );
         assert!(is_manifest_lock_pair("package.json", "package-lock.json"));
         assert!(!is_same_source_sibling("main.rs", "lib.rs"));
