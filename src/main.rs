@@ -62,6 +62,7 @@ const WORKSPACE_IMPACT_KIND: &str = "workspace_impact";
 const WORKSPACE_READ_KIND: &str = "workspace_read";
 const WORKSPACE_DIFF_KIND: &str = "workspace_diff";
 const WORKSPACE_PATCH_KIND: &str = "workspace_patch";
+const WORKSPACE_REPLACE_KIND: &str = "workspace_replace";
 const WORKSPACE_RUN_KIND: &str = "workspace_run";
 const WORKSPACE_LOG_KIND: &str = "workspace_log";
 const WORKSPACE_ROLLBACK_KIND: &str = "workspace_rollback";
@@ -78,6 +79,7 @@ const LOG_OP_IMPACT: &str = "impact";
 const LOG_OP_READ: &str = "read";
 const LOG_OP_DIFF: &str = "diff";
 const LOG_OP_PATCH: &str = "patch";
+const LOG_OP_REPLACE: &str = "replace";
 const LOG_OP_RUN: &str = "run";
 const LOG_OP_ROLLBACK: &str = "rollback";
 const IMPACT_SOURCE_DIFF: &str = "diff";
@@ -123,10 +125,12 @@ const RELATIONSHIP_SOURCE_GIT_LOG: &str = "git-log";
 const RELATIONSHIP_SOURCE_RELATED_CLI: &str = "related-cli";
 const EVIDENCE_REASON_GIT_DIFF_CHANGED_FILE: &str = "git diff changed file";
 const EVIDENCE_REASON_PATCH_FILE_TARGET: &str = "patch file target";
+const EVIDENCE_REASON_REPLACE_TARGET: &str = "replace target";
 const EVIDENCE_REASON_ROLLBACK_TARGET: &str = "rollback target";
 const EVIDENCE_REASON_TEXT_MATCH: &str = "text match";
 const EVIDENCE_REASON_REQUESTED_FILE_CONTENT: &str = "requested file content";
 const TRANSACTION_ACTION_APPLIED_PATCH: &str = "applied patch";
+const TRANSACTION_ACTION_APPLIED_REPLACE: &str = "applied replace";
 const TRANSACTION_ACTION_ROLLED_BACK: &str = "rolled back";
 const IMPORTANT_REASON_CONFIGURATION_OR_PACKAGE_MANIFEST: &str =
     "configuration or package manifest";
@@ -206,6 +210,8 @@ enum Commands {
     Diff(DiffArgs),
     /// Apply a patch as a recorded transaction.
     Patch(PatchArgs),
+    /// Apply exact text replacements as a recorded transaction.
+    Replace(ReplaceArgs),
     /// Run a command and record its output.
     Run(RunArgs),
     /// Show recorded workspace operations.
@@ -418,6 +424,21 @@ struct PatchArgs {
     stdin: bool,
     /// Patch file to apply with git apply.
     patch_file: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct ReplaceArgs {
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    json: bool,
+    /// Optional human-readable transaction description.
+    #[arg(long)]
+    description: Option<String>,
+    /// Read replacement JSON from stdin.
+    #[arg(long)]
+    stdin: bool,
+    /// JSON file containing exact replacements.
+    replace_file: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -1000,6 +1021,32 @@ struct PatchData {
 }
 
 #[derive(Serialize)]
+struct ReplaceData {
+    transaction_id: String,
+    replace_file: String,
+    stored_patch: String,
+    replacement_count: usize,
+    file_count: usize,
+    files_changed: Vec<String>,
+    omitted_files: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ReplaceInput {
+    Object { replacements: Vec<ReplacementSpec> },
+    List(Vec<ReplacementSpec>),
+}
+
+#[derive(Deserialize)]
+struct ReplacementSpec {
+    path: PathBuf,
+    find: String,
+    replace: String,
+    occurrence: Option<usize>,
+}
+
+#[derive(Serialize)]
 struct RunData {
     command: String,
     cwd: String,
@@ -1344,6 +1391,7 @@ fn main() -> Result<()> {
         Commands::Read(args) => cmd_read(&workspace, args),
         Commands::Diff(args) => cmd_diff(&workspace, args),
         Commands::Patch(args) => cmd_patch(&workspace, args),
+        Commands::Replace(args) => cmd_replace(&workspace, args),
         Commands::Run(args) => cmd_run(&workspace, args),
         Commands::Log(args) => cmd_log(&workspace, args),
         Commands::Rollback(args) => cmd_rollback(&workspace, args),
@@ -1549,6 +1597,22 @@ fn cmd_patch(workspace: &Workspace, args: PatchArgs) -> Result<()> {
     )
 }
 
+fn cmd_replace(workspace: &Workspace, args: ReplaceArgs) -> Result<()> {
+    let replace = observed_replace_transaction(workspace, &args)?;
+    let observation = replace_transaction_observation(workspace, &replace);
+    let log_summary = replace_log_summary(args.description, &observation);
+
+    output_changed_observation_with_summary(
+        workspace,
+        args.json,
+        LOG_OP_REPLACE,
+        &log_summary,
+        &replace.transaction_id,
+        &observation,
+        print_replace,
+    )
+}
+
 fn observed_patch_transaction(
     workspace: &Workspace,
     args: &PatchArgs,
@@ -1558,6 +1622,18 @@ fn observed_patch_transaction(
         (false, Some(patch_file)) => apply_patch_transaction(workspace, patch_file),
         (true, Some(_)) => bail!("--stdin cannot be used with PATCH_FILE"),
         (false, None) => bail!("workspace patch requires PATCH_FILE or --stdin"),
+    }
+}
+
+fn observed_replace_transaction(
+    workspace: &Workspace,
+    args: &ReplaceArgs,
+) -> Result<AppliedReplaceTransaction> {
+    match (args.stdin, args.replace_file.as_deref()) {
+        (true, None) => apply_stdin_replace_transaction(workspace),
+        (false, Some(replace_file)) => apply_replace_transaction(workspace, replace_file),
+        (true, Some(_)) => bail!("--stdin cannot be used with REPLACE_FILE"),
+        (false, None) => bail!("workspace replace requires REPLACE_FILE or --stdin"),
     }
 }
 
@@ -1573,6 +1649,45 @@ fn apply_patch_transaction(
 fn apply_stdin_patch_transaction(workspace: &Workspace) -> Result<AppliedPatchTransaction> {
     let patch_path = read_stdin_patch_to_temp()?;
     let result = apply_patch_transaction_from_path(workspace, &patch_path, "<stdin>".to_string());
+    let _ = fs::remove_file(&patch_path);
+    result
+}
+
+fn apply_replace_transaction(
+    workspace: &Workspace,
+    replace_file: &Path,
+) -> Result<AppliedReplaceTransaction> {
+    let replace_path = workspace.resolve_existing_workspace_path(replace_file)?;
+    let replace_file = workspace.relative(&replace_path);
+    let input = fs::read_to_string(&replace_path)
+        .with_context(|| format!("failed to read replacement JSON {}", replace_path.display()))?;
+    apply_replace_transaction_from_input(workspace, &input, replace_file)
+}
+
+fn apply_stdin_replace_transaction(workspace: &Workspace) -> Result<AppliedReplaceTransaction> {
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .context("failed to read replacement JSON from stdin")?;
+    apply_replace_transaction_from_input(workspace, &input, "<stdin>".to_string())
+}
+
+fn apply_replace_transaction_from_input(
+    workspace: &Workspace,
+    input: &str,
+    replace_file: String,
+) -> Result<AppliedReplaceTransaction> {
+    let specs = parse_replacement_specs(input)?;
+    let replacement_count = specs.len();
+    let patch_path = build_replacement_patch(workspace, &specs)?;
+    let result = apply_patch_transaction_from_path(workspace, &patch_path, replace_file.clone())
+        .map(|patch| AppliedReplaceTransaction {
+            transaction_id: patch.transaction_id,
+            replace_file,
+            stored_patch: patch.stored_patch,
+            replacement_count,
+            files_changed: patch.files_changed,
+        });
     let _ = fs::remove_file(&patch_path);
     result
 }
@@ -1709,6 +1824,214 @@ fn copy_stdin_to_temp_patch(temp_file: fs::File, temp_path: &Path) -> Result<u64
     Ok(bytes_copied)
 }
 
+fn parse_replacement_specs(input: &str) -> Result<Vec<ReplacementSpec>> {
+    let parsed: ReplaceInput =
+        serde_json::from_str(input).context("failed to parse replacement JSON")?;
+    let specs = match parsed {
+        ReplaceInput::Object { replacements } => replacements,
+        ReplaceInput::List(replacements) => replacements,
+    };
+    if specs.is_empty() {
+        bail!("workspace replace requires at least one replacement");
+    }
+    Ok(specs)
+}
+
+struct ReplacementFileEdit {
+    before: String,
+    after: String,
+}
+
+fn build_replacement_patch(workspace: &Workspace, specs: &[ReplacementSpec]) -> Result<PathBuf> {
+    let mut edits: BTreeMap<String, ReplacementFileEdit> = BTreeMap::new();
+
+    for spec in specs {
+        apply_replacement_spec(workspace, &mut edits, spec)?;
+    }
+
+    let changes = edits
+        .into_iter()
+        .filter(|(_, edit)| edit.before != edit.after)
+        .collect::<Vec<_>>();
+    if changes.is_empty() {
+        bail!("replacement JSON did not change any files");
+    }
+
+    let patch = replacement_patch_content(&changes)?;
+    write_temp_patch_content(&patch, "replace")
+}
+
+fn apply_replacement_spec(
+    workspace: &Workspace,
+    edits: &mut BTreeMap<String, ReplacementFileEdit>,
+    spec: &ReplacementSpec,
+) -> Result<()> {
+    if spec.find.is_empty() {
+        bail!(
+            "replacement find string for {} is empty",
+            spec.path.display()
+        );
+    }
+    if spec.find == spec.replace {
+        bail!(
+            "replacement for {} has identical find and replace strings",
+            spec.path.display()
+        );
+    }
+
+    let path = workspace.resolve_existing_workspace_path(&spec.path)?;
+    let relative = normalize_repo_path(&workspace.relative(&path));
+    if !should_include_repo_file(&relative) {
+        bail!("replacement target {relative:?} is outside observable workspace files");
+    }
+
+    if !edits.contains_key(&relative) {
+        let before = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read replacement target {}", path.display()))?;
+        edits.insert(
+            relative.clone(),
+            ReplacementFileEdit {
+                before: before.clone(),
+                after: before,
+            },
+        );
+    }
+
+    let edit = edits
+        .get_mut(&relative)
+        .expect("replacement edit should have been inserted");
+    edit.after = replace_once_for_spec(&relative, &edit.after, spec)?;
+    Ok(())
+}
+
+fn replace_once_for_spec(path: &str, content: &str, spec: &ReplacementSpec) -> Result<String> {
+    let matches = content.match_indices(&spec.find).collect::<Vec<_>>();
+    let index = match spec.occurrence {
+        Some(0) => bail!("replacement occurrence for {path} must be at least 1"),
+        Some(occurrence) => {
+            if matches.len() < occurrence {
+                bail!(
+                    "replacement for {path} requested occurrence {occurrence}, but only {} match(es) were found",
+                    matches.len()
+                );
+            }
+            occurrence - 1
+        }
+        None => {
+            if matches.len() != 1 {
+                bail!(
+                    "replacement for {path} expected exactly one match, found {}; add occurrence for repeated strings",
+                    matches.len()
+                );
+            }
+            0
+        }
+    };
+
+    let (start, _) = matches[index];
+    let end = start + spec.find.len();
+    let mut replaced = String::with_capacity(content.len() - spec.find.len() + spec.replace.len());
+    replaced.push_str(&content[..start]);
+    replaced.push_str(&spec.replace);
+    replaced.push_str(&content[end..]);
+    Ok(replaced)
+}
+
+fn replacement_patch_content(changes: &[(String, ReplacementFileEdit)]) -> Result<String> {
+    let mut patch = String::new();
+    for (path, edit) in changes {
+        append_full_file_replacement_diff(&mut patch, path, &edit.before, &edit.after)?;
+    }
+    Ok(patch)
+}
+
+fn append_full_file_replacement_diff(
+    patch: &mut String,
+    path: &str,
+    before: &str,
+    after: &str,
+) -> Result<()> {
+    let before_lines = patch_lines(path, before, "before")?;
+    let after_lines = patch_lines(path, after, "after")?;
+    let before_start = if before_lines.is_empty() { 0 } else { 1 };
+    let after_start = if after_lines.is_empty() { 0 } else { 1 };
+
+    patch.push_str(&format!("diff --git a/{path} b/{path}\n"));
+    patch.push_str(&format!("--- a/{path}\n"));
+    patch.push_str(&format!("+++ b/{path}\n"));
+    patch.push_str(&format!(
+        "@@ -{},{} +{},{} @@\n",
+        before_start,
+        before_lines.len(),
+        after_start,
+        after_lines.len()
+    ));
+    for line in before_lines {
+        patch.push('-');
+        patch.push_str(&line);
+        patch.push('\n');
+    }
+    for line in after_lines {
+        patch.push('+');
+        patch.push_str(&line);
+        patch.push('\n');
+    }
+    Ok(())
+}
+
+fn patch_lines(path: &str, content: &str, label: &str) -> Result<Vec<String>> {
+    if content.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !content.ends_with('\n') {
+        bail!(
+            "replacement {label} content for {path} has no final newline; use workspace patch for this file"
+        );
+    }
+    Ok(content
+        .trim_end_matches('\n')
+        .split('\n')
+        .map(ToOwned::to_owned)
+        .collect())
+}
+
+fn write_temp_patch_content(content: &str, prefix: &str) -> Result<PathBuf> {
+    let path = std::env::temp_dir().join(format!("workspace-{}.patch", new_id(prefix)));
+    let file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to create temporary patch {}", path.display()));
+        }
+    };
+
+    let result = write_string_to_file_sync(file, content, &path);
+    if result.is_err() {
+        let _ = fs::remove_file(&path);
+    }
+    result.map(|_| path)
+}
+
+fn write_string_to_file_sync(file: fs::File, content: &str, path: &Path) -> Result<()> {
+    let mut writer = BufWriter::new(file);
+    writer
+        .write_all(content.as_bytes())
+        .with_context(|| format!("failed to write temporary patch {}", path.display()))?;
+    writer
+        .flush()
+        .with_context(|| format!("failed to flush temporary patch {}", path.display()))?;
+    let file = writer
+        .into_inner()
+        .with_context(|| format!("failed to finish temporary patch {}", path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync temporary patch {}", path.display()))?;
+    Ok(())
+}
+
 fn cmd_run(workspace: &Workspace, args: RunArgs) -> Result<()> {
     ensure_log_writable(workspace)?;
     let run = execute_run_command(workspace, &args.command)?;
@@ -1802,6 +2125,14 @@ struct AppliedPatchTransaction {
     files_changed: Vec<String>,
 }
 
+struct AppliedReplaceTransaction {
+    transaction_id: String,
+    replace_file: String,
+    stored_patch: PathBuf,
+    replacement_count: usize,
+    files_changed: Vec<String>,
+}
+
 struct AppliedRollbackTransaction {
     rollback_transaction_id: String,
     stored_patch: PathBuf,
@@ -1822,6 +2153,21 @@ fn patch_transaction_observation(
     patch_observation(data, &patch.files_changed)
 }
 
+fn replace_transaction_observation(
+    workspace: &Workspace,
+    replace: &AppliedReplaceTransaction,
+) -> Observation<ReplaceData> {
+    let data = replace_data(
+        workspace,
+        &replace.transaction_id,
+        &replace.replace_file,
+        &replace.stored_patch,
+        replace.replacement_count,
+        &replace.files_changed,
+    );
+    replace_observation(data, &replace.files_changed)
+}
+
 fn rollback_transaction_observation(
     workspace: &Workspace,
     transaction_id: &str,
@@ -1838,6 +2184,13 @@ fn rollback_transaction_observation(
 }
 
 fn patch_log_summary(description: Option<String>, observation: &Observation<PatchData>) -> String {
+    description.unwrap_or_else(|| observation.summary.clone())
+}
+
+fn replace_log_summary(
+    description: Option<String>,
+    observation: &Observation<ReplaceData>,
+) -> String {
     description.unwrap_or_else(|| observation.summary.clone())
 }
 
@@ -1878,6 +2231,40 @@ fn patch_observation(data: PatchData, files_changed: &[String]) -> Observation<P
         file_count: data.file_count,
         omitted_files: data.omitted_files,
         evidence_reason: EVIDENCE_REASON_PATCH_FILE_TARGET,
+        next_observations: patch_followup_observations(&data.transaction_id),
+    };
+    transaction_observation(context, data, files_changed)
+}
+
+fn replace_data(
+    workspace: &Workspace,
+    transaction_id: &str,
+    replace_file: &str,
+    stored_patch: &Path,
+    replacement_count: usize,
+    files_changed: &[String],
+) -> ReplaceData {
+    let observed_files = observed_changed_files(files_changed);
+    ReplaceData {
+        transaction_id: transaction_id.to_string(),
+        replace_file: replace_file.to_string(),
+        stored_patch: workspace.relative(stored_patch),
+        replacement_count,
+        file_count: observed_files.file_count,
+        files_changed: observed_files.files,
+        omitted_files: observed_files.omitted_files,
+    }
+}
+
+fn replace_observation(data: ReplaceData, files_changed: &[String]) -> Observation<ReplaceData> {
+    let context = TransactionObservationContext {
+        kind: WORKSPACE_REPLACE_KIND,
+        scope: data.replace_file.clone(),
+        action: TRANSACTION_ACTION_APPLIED_REPLACE,
+        transaction_id: data.transaction_id.clone(),
+        file_count: data.file_count,
+        omitted_files: data.omitted_files,
+        evidence_reason: EVIDENCE_REASON_REPLACE_TARGET,
         next_observations: patch_followup_observations(&data.transaction_id),
     };
     transaction_observation(context, data, files_changed)
@@ -7716,6 +8103,20 @@ fn print_patch(observation: &Observation<PatchData>) -> Result<()> {
         "{}",
         patch_transaction_human_summary(&observation.data.transaction_id)
     );
+    print_transaction_files(
+        &observation.data.files_changed,
+        observation.data.omitted_files,
+    );
+    Ok(())
+}
+
+fn print_replace(observation: &Observation<ReplaceData>) -> Result<()> {
+    println!("{}", observation.summary);
+    println!(
+        "{}",
+        patch_transaction_human_summary(&observation.data.transaction_id)
+    );
+    println!("  replacements: {}", observation.data.replacement_count);
     print_transaction_files(
         &observation.data.files_changed,
         observation.data.omitted_files,

@@ -47,6 +47,37 @@ fn run_workspace_failure(cwd: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+fn run_workspace_failure_with_stdin(cwd: &Path, args: &[&str], stdin: &str) -> String {
+    let mut child = Command::new(workspace_bin())
+        .current_dir(cwd)
+        .args(args)
+        .env("WORKSPACE_RELATED_DISABLE", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("workspace command should start");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin should be piped")
+        .write_all(stdin.as_bytes())
+        .expect("stdin should be written");
+    let output = child
+        .wait_with_output()
+        .expect("workspace command should run");
+
+    assert!(
+        !output.status.success(),
+        "workspace {:?} unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
 fn run_workspace_with_stdin(cwd: &Path, args: &[&str], stdin: &str) -> Value {
     let mut child = Command::new(workspace_bin())
         .current_dir(cwd)
@@ -1279,6 +1310,127 @@ diff --git a/note.txt b/note.txt
     assert_eq!(
         fs::read_to_string(root.join("note.txt")).unwrap(),
         "hello\n"
+    );
+}
+
+#[test]
+fn replace_can_apply_exact_replacements_from_stdin_and_rollback() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "note.txt", "hello\n");
+    write_file(
+        root,
+        "config.json",
+        "{\n  \"enabled\": false,\n  \"label\": \"old\"\n}\n",
+    );
+    commit_all(root, "initial files");
+    let replacements = r#"{
+  "replacements": [
+    {
+      "path": "note.txt",
+      "find": "hello",
+      "replace": "hello workspace"
+    },
+    {
+      "path": "config.json",
+      "find": "\"enabled\": false",
+      "replace": "\"enabled\": true"
+    },
+    {
+      "path": "config.json",
+      "find": "\"label\": \"old\"",
+      "replace": "\"label\": \"new\""
+    }
+  ]
+}
+"#;
+
+    let replace = run_workspace_with_stdin(root, &["replace", "--stdin", "--json"], replacements);
+
+    assert_eq!(replace["kind"], "workspace_replace");
+    assert_eq!(replace["scope"], "<stdin>");
+    assert_eq!(replace["data"]["replace_file"], "<stdin>");
+    assert_eq!(replace["data"]["replacement_count"], 3);
+    assert_eq!(replace["data"]["file_count"], 2);
+    assert!(strings_at(&replace, &["data", "files_changed"]).contains(&"config.json".to_string()));
+    assert!(strings_at(&replace, &["data", "files_changed"]).contains(&"note.txt".to_string()));
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello workspace\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("config.json")).unwrap(),
+        "{\n  \"enabled\": true,\n  \"label\": \"new\"\n}\n"
+    );
+    let transaction_id = replace["data"]["transaction_id"]
+        .as_str()
+        .expect("transaction id should be a string")
+        .to_string();
+    let stored_patch = replace["data"]["stored_patch"]
+        .as_str()
+        .expect("stored patch should be a string");
+    let stored_patch_content =
+        fs::read_to_string(root.join(stored_patch)).expect("stored patch should be readable");
+    assert!(stored_patch_content.contains("diff --git a/config.json b/config.json"));
+    assert!(stored_patch_content.contains("+hello workspace"));
+
+    let log = run_workspace(root, &["log", "--limit", "1", "--json"]);
+    assert_eq!(log["data"]["entries"][0]["op"], "replace");
+
+    let rollback = run_workspace(root, &["rollback", &transaction_id, "--json"]);
+    assert_eq!(rollback["kind"], "workspace_rollback");
+    assert_eq!(
+        fs::read_to_string(root.join("note.txt")).unwrap(),
+        "hello\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("config.json")).unwrap(),
+        "{\n  \"enabled\": false,\n  \"label\": \"old\"\n}\n"
+    );
+}
+
+#[test]
+fn replace_requires_unique_match_unless_occurrence_is_given() {
+    let temp = init_git_repo();
+    let root = temp.path();
+
+    write_file(root, "flags.txt", "flag=false\nflag=false\n");
+    commit_all(root, "initial flags");
+    let ambiguous = r#"[
+  {
+    "path": "flags.txt",
+    "find": "flag=false",
+    "replace": "flag=true"
+  }
+]
+"#;
+
+    let stderr =
+        run_workspace_failure_with_stdin(root, &["replace", "--stdin", "--json"], ambiguous);
+    assert!(
+        stderr.contains("expected exactly one match"),
+        "stderr should explain ambiguous replacement: {stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("flags.txt")).unwrap(),
+        "flag=false\nflag=false\n"
+    );
+
+    let second_only = r#"[
+  {
+    "path": "flags.txt",
+    "find": "flag=false",
+    "replace": "flag=true",
+    "occurrence": 2
+  }
+]
+"#;
+    let replace = run_workspace_with_stdin(root, &["replace", "--stdin", "--json"], second_only);
+    assert_eq!(replace["kind"], "workspace_replace");
+    assert_eq!(
+        fs::read_to_string(root.join("flags.txt")).unwrap(),
+        "flag=false\nflag=true\n"
     );
 }
 

@@ -62,9 +62,10 @@ workspace impact    Find likely impacted files from the current diff
 workspace read      Read a text file or line range
 workspace diff      Show the current git diff
 workspace patch     Apply a patch as a recorded transaction
+workspace replace   Apply exact text replacements as a recorded transaction
 workspace run       Run a command and record the result
 workspace log       Show the operation log
-workspace rollback  Roll back a workspace patch transaction
+workspace rollback  Roll back a workspace patch or replace transaction
 ```
 
 Observation commands support `--json` and return structured output with
@@ -469,6 +470,23 @@ avoid creating a temporary patch file just to apply a transaction.
 Large changed-file lists are bounded in patch and rollback observations. The
 total count remains available as `file_count`, with omitted files reported
 separately.
+
+### `workspace replace`
+
+Applies exact text replacements as a transaction and stores the generated patch
+for rollback:
+
+```sh
+workspace replace replacements.json
+workspace replace --stdin <<'JSON'
+{"replacements":[{"path":"README.md","find":"old text","replace":"new text"}]}
+JSON
+```
+
+By default each `find` string must match exactly once. For repeated strings, add
+a 1-based `occurrence` field to replace a specific match. This gives agents a
+structured alternative when exact replacements are simpler and less error-prone
+than hand-writing unified diff hunks.
 
 ### `workspace run`
 
