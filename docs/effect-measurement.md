@@ -78,7 +78,8 @@ re-render consistency with `effect.json`, Markdown re-render consistency with
 `effect.json`, result-summary consistency with `effect.json`, and
 residual-cluster diagnostic fields for missing predictable/new targets,
 missed-target ranks and scores, score-ranked top-k candidates, and top
-non-targets.
+non-targets. It also checks that the score-ranked top-k candidate list matches
+the method's top-k path order and that any ranked missed target carries a score.
 The verifier also supports `--require-clean-workspace` for CI-published paper
 artifacts; this requires `workspace_dirty: false`,
 `workspace_status_line_count: 0` as an integer, and a recorded workspace

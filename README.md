@@ -163,8 +163,9 @@ manifest,
 holdout manifest hashes and holdout entries that match `effect.json` metadata,
 a recomputed threshold pass and threshold log that re-renders from
 `effect.json`, a Markdown summary that re-renders from `effect.json`, and a
-result summary that matches `effect.json`. The manifest also records the
-verifier command for artifact consumers.
+result summary that matches `effect.json`, including score-ranked residual
+diagnostics that line up with each method top-k list. The manifest also records
+the verifier command for artifact consumers.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
 is captured in `tools/effect_paper_holdouts.json`. `tools/prepare_effect_holdouts.py`

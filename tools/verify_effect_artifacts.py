@@ -735,26 +735,35 @@ def verify_residual_gap_case_schema(
     if not isinstance(case, dict):
         failures.append(f"result_summary.json {label} must be an object")
         return
+    string_lists: dict[str, list[str]] = {}
     for field in (
         "missing_expected",
-        "missing_expected_ranks",
+        "method_hits",
         "missing_predictable_expected",
         "missing_unpredictable_expected",
         "method_false_positives",
         "method_top",
-        "method_top_ranked",
     ):
-        if not isinstance(case.get(field), list):
-            failures.append(f"result_summary.json {label}.{field} must be a list")
+        values = verify_string_list_field(case, field, label, failures)
+        if values is not None:
+            string_lists[field] = values
     ranks = case.get("missing_expected_ranks")
-    if isinstance(ranks, list):
+    if not isinstance(ranks, list):
+        failures.append(
+            f"result_summary.json {label}.missing_expected_ranks must be a list"
+        )
+    else:
+        rank_paths = []
         for rank_index, entry in enumerate(ranks):
             entry_label = f"{label}.missing_expected_ranks[{rank_index}]"
             if not isinstance(entry, dict):
                 failures.append(f"result_summary.json {entry_label} must be an object")
                 continue
-            if not isinstance(entry.get("path"), str):
+            path = entry.get("path")
+            if not isinstance(path, str):
                 failures.append(f"result_summary.json {entry_label}.path must be a string")
+            else:
+                rank_paths.append(path)
             rank = entry.get("rank")
             if rank is not None and (
                 not isinstance(rank, int) or isinstance(rank, bool)
@@ -767,29 +776,90 @@ def verify_residual_gap_case_schema(
                 failures.append(
                     f"result_summary.json {entry_label}.score must be a number"
                 )
+            if isinstance(rank, int) and not isinstance(rank, bool) and score is None:
+                failures.append(
+                    f"result_summary.json {entry_label}.score is required "
+                    "when rank is present"
+                )
+        missing_expected = string_lists.get("missing_expected")
+        if missing_expected is not None and rank_paths != missing_expected:
+            failures.append(
+                f"result_summary.json {label}.missing_expected_ranks paths "
+                "must match missing_expected"
+            )
     top_ranked = case.get("method_top_ranked")
-    if isinstance(top_ranked, list):
+    if not isinstance(top_ranked, list):
+        failures.append(
+            f"result_summary.json {label}.method_top_ranked must be a list"
+        )
+    else:
+        top_paths = []
         for rank_index, entry in enumerate(top_ranked):
             entry_label = f"{label}.method_top_ranked[{rank_index}]"
-            verify_ranked_candidate_schema(entry, entry_label, failures)
+            path = verify_ranked_candidate_schema(
+                entry,
+                entry_label,
+                failures,
+                require_score=True,
+            )
+            if path is not None:
+                top_paths.append(path)
+            if isinstance(entry, dict) and entry.get("rank") != rank_index + 1:
+                failures.append(
+                    f"result_summary.json {entry_label}.rank must be {rank_index + 1}"
+                )
+        method_top = string_lists.get("method_top")
+        if method_top is not None and top_paths != method_top:
+            failures.append(
+                f"result_summary.json {label}.method_top_ranked paths "
+                "must match method_top"
+            )
+
+
+def verify_string_list_field(
+    case: dict[str, Any],
+    field: str,
+    label: str,
+    failures: list[str],
+) -> list[str] | None:
+    values = case.get(field)
+    if not isinstance(values, list):
+        failures.append(f"result_summary.json {label}.{field} must be a list")
+        return None
+    result = []
+    for index, value in enumerate(values):
+        if not isinstance(value, str):
+            failures.append(
+                f"result_summary.json {label}.{field}[{index}] must be a string"
+            )
+            continue
+        result.append(value)
+    return result
 
 
 def verify_ranked_candidate_schema(
     entry: Any,
     label: str,
     failures: list[str],
-) -> None:
+    *,
+    require_score: bool = False,
+) -> str | None:
     if not isinstance(entry, dict):
         failures.append(f"result_summary.json {label} must be an object")
-        return
-    if not isinstance(entry.get("path"), str):
+        return None
+    path = entry.get("path")
+    if not isinstance(path, str):
         failures.append(f"result_summary.json {label}.path must be a string")
+        path = None
     rank = entry.get("rank")
     if not isinstance(rank, int) or isinstance(rank, bool):
         failures.append(f"result_summary.json {label}.rank must be an integer")
     score = entry.get("score")
-    if score is not None and not is_json_number(score):
+    if score is None and require_score:
+        failures.append(f"result_summary.json {label}.score is required")
+    elif score is not None and not is_json_number(score):
         failures.append(f"result_summary.json {label}.score must be a number")
+    return path
 
 
 def verify_result_summary_matches_report(
