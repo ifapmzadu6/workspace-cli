@@ -36,7 +36,12 @@ def resolve_user_path(path: Path) -> Path:
     return (Path.cwd() / path).resolve()
 
 
-def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
+def build_plan(
+    output_dir: Path,
+    manifest: Path | None,
+    *,
+    require_clean_workspace: bool = False,
+) -> dict[str, Any]:
     output_dir = resolve_user_path(output_dir)
     manifest = resolve_user_path(manifest) if manifest is not None else None
     json_path = output_dir / "effect.json"
@@ -75,8 +80,10 @@ def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
     verify_command = [
         sys.executable,
         str(TOOLS_DIR / "verify_effect_artifacts.py"),
-        str(output_dir),
     ]
+    if require_clean_workspace:
+        verify_command.append("--require-clean-workspace")
+    verify_command.append(str(output_dir))
 
     return {
         "output_dir": output_dir,
@@ -94,6 +101,7 @@ def build_plan(output_dir: Path, manifest: Path | None) -> dict[str, Any]:
         "verify_command": verify_command,
         "manifest": manifest,
         "require_holdout_thresholds": manifest is not None,
+        "require_clean_workspace_verifier": require_clean_workspace,
     }
 
 
@@ -198,6 +206,7 @@ def write_run_manifest(plan: dict[str, Any]) -> None:
             else None
         ),
         "require_holdout_thresholds": plan["require_holdout_thresholds"],
+        "require_clean_workspace_verifier": plan["require_clean_workspace_verifier"],
         "sha256": artifact_checksums(plan),
         "commands": {
             "measure": plan["measurement_command"],
@@ -234,6 +243,7 @@ def run_plan(
         runner=runner,
     )
     write_run_manifest(plan)
+    runner(plan["verify_command"], cwd=ROOT, check=True, text=True)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -257,6 +267,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "thresholds.txt, and run_manifest.json"
         ),
     )
+    parser.add_argument(
+        "--require-clean-workspace",
+        action="store_true",
+        help="record and run artifact verification with clean workspace metadata required",
+    )
     args = parser.parse_args(argv)
     if args.paper and args.manifest is not None:
         parser.error("--paper cannot be combined with --manifest")
@@ -267,7 +282,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    plan = build_plan(args.output_dir, args.manifest)
+    plan = build_plan(
+        args.output_dir,
+        args.manifest,
+        require_clean_workspace=args.require_clean_workspace,
+    )
     run_plan(plan)
     print(f"wrote effect artifacts to {plan['output_dir']}")
 

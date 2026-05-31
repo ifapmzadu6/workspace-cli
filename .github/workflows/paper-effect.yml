@@ -40,8 +40,8 @@ jobs:
         run: |
           python3 tools/run_effect_artifacts.py \
             --manifest target/effect-repos/holdouts.local.json \
-            --output-dir target/effect-paper
-          python3 tools/verify_effect_artifacts.py --require-clean-workspace target/effect-paper
+            --output-dir target/effect-paper \
+            --require-clean-workspace
 
       - name: Upload paper artifacts
         id: upload-paper-artifacts

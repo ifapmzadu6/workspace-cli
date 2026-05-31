@@ -219,6 +219,28 @@ def verify_clean_workspace_metadata(
             )
 
 
+def verify_clean_workspace_manifest_command(
+    manifest: dict[str, Any],
+    failures: list[str],
+) -> None:
+    commands = manifest.get("commands")
+    if not isinstance(commands, dict):
+        return
+    verify_command = commands.get("verify_artifacts")
+    if not isinstance(verify_command, list) or not all(
+        isinstance(part, str) for part in verify_command
+    ):
+        failures.append(
+            "run_manifest.json commands.verify_artifacts must be a string list"
+        )
+        return
+    if "--require-clean-workspace" not in verify_command:
+        failures.append(
+            "run_manifest.json commands.verify_artifacts must include "
+            "--require-clean-workspace"
+        )
+
+
 def verify_result_summary_schema(
     result_summary: dict[str, Any],
     failures: list[str],
@@ -408,6 +430,7 @@ def verify_artifact_directory(
     verify_result_summary_schema(result_summary, failures)
     if require_clean_workspace:
         verify_clean_workspace_metadata(effect_report, result_summary, failures)
+        verify_clean_workspace_manifest_command(manifest, failures)
     verify_residual_gap_clusters(result_summary, failures)
     verify_result_summary_matches_report(effect_report, result_summary, failures)
     verify_markdown_matches_report(effect_report, artifact_dir / "effect.md", failures)

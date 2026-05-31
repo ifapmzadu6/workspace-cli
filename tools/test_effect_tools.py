@@ -1529,6 +1529,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
         self.assertEqual(plan["markdown_path"].name, "effect.md")
         self.assertEqual(plan["result_summary_path"].name, "result_summary.json")
         self.assertEqual(plan["threshold_path"].name, "thresholds.txt")
+        self.assertNotIn("--require-clean-workspace", plan["verify_command"])
 
     def test_fixture_plan_keeps_holdout_thresholds_optional(self) -> None:
         plan = run_effect_artifacts.build_plan(
@@ -1537,6 +1538,21 @@ class EffectArtifactRunnerTests(unittest.TestCase):
         )
         self.assertNotIn("--repo-holdout-manifest", plan["measurement_command"])
         self.assertNotIn("--require-holdout", plan["threshold_command"])
+        self.assertFalse(plan["require_clean_workspace_verifier"])
+
+    def test_clean_workspace_plan_records_clean_verifier_command(self) -> None:
+        plan = run_effect_artifacts.build_plan(
+            Path("target/test-effect-artifacts"),
+            run_effect_artifacts.DEFAULT_PAPER_MANIFEST,
+            require_clean_workspace=True,
+        )
+
+        self.assertTrue(plan["require_clean_workspace_verifier"])
+        self.assertIn("--require-clean-workspace", plan["verify_command"])
+        self.assertLess(
+            plan["verify_command"].index("--require-clean-workspace"),
+            len(plan["verify_command"]) - 1,
+        )
 
     def test_artifact_runner_writes_all_outputs_and_run_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1558,6 +1574,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
                 plan["threshold_command"],
                 plan["summary_command"],
                 plan["result_summary_command"],
+                plan["verify_command"],
             ])
             self.assertTrue(plan["json_path"].exists())
             self.assertTrue(plan["markdown_path"].exists())
@@ -1597,6 +1614,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
                 run_effect_artifacts.file_sha256(plan["threshold_path"]),
             )
             self.assertFalse(run_manifest["require_holdout_thresholds"])
+            self.assertFalse(run_manifest["require_clean_workspace_verifier"])
 
     def test_artifact_runner_copies_holdout_manifests(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1683,6 +1701,11 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                     "python3",
                     "tools/extract_effect_summary.py",
                 ],
+                "verify_artifacts": [
+                    "python3",
+                    "tools/verify_effect_artifacts.py",
+                    str(output_dir),
+                ],
             },
             "require_holdout_thresholds": True,
             "sha256": {
@@ -1753,6 +1776,14 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         )
         return summary
 
+    def rewrite_verify_command(self, output_dir: Path, command: list[str]) -> None:
+        run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+        run_manifest["commands"]["verify_artifacts"] = command
+        (output_dir / "run_manifest.json").write_text(
+            json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
     def test_artifact_verifier_accepts_complete_artifact_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_dir = Path(tmp_dir) / "artifacts"
@@ -1762,6 +1793,61 @@ class EffectArtifactVerifierTests(unittest.TestCase):
                 self.verify_with_patched_semantics(output_dir),
                 [],
             )
+
+    def test_artifact_verifier_accepts_clean_metadata_when_clean_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            clean_metadata = {
+                "workspace_commit": "abc123",
+                "workspace_dirty": False,
+                "workspace_status_line_count": 0,
+            }
+            summary = self.rewrite_artifact_metadata(output_dir, clean_metadata)
+            self.rewrite_verify_command(
+                output_dir,
+                [
+                    "python3",
+                    "tools/verify_effect_artifacts.py",
+                    "--require-clean-workspace",
+                    str(output_dir),
+                ],
+            )
+
+            self.assertEqual(
+                self.verify_with_patched_semantics(
+                    output_dir,
+                    extracted_summary=summary,
+                    require_clean_workspace=True,
+                ),
+                [],
+            )
+
+    def test_artifact_verifier_requires_clean_manifest_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            clean_metadata = {
+                "workspace_commit": "abc123",
+                "workspace_dirty": False,
+                "workspace_status_line_count": 0,
+            }
+            summary = self.rewrite_artifact_metadata(output_dir, clean_metadata)
+
+            failures = self.verify_with_patched_semantics(
+                output_dir,
+                extracted_summary=summary,
+                require_clean_workspace=True,
+            )
+
+        self.assertTrue(
+            any(
+                "commands.verify_artifacts must include --require-clean-workspace"
+                in failure
+                for failure in failures
+            ),
+            failures,
+        )
 
     def test_artifact_verifier_rejects_dirty_metadata_when_clean_required(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
