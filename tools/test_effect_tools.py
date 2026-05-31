@@ -883,6 +883,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                     "paired_deltas": {
                         "workspace_related_hybrid_minus_workspace_related_direct": {
                             "mean_delta_average_precision_at_5": 0.087,
+                            "p_greater_delta_average_precision_at_5": 1.862645149230957e-9,
                             "p_greater_holm_delta_average_precision_at_5": 0.00003,
                             "win_count_delta_average_precision_at_5": 21,
                             "tie_count_delta_average_precision_at_5": 24,
@@ -913,6 +914,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                                 "paired_deltas": {
                                     "workspace_related_hybrid_w_0_9_minus_workspace_related_direct": {
                                         "mean_delta_average_precision_at_5": 0.087,
+                                        "p_greater_delta_average_precision_at_5": 1.862645149230957e-9,
                                         "p_greater_holm_delta_average_precision_at_5": 0.00003,
                                     },
                                 },
@@ -1071,7 +1073,7 @@ class EffectSummaryExtractionTests(unittest.TestCase):
 
         summary = extract_effect_summary.extract_summary(report)
 
-        self.assertEqual(summary["schema_version"], 3)
+        self.assertEqual(summary["schema_version"], 4)
         self.assertEqual(summary["observation_recall"]["map_fact_recall"], 1.0)
         holdout = summary["repo_temporal_holdout"]
         self.assertEqual(holdout["temporal_leakage_audit"]["failure_count"], 0)
@@ -1197,6 +1199,16 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                 "workspace_related_hybrid_minus_workspace_related_direct"
             ]["wins"],
             21,
+        )
+        self.assertEqual(
+            holdout["key_deltas"][
+                "workspace_related_hybrid_minus_workspace_related_direct"
+            ]["p_greater"],
+            1.86265e-9,
+        )
+        self.assertEqual(
+            holdout["weight_sweep"][1]["delta_vs_direct"]["p_greater"],
+            1.86265e-9,
         )
 
 
@@ -1563,7 +1575,7 @@ class EffectThresholdTests(unittest.TestCase):
         summary = extract_effect_summary.extract_summary(self.passing_report())
 
         by_label = {entry["label"]: entry for entry in summary["threshold_margins"]}
-        self.assertEqual(summary["schema_version"], 3)
+        self.assertEqual(summary["schema_version"], 4)
         self.assertEqual(
             by_label[
                 "repo_temporal_holdout_aggregate.workspace_related_hybrid"
@@ -1899,7 +1911,7 @@ class EffectArtifactRunnerTests(unittest.TestCase):
 
 class EffectArtifactVerifierTests(unittest.TestCase):
     SUMMARY_FIXTURE = {
-        "schema_version": 3,
+        "schema_version": 4,
         "repo_temporal_holdout": {},
         "threshold_margins": [],
     }
@@ -2038,7 +2050,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         effect_report = {"metadata": merged_metadata, "measurements": []}
         summary = {
             "metadata": merged_metadata,
-            "schema_version": 3,
+            "schema_version": 4,
             "threshold_margins": [],
         }
         (output_dir / "effect.json").write_text(
@@ -2260,7 +2272,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 3,
+                "schema_version": 4,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2305,7 +2317,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 3,
+                "schema_version": 4,
                 "repo_temporal_holdout": {},
                 "threshold_margins": [
                     {
@@ -2569,7 +2581,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             failures = self.verify_with_patched_semantics(
                 output_dir,
                 extracted_summary={
-                    "schema_version": 3,
+                    "schema_version": 4,
                     "changed": True,
                     "threshold_margins": [],
                 },
@@ -2609,7 +2621,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 3,
+                "schema_version": 4,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -2698,7 +2710,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 3,
+                "schema_version": 4,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,
@@ -2773,7 +2785,7 @@ class EffectArtifactVerifierTests(unittest.TestCase):
             output_dir = Path(tmp_dir) / "artifacts"
             self.write_artifact_set(output_dir)
             summary = {
-                "schema_version": 3,
+                "schema_version": 4,
                 "threshold_margins": [],
                 "repo_temporal_holdout": {
                     "k": 5,

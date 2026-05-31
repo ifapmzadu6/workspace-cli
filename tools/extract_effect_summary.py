@@ -17,7 +17,8 @@ if str(TOOLS_DIR) not in sys.path:
 import check_effect_thresholds  # noqa: E402
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+P_VALUE_SIGNIFICANT_DIGITS = 6
 
 
 def load_report(path: str) -> dict[str, Any]:
@@ -51,6 +52,12 @@ def rounded(value: Any) -> float | None:
     if value is None:
         return None
     return round(float(value), 6)
+
+
+def rounded_p_value(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(f"{float(value):.{P_VALUE_SIGNIFICANT_DIGITS}g}")
 
 
 def metric_mean(summary: dict[str, Any], metric: str) -> dict[str, float] | None:
@@ -117,9 +124,12 @@ def delta_metrics(
         if source not in summary:
             continue
         value = summary[source]
-        result[target] = (
-            int(value) if target in {"wins", "ties", "losses"} else rounded(value)
-        )
+        if target in {"wins", "ties", "losses"}:
+            result[target] = int(value)
+        elif source.startswith("p_"):
+            result[target] = rounded_p_value(value)
+        else:
+            result[target] = rounded(value)
     return result
 
 
