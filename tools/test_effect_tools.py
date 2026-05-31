@@ -1207,19 +1207,21 @@ class EffectThresholdTests(unittest.TestCase):
 
     def repo_macro_average(self, *, predictable: bool) -> dict:
         if predictable:
-            hybrid_ap = 0.80
-            direct_ap = 0.67
+            hybrid_ap = 0.856
+            direct_ap = 0.673
             pagerank_ap = 0.62
-            content_ap = 0.42
-            recent_ap = 0.52
-            global_ap = 0.53
+            lexical_ap = 0.297
+            content_ap = 0.411
+            recent_ap = 0.467
+            global_ap = 0.533
         else:
-            hybrid_ap = 0.768
-            direct_ap = 0.62
-            pagerank_ap = 0.56
-            content_ap = 0.38
-            recent_ap = 0.50
-            global_ap = 0.51
+            hybrid_ap = 0.823
+            direct_ap = 0.661
+            pagerank_ap = 0.592
+            lexical_ap = 0.291
+            content_ap = 0.394
+            recent_ap = 0.454
+            global_ap = 0.515
         return {
             "repo_count": 3,
             "aggregate": {
@@ -1230,7 +1232,7 @@ class EffectThresholdTests(unittest.TestCase):
                     "mean_average_precision_at_5": pagerank_ap,
                 },
                 "baseline_lexical_similarity": {
-                    "mean_average_precision_at_5": 0.25,
+                    "mean_average_precision_at_5": lexical_ap,
                 },
                 "baseline_content_similarity": {
                     "mean_average_precision_at_5": content_ap,
@@ -1254,39 +1256,39 @@ class EffectThresholdTests(unittest.TestCase):
                 "target_count": 204,
                 "aggregate": {
                     "workspace_related_direct": {
-                        "mean_average_precision_at_5": 0.64,
+                        "mean_average_precision_at_5": 0.644,
                     },
                     "baseline_lexical_similarity": {
-                        "mean_average_precision_at_5": 0.20,
+                        "mean_average_precision_at_5": 0.253,
                     },
                     "baseline_content_similarity": {
-                        "mean_average_precision_at_5": 0.30,
+                        "mean_average_precision_at_5": 0.399,
                     },
                     "baseline_recent_activity": {
-                        "mean_average_precision_at_5": 0.45,
+                        "mean_average_precision_at_5": 0.424,
                     },
                     "baseline_global_pagerank": {
-                        "mean_average_precision_at_5": 0.50,
+                        "mean_average_precision_at_5": 0.521,
                     },
                     "workspace_related_pagerank": {
                         "mean_average_precision_at_5": 0.61,
                     },
                     "workspace_related_hybrid": {
-                        "mean_average_precision_at_5": 0.770,
+                        "mean_average_precision_at_5": 0.832,
                     },
                     "history_oracle_ceiling": {
-                        "mean_average_precision_at_5": 0.90,
+                        "mean_average_precision_at_5": 0.915,
                     },
                 },
-                "hybrid_weight_sweep": self.weight_sweep(0.770),
+                "hybrid_weight_sweep": self.weight_sweep(0.832),
                 "leave_one_repo_out_weight_selection": self.loro_selection(
-                    ap=0.770,
-                    direct_ap=0.64,
+                    ap=0.832,
+                    direct_ap=0.644,
                     pagerank_ap=0.61,
-                    lexical_ap=0.20,
-                    content_ap=0.30,
-                    recent_ap=0.45,
-                    global_ap=0.50,
+                    lexical_ap=0.253,
+                    content_ap=0.399,
+                    recent_ap=0.424,
+                    global_ap=0.521,
                 ),
                 "paired_deltas": self.paired_deltas("workspace_related_hybrid"),
                 "repo_macro_average": self.repo_macro_average(predictable=True),
@@ -1301,10 +1303,10 @@ class EffectThresholdTests(unittest.TestCase):
                     "mean_average_precision_at_5": 0.626,
                 },
                 "baseline_lexical_similarity": {
-                    "mean_average_precision_at_5": 0.20,
+                    "mean_average_precision_at_5": 0.244,
                 },
                 "baseline_content_similarity": {
-                    "mean_average_precision_at_5": 0.30,
+                    "mean_average_precision_at_5": 0.378,
                 },
                 "baseline_recent_activity": {
                     "mean_average_precision_at_5": 0.403,
@@ -1316,21 +1318,21 @@ class EffectThresholdTests(unittest.TestCase):
                     "mean_average_precision_at_5": 0.577,
                 },
                 "workspace_related_hybrid": {
-                    "mean_average_precision_at_5": 0.730,
+                    "mean_average_precision_at_5": 0.790,
                 },
                 "history_oracle_ceiling": {
                     "mean_average_precision_at_5": 0.853,
                 },
             },
-            "hybrid_weight_sweep": self.weight_sweep(0.730),
+            "hybrid_weight_sweep": self.weight_sweep(0.790),
             "leave_one_repo_out_weight_selection": self.loro_selection(
-                ap=0.730,
+                ap=0.790,
                 direct_ap=0.626,
                 pagerank_ap=0.577,
-                lexical_ap=0.20,
-                content_ap=0.30,
-                recent_ap=0.40,
-                global_ap=0.42,
+                lexical_ap=0.244,
+                content_ap=0.378,
+                recent_ap=0.403,
+                global_ap=0.498,
             ),
             "paired_deltas": self.paired_deltas("workspace_related_hybrid"),
             "repo_macro_average": self.repo_macro_average(predictable=False),
@@ -1535,7 +1537,7 @@ class EffectThresholdTests(unittest.TestCase):
                 method = entry["related"]["method"]
                 entry["related"]["aggregate"][method][
                     "mean_average_precision_at_5"
-                ] = 0.74
+                ] = 0.80
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any("is below weight 0.8" in item for item in failures),

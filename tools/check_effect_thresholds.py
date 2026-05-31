@@ -32,7 +32,7 @@ EXPECTED_HYBRID_WEIGHT_SWEEP = [
 EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT = 0.9
 FLOAT_TOLERANCE = 1e-12
 MAX_HOLDOUT_HOLM_P = 0.005
-MIN_HOLDOUT_ORACLE_NORMALIZED_AP = 0.80
+MIN_HOLDOUT_ORACLE_NORMALIZED_AP = 0.90
 
 
 def load_report(path: str) -> dict[str, Any]:
@@ -193,18 +193,18 @@ def check_repo_holdout_thresholds(
     require_count(failures, holdout, "target_count", 180, label)
 
     aggregate = holdout.get("aggregate", {})
-    min_hybrid_ap = 0.765 if predictable else 0.725
-    min_direct_delta = 0.09 if predictable else 0.07
-    min_lexical_delta = 0.40 if predictable else 0.35
-    min_content_delta = 0.25 if predictable else 0.20
-    min_recent_delta = 0.20 if predictable else 0.15
-    min_global_delta = 0.18 if predictable else 0.15
-    min_pagerank_delta = 0.11 if predictable else 0.10
+    min_hybrid_ap = 0.82 if predictable else 0.78
+    min_direct_delta = 0.15 if predictable else 0.13
+    min_lexical_delta = 0.50 if predictable else 0.48
+    min_content_delta = 0.35 if predictable else 0.33
+    min_recent_delta = 0.32 if predictable else 0.30
+    min_global_delta = 0.24 if predictable else 0.23
+    min_pagerank_delta = 0.18 if predictable else 0.17
     min_oracle_normalized = MIN_HOLDOUT_ORACLE_NORMALIZED_AP
-    min_loro_ap = 0.765 if predictable else 0.725
-    min_macro_hybrid_ap = 0.79 if predictable else 0.76
-    min_macro_direct_delta = 0.08 if predictable else 0.06
-    min_macro_pagerank_delta = 0.12 if predictable else 0.10
+    min_loro_ap = 0.82 if predictable else 0.78
+    min_macro_hybrid_ap = 0.84 if predictable else 0.81
+    min_macro_direct_delta = 0.16 if predictable else 0.14
+    min_macro_pagerank_delta = 0.19 if predictable else 0.18
     ap_metric = "mean_average_precision_at_5"
     delta_metric = "average_precision_at_5"
 
@@ -331,7 +331,7 @@ def check_repo_holdout_thresholds(
         holdout,
         weight=EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT,
         metric="mean_average_precision_at_5",
-        minimum=0.73 if predictable else 0.70,
+        minimum=0.82 if predictable else 0.78,
         label=label,
     )
     require_loro_thresholds(

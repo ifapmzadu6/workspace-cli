@@ -82,6 +82,10 @@ manifest's recorded verifier command to include the same clean-workspace flag.
 For paper-style holdout reports, the threshold log gates case-weighted and
 repo-macro AP effect-size floors, oracle-normalized AP, plus Holm-adjusted
 paired sign-flip p-value ceilings for the key hybrid-vs-baseline deltas.
+The expanded fixed-ref gate requires related hybrid AP@5 of at least 0.78
+all-target and 0.82 predictable-only, repo-macro AP@5 of at least 0.81
+all-target and 0.84 predictable-only, and oracle-normalized AP@5 of at least
+0.90.
 It also gates a temporal leakage audit: every held-out seed case must have
 been scored with a co-change index whose head exactly matches the held-out
 commit's parent.
