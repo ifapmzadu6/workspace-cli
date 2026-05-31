@@ -97,8 +97,9 @@ const RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER: f64 = 3.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_SCORE_MULTIPLIER: f64 = 2.25;
 const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.4;
 const RELATED_HYBRID_LOW_SIGNAL_METADATA_SCORE_MULTIPLIER: f64 = 0.3;
-const RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER: f64 = 0.3;
-const RELATED_HYBRID_CROSS_ECOSYSTEM_PACKAGE_METADATA_SCORE_MULTIPLIER: f64 = 0.45;
+const RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER: f64 = 0.25;
+const RELATED_HYBRID_CI_WORKFLOW_METADATA_SCORE_MULTIPLIER: f64 = 0.25;
+const RELATED_HYBRID_CROSS_ECOSYSTEM_PACKAGE_METADATA_SCORE_MULTIPLIER: f64 = 0.25;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER: f64 = 6.0;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
 const RELATED_HYBRID_CHANGELOG_JS_TOOLCHAIN_COLD_START_SCORE_MULTIPLIER: f64 = 60.0;
@@ -4715,6 +4716,9 @@ fn related_hybrid_path_score_multiplier(
     if is_release_workflow_metadata_candidate(target, candidate) {
         multiplier *= RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER;
     }
+    if is_ci_workflow_metadata_candidate(target, candidate) {
+        multiplier *= RELATED_HYBRID_CI_WORKFLOW_METADATA_SCORE_MULTIPLIER;
+    }
     if direct_edge_weight > 0.0 && is_readme_lockfile_candidate(target, candidate) {
         multiplier *= RELATED_HYBRID_README_LOCKFILE_SCORE_MULTIPLIER;
     }
@@ -4944,6 +4948,12 @@ fn is_javascript_lockfile(path: &str) -> bool {
 fn is_release_workflow_metadata_candidate(target: &str, candidate: &str) -> bool {
     is_release_workflow_file(candidate)
         && !is_release_workflow_file(target)
+        && !is_project_manifest_or_lock(target)
+}
+
+fn is_ci_workflow_metadata_candidate(target: &str, candidate: &str) -> bool {
+    is_ci_like_workflow_file(candidate)
+        && !is_ci_like_workflow_file(target)
         && !is_project_manifest_or_lock(target)
 }
 
@@ -12115,6 +12125,15 @@ src/b.rs
                 1.0
             ),
             RELATED_HYBRID_RELEASE_WORKFLOW_METADATA_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier(
+                "src/main.rs",
+                ".github/workflows/ci.yml",
+                1.0,
+                1.0
+            ),
+            RELATED_HYBRID_CI_WORKFLOW_METADATA_SCORE_MULTIPLIER
         );
         assert_eq!(
             related_hybrid_path_score_multiplier(
