@@ -788,6 +788,74 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                     },
                     "paired_deltas": {},
                     "hybrid_weight_sweep": [],
+                    "cases": [
+                        {
+                            "repo": "/tmp/workspace-cli",
+                            "heldout_commit": "abc123",
+                            "seed": "README.md",
+                            "expected": [
+                                "Cargo.toml",
+                                "src/main.rs",
+                            ],
+                            "predictable_expected": [
+                                "Cargo.toml",
+                                "src/main.rs",
+                            ],
+                            "unpredictable_expected": [],
+                            "methods": {
+                                "workspace_related_hybrid": {
+                                    "average_precision_at_5": 0.25,
+                                    "hits": ["Cargo.toml"],
+                                    "top": [
+                                        "README.md",
+                                        "Cargo.toml",
+                                        "Cargo.lock",
+                                        "tests/cli.rs",
+                                        ".gitignore",
+                                    ],
+                                },
+                                "history_oracle_ceiling": {
+                                    "average_precision_at_5": 1.0,
+                                },
+                            },
+                        },
+                        {
+                            "repo": "/tmp/workspace-cli",
+                            "heldout_commit": "abc123",
+                            "seed": "Cargo.toml",
+                            "expected": ["Cargo.lock"],
+                            "predictable_expected": ["Cargo.lock"],
+                            "unpredictable_expected": [],
+                            "methods": {
+                                "workspace_related_hybrid": {
+                                    "average_precision_at_5": 1.0,
+                                    "hits": ["Cargo.lock"],
+                                    "top": ["Cargo.lock"],
+                                },
+                                "history_oracle_ceiling": {
+                                    "average_precision_at_5": 1.0,
+                                },
+                            },
+                        },
+                        {
+                            "repo": "/tmp/workspace-cli",
+                            "heldout_commit": "def456",
+                            "seed": "src/main.rs",
+                            "expected": ["tests/cli.rs"],
+                            "predictable_expected": [],
+                            "unpredictable_expected": ["tests/cli.rs"],
+                            "methods": {
+                                "workspace_related_hybrid": {
+                                    "average_precision_at_5": 0.5,
+                                    "hits": [],
+                                    "top": ["README.md", "Cargo.toml"],
+                                },
+                                "history_oracle_ceiling": {
+                                    "average_precision_at_5": 0.75,
+                                },
+                            },
+                        },
+                    ],
                 },
             ],
         }
@@ -847,6 +915,27 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                 "oracle_normalized_average_precision_at_5"
             ],
             0.75,
+        )
+        residual_clusters = holdout["residual_gap_clusters"]
+        self.assertEqual(
+            [cluster["heldout_commit"] for cluster in residual_clusters],
+            ["abc123", "def456"],
+        )
+        self.assertEqual(residual_clusters[0]["case_count"], 1)
+        self.assertEqual(residual_clusters[0]["target_count"], 2)
+        self.assertEqual(
+            residual_clusters[0]["oracle_gap_average_precision_at_5"],
+            0.75,
+        )
+        self.assertEqual(
+            residual_clusters[0]["top_residual_cases"][0]["missing_expected"],
+            ["src/main.rs"],
+        )
+        self.assertEqual(
+            holdout["per_repo"][0]["residual_gap_clusters"][0][
+                "heldout_commit"
+            ],
+            "abc123",
         )
         self.assertEqual(
             holdout["key_deltas"][

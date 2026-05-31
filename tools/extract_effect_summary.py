@@ -151,6 +151,164 @@ def oracle_normalized_metrics(
     return result
 
 
+def residual_gap_clusters(
+    measurements: list[dict[str, Any]],
+    *,
+    method: str = "workspace_related_hybrid",
+    oracle_method: str = "history_oracle_ceiling",
+    limit: int = 8,
+    case_limit: int = 5,
+) -> list[dict[str, Any]]:
+    clusters: dict[tuple[str, str], dict[str, Any]] = {}
+    for measurement in measurements:
+        k = measurement.get("k", 5)
+        metric = f"average_precision_at_{k}"
+        cases = measurement.get("cases", [])
+        if not isinstance(cases, list):
+            continue
+        for case in cases:
+            if not isinstance(case, dict):
+                continue
+            methods = case.get("methods", {})
+            if not isinstance(methods, dict):
+                continue
+            method_summary = methods.get(method)
+            oracle_summary = methods.get(oracle_method)
+            if not isinstance(method_summary, dict) or not isinstance(
+                oracle_summary,
+                dict,
+            ):
+                continue
+            method_ap = method_summary.get(metric)
+            oracle_ap = oracle_summary.get(metric)
+            if method_ap is None or oracle_ap is None:
+                continue
+            gap = float(oracle_ap) - float(method_ap)
+            if gap <= 0.0:
+                continue
+
+            repo = case.get("repo") or measurement.get("repo")
+            commit = case.get("heldout_commit")
+            if not isinstance(commit, str) or not commit:
+                continue
+            repo_key = repo if isinstance(repo, str) else ""
+            key = (repo_key, commit)
+            cluster = clusters.setdefault(
+                key,
+                {
+                    "repo": repo if isinstance(repo, str) else None,
+                    "repo_name": repo_name(repo),
+                    "heldout_commit": commit,
+                    "k": k,
+                    "metric": metric,
+                    "method": method,
+                    "oracle_method": oracle_method,
+                    "_gap_sum": 0.0,
+                    "_method_ap_sum": 0.0,
+                    "_oracle_ap_sum": 0.0,
+                    "_seed_set": set(),
+                    "_target_count": 0,
+                    "_predictable_target_count": 0,
+                    "_unpredictable_target_count": 0,
+                    "_cases": [],
+                },
+            )
+
+            expected = [
+                path for path in case.get("expected", []) if isinstance(path, str)
+            ]
+            predictable_expected = [
+                path
+                for path in case.get("predictable_expected", [])
+                if isinstance(path, str)
+            ]
+            unpredictable_expected = [
+                path
+                for path in case.get("unpredictable_expected", [])
+                if isinstance(path, str)
+            ]
+            hits = [
+                path for path in method_summary.get("hits", []) if isinstance(path, str)
+            ]
+            top = [
+                path for path in method_summary.get("top", []) if isinstance(path, str)
+            ]
+            hit_set = set(hits)
+            seed = case.get("seed")
+            if isinstance(seed, str):
+                cluster["_seed_set"].add(seed)
+
+            cluster["_gap_sum"] += gap
+            cluster["_method_ap_sum"] += float(method_ap)
+            cluster["_oracle_ap_sum"] += float(oracle_ap)
+            cluster["_target_count"] += len(expected)
+            cluster["_predictable_target_count"] += len(predictable_expected)
+            cluster["_unpredictable_target_count"] += len(unpredictable_expected)
+            cluster["_cases"].append(
+                {
+                    "seed": seed,
+                    f"oracle_gap_{metric}": rounded(gap),
+                    f"method_{metric}": rounded(method_ap),
+                    f"oracle_{metric}": rounded(oracle_ap),
+                    "expected_count": len(expected),
+                    "missing_expected": [
+                        path for path in expected if path not in hit_set
+                    ],
+                    "method_hits": hits,
+                    "method_top": top,
+                },
+            )
+
+    rows = []
+    for cluster in clusters.values():
+        cases = sorted(
+            cluster["_cases"],
+            key=lambda case: (
+                -float(case[f"oracle_gap_{cluster['metric']}"]),
+                str(case.get("seed") or ""),
+            ),
+        )
+        case_count = len(cases)
+        if case_count == 0:
+            continue
+        metric = cluster["metric"]
+        row = {
+            "repo": cluster["repo"],
+            "repo_name": cluster["repo_name"],
+            "heldout_commit": cluster["heldout_commit"],
+            "k": cluster["k"],
+            "metric": metric,
+            "method": cluster["method"],
+            "oracle_method": cluster["oracle_method"],
+            "case_count": case_count,
+            "seed_count": len(cluster["_seed_set"]),
+            "target_count": cluster["_target_count"],
+            "predictable_target_count": cluster["_predictable_target_count"],
+            "unpredictable_target_count": cluster["_unpredictable_target_count"],
+            f"oracle_gap_{metric}": rounded(cluster["_gap_sum"]),
+            f"mean_oracle_gap_{metric}": rounded(
+                cluster["_gap_sum"] / case_count
+            ),
+            f"mean_method_{metric}": rounded(
+                cluster["_method_ap_sum"] / case_count
+            ),
+            f"mean_oracle_{metric}": rounded(
+                cluster["_oracle_ap_sum"] / case_count
+            ),
+            "top_residual_cases": cases[:case_limit],
+        }
+        rows.append(row)
+
+    return sorted(
+        rows,
+        key=lambda row: (
+            -float(row[f"oracle_gap_{row['metric']}"]),
+            str(row.get("repo_name") or ""),
+            str(row.get("heldout_commit") or ""),
+        ),
+    )[:limit]
+
+
 def best_weight_sweep(measurement: dict[str, Any], group: str) -> dict[str, Any]:
     k = measurement.get("k", 5)
     metric = f"mean_average_precision_at_{k}"
@@ -342,6 +500,9 @@ def headline_holdout_summary(holdout: dict[str, Any]) -> dict[str, Any]:
             pagerank_method="workspace_related_pagerank",
         ),
     }
+    clusters = residual_gap_clusters([holdout])
+    if clusters:
+        result["residual_gap_clusters"] = clusters
     predictable = holdout.get("predictable_only")
     if isinstance(predictable, dict):
         result["predictable_only"] = headline_holdout_summary(predictable)
@@ -353,13 +514,17 @@ def extract_summary(report: dict[str, Any]) -> dict[str, Any]:
     map_recall = measurement_by_name(report, "map_fact_recall") or {}
     transaction = measurement_by_name(report, "transaction_audit_signal_recall") or {}
     holdout_summary = headline_holdout_summary(holdout or {})
+    repo_measurements = measurements_by_name(report, "repo_temporal_holdout")
     if holdout:
         holdout_summary["per_repo"] = []
-        for measurement in measurements_by_name(report, "repo_temporal_holdout"):
+        for measurement in repo_measurements:
             repo_summary = headline_holdout_summary(measurement)
             repo_summary["repo"] = measurement.get("repo")
             repo_summary["repo_name"] = repo_name(measurement.get("repo"))
             holdout_summary["per_repo"].append(repo_summary)
+        clusters = residual_gap_clusters(repo_measurements)
+        if clusters:
+            holdout_summary["residual_gap_clusters"] = clusters
     return {
         "schema_version": SCHEMA_VERSION,
         "metadata": report.get("metadata", {}),
