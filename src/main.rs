@@ -4648,7 +4648,11 @@ fn related_hybrid_path_score_multiplier(
     direct_edge_weight: f64,
     direct_score: f64,
 ) -> f64 {
-    let mut multiplier = related_path_score_multiplier(target, candidate);
+    let mut multiplier = if is_unshared_script_utility_sibling(target, candidate) {
+        1.0
+    } else {
+        related_path_score_multiplier(target, candidate)
+    };
     if direct_edge_weight >= RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT
         && is_same_source_sibling(target, candidate)
     {
@@ -4787,6 +4791,29 @@ fn shares_parent_and_name_token(target: &str, candidate: &str) -> bool {
     target_tokens
         .iter()
         .any(|token| candidate_tokens.contains(token))
+}
+
+fn is_unshared_script_utility_sibling(target: &str, candidate: &str) -> bool {
+    let parent = path_parent(target);
+    !parent.is_empty()
+        && parent == path_parent(candidate)
+        && is_script_utility_dir(parent)
+        && is_script_like_file(target)
+        && is_script_like_file(candidate)
+        && !shares_parent_and_name_token(target, candidate)
+}
+
+fn is_script_utility_dir(parent: &str) -> bool {
+    parent
+        .split('/')
+        .any(|component| matches!(component, "script" | "scripts" | "bin"))
+}
+
+fn is_script_like_file(path: &str) -> bool {
+    matches!(
+        path_extension(path),
+        Some("sh" | "bash" | "zsh" | "fish" | "py" | "js" | "mjs" | "cjs" | "ts")
+    )
 }
 
 fn path_name_tokens(path: &str) -> BTreeSet<String> {
@@ -11680,16 +11707,15 @@ src/b.rs
         );
         assert_eq!(
             related_hybrid_path_score_multiplier("src/main.rs", "Cargo.toml", 1.0, 1.0),
-            related_path_score_multiplier("src/main.rs", "Cargo.toml")
+            1.0
         );
         assert_eq!(
             related_hybrid_path_score_multiplier("Cargo.toml", "Cargo.lock", 0.0, 0.0),
-            related_path_score_multiplier("Cargo.toml", "Cargo.lock")
+            1.0
         );
         assert!(
             related_hybrid_path_score_multiplier("Cargo.toml", "Cargo.lock", 1.0, 1.0)
-                >= related_path_score_multiplier("Cargo.toml", "Cargo.lock")
-                    * RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER
+                >= RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER
         );
         assert_eq!(
             related_hybrid_path_score_multiplier(
@@ -11698,7 +11724,7 @@ src/b.rs
                 0.0,
                 0.0
             ),
-            related_path_score_multiplier(".github/workflows/ci.yml", "package.json")
+            1.0
         );
         assert!(
             related_hybrid_path_score_multiplier(
@@ -11706,8 +11732,7 @@ src/b.rs
                 "package.json",
                 1.0,
                 1.0
-            ) >= related_path_score_multiplier(".github/workflows/ci.yml", "package.json")
-                * RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER
+            ) >= RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER
         );
         assert_eq!(
             related_hybrid_path_score_multiplier(
@@ -11716,7 +11741,7 @@ src/b.rs
                 1.0,
                 1.0
             ),
-            related_path_score_multiplier("package.json", ".github/workflows/ci.yml")
+            1.0
         );
         assert!(!is_ci_workflow_manifest_pair(
             ".github/workflows/release.yml",
@@ -11728,17 +11753,15 @@ src/b.rs
         ));
         assert!(
             related_hybrid_path_score_multiplier("package.json", "CHANGELOG.md", 1.0, 1.0)
-                >= related_path_score_multiplier("package.json", "CHANGELOG.md")
-                    * RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER
+                >= RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER
         );
         assert!(
             related_hybrid_path_score_multiplier("CHANGELOG.md", "package.json", 1.0, 1.0)
-                >= related_path_score_multiplier("CHANGELOG.md", "package.json")
-                    * RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER
+                >= RELATED_HYBRID_CHANGELOG_MANIFEST_SCORE_MULTIPLIER
         );
         assert_eq!(
             related_hybrid_path_score_multiplier("docs/CHANGELOG.md", "package.json", 1.0, 1.0),
-            related_path_score_multiplier("docs/CHANGELOG.md", "package.json")
+            1.0
         );
         assert_eq!(
             related_hybrid_path_score_multiplier("README.md", "CHANGELOG.md", 0.0, 0.0),
@@ -11775,14 +11798,17 @@ src/b.rs
                 1.0,
                 0.1
             ),
+            1.0
+        );
+        assert!(
             related_path_score_multiplier(
                 "scripts/compare.sh",
                 "scripts/verify_release_version.sh"
-            )
+            ) > 1.0
         );
         assert_eq!(
             related_hybrid_path_score_multiplier("scripts/compare.sh", "docs/compare.md", 1.0, 0.1),
-            related_path_score_multiplier("scripts/compare.sh", "docs/compare.md")
+            1.0
         );
         assert!(is_manifest_lock_pair("package.json", "package-lock.json"));
         assert!(!is_same_source_sibling("main.rs", "lib.rs"));

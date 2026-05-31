@@ -591,7 +591,7 @@ file labels. It preserves the main result with tighter aggregate evidence:
 
 ```text
 expanded temporal leakage audit: 53/53 cases checked, index head matched held-out parent for 53, failures 0
-expanded cross_repo hybrid average_precision@5: 0.733 (0.644, 0.822)
+expanded cross_repo hybrid average_precision@5: 0.736 (0.646, 0.823)
 expanded cross_repo direct average_precision@5: 0.626 (0.524, 0.736)
 expanded cross_repo pagerank average_precision@5: 0.577 (0.490, 0.665)
 expanded cross_repo recent_activity average_precision@5: 0.403 (0.321, 0.485)
@@ -600,22 +600,22 @@ expanded cross_repo path_locality average_precision@5: 0.095 (0.064, 0.127)
 expanded cross_repo lexical_similarity average_precision@5: 0.244 (0.152, 0.336)
 expanded cross_repo content_similarity average_precision@5: 0.378 (0.322, 0.434)
 expanded cross_repo history_oracle_ceiling average_precision@5: 0.853 (0.784, 0.918)
-expanded cross_repo hybrid oracle-normalized average_precision@5: 0.859, oracle gap: 0.120
-expanded cross_repo hybrid - direct average_precision@5: +0.107 (0.064, 0.154), wins/ties/losses 22/28/3, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - pagerank average_precision@5: +0.157 (0.093, 0.224), wins/ties/losses 28/21/4, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.489 (0.388, 0.588), wins/ties/losses 43/9/1, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - content_similarity average_precision@5: +0.356 (0.274, 0.443), wins/ties/losses 43/2/8, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - recent_activity average_precision@5: +0.331 (0.243, 0.413), wins/ties/losses 41/11/1, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid - global_pagerank average_precision@5: +0.236 (0.156, 0.319), wins/ties/losses 31/17/5, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid average_precision@5: 0.774 (0.684, 0.856)
+expanded cross_repo hybrid oracle-normalized average_precision@5: 0.863, oracle gap: 0.117
+expanded cross_repo hybrid - direct average_precision@5: +0.109 (0.066, 0.157), wins/ties/losses 22/28/3, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - pagerank average_precision@5: +0.159 (0.096, 0.226), wins/ties/losses 28/21/4, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - lexical_similarity average_precision@5: +0.492 (0.391, 0.589), wins/ties/losses 43/9/1, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - content_similarity average_precision@5: +0.358 (0.276, 0.445), wins/ties/losses 43/2/8, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - recent_activity average_precision@5: +0.333 (0.248, 0.416), wins/ties/losses 41/11/1, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid - global_pagerank average_precision@5: +0.238 (0.158, 0.322), wins/ties/losses 31/17/5, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid average_precision@5: 0.776 (0.689, 0.857)
 expanded predictable cross_repo lexical_similarity average_precision@5: 0.253 (0.159, 0.353)
 expanded predictable cross_repo content_similarity average_precision@5: 0.399 (0.341, 0.457)
 expanded predictable cross_repo history_oracle_ceiling average_precision@5: 0.915 (0.863, 0.957)
-expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.846, oracle gap: 0.141
-expanded predictable cross_repo hybrid - direct average_precision@5: +0.129 (0.073, 0.189), wins/ties/losses 22/27/3, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.163 (0.099, 0.237), wins/ties/losses 28/20/4, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.521 (0.416, 0.625), wins/ties/losses 43/8/1, p_greater=<0.0001, holm_p_greater=<0.0001
-expanded predictable cross_repo hybrid - content_similarity average_precision@5: +0.374 (0.294, 0.458), wins/ties/losses 43/1/8, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid oracle-normalized average_precision@5: 0.848, oracle gap: 0.139
+expanded predictable cross_repo hybrid - direct average_precision@5: +0.132 (0.075, 0.191), wins/ties/losses 22/27/3, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - pagerank average_precision@5: +0.165 (0.102, 0.238), wins/ties/losses 28/20/4, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - lexical_similarity average_precision@5: +0.523 (0.418, 0.627), wins/ties/losses 43/8/1, p_greater=<0.0001, holm_p_greater=<0.0001
+expanded predictable cross_repo hybrid - content_similarity average_precision@5: +0.377 (0.296, 0.461), wins/ties/losses 43/1/8, p_greater=<0.0001, holm_p_greater=<0.0001
 ```
 
 The expanded manifest also runs a denser hybrid direct-weight sweep:
@@ -632,38 +632,37 @@ expanded cross_repo hybrid direct_weight=0.75 average_precision@5: 0.723
 expanded cross_repo hybrid direct_weight=0.80 average_precision@5: 0.723
 expanded cross_repo hybrid direct_weight=0.82 average_precision@5: 0.723
 expanded cross_repo hybrid direct_weight=0.85 average_precision@5: 0.733
-expanded cross_repo hybrid direct_weight=0.88 average_precision@5: 0.731
-expanded cross_repo hybrid direct_weight=0.90 average_precision@5: 0.733
-expanded cross_repo hybrid direct_weight=0.92 average_precision@5: 0.732
-expanded cross_repo hybrid direct_weight=0.95 average_precision@5: 0.727
+expanded cross_repo hybrid direct_weight=0.88 average_precision@5: 0.733
+expanded cross_repo hybrid direct_weight=0.90 average_precision@5: 0.736
+expanded cross_repo hybrid direct_weight=0.92 average_precision@5: 0.735
+expanded cross_repo hybrid direct_weight=0.95 average_precision@5: 0.730
 expanded cross_repo hybrid direct_weight=1.00 average_precision@5: 0.690
-expanded cross_repo hybrid direct_weight=0.90 - direct average_precision@5: +0.107 (0.063, 0.154), p_greater=<0.0001, holm_p_greater=<0.0001
-expanded cross_repo hybrid direct_weight=0.90 - pagerank average_precision@5: +0.157 (0.089, 0.231), p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid direct_weight=0.90 - direct average_precision@5: +0.109 (0.065, 0.157), p_greater=<0.0001, holm_p_greater=<0.0001
+expanded cross_repo hybrid direct_weight=0.90 - pagerank average_precision@5: +0.159 (0.092, 0.234), p_greater=<0.0001, holm_p_greater=<0.0001
 expanded predictable cross_repo hybrid direct_weight=0.50 average_precision@5: 0.760
-expanded predictable cross_repo hybrid direct_weight=0.90 average_precision@5: 0.774
+expanded predictable cross_repo hybrid direct_weight=0.90 average_precision@5: 0.776
 ```
 
 With the related path, CI-workflow manifest, changelog-manifest, strong
-root-document direct-tie, and shared filename-token priors enabled, the fine
-sweep has a broad high-weight plateau. The all-target slice peaks at 0.85 by
-exact AP, with 0.90 matching to three decimals; the predictable slice peaks at
-0.90.
+root-document direct-tie, shared filename-token, and unshared script-utility
+sibling suppression priors enabled, the fine sweep has a broad high-weight
+plateau and peaks at 0.90 on both the all-target and predictable slices.
 Leave-one-repo-out selection over that dense grid uses a 0.002 AP/nDCG
-indifference band to avoid overfitting tiny train-fold differences. It keeps
-0.90 for `workspace-cli` and `related-cli`, selects 0.85 for
-`llm-json-extract` on the all-target slice, and selects 0.88 for
-`llm-json-extract` on the predictable slice. The LORO aggregate remains close
-to the fixed default, with AP@5 0.730 all-target and 0.770 predictable-only.
-Because 0.90 is the predictable fixed-ref peak and sits on the all-target
-high-weight plateau, the CLI related hybrid default remains 0.90.
+indifference band to avoid overfitting tiny train-fold differences. It selects
+0.90 for all three held-out repositories on both all-target and predictable
+slices. The LORO aggregate matches the fixed default, with AP@5 0.736
+all-target and 0.776 predictable-only. Because 0.90 is now the fixed-ref peak
+and the LORO-selected weight, the CLI related hybrid default remains 0.90.
 
 Residual gap analysis on the fixed-ref manifest shows that the remaining
 oracle gap is concentrated rather than diffuse. The largest cluster is one
 wide `related-cli` behavior-removal commit (`6447d4333c23`), contributing
-3.006 AP@5 gap across 10 seed cases; the root-document and filename-token
-priors lift strongly tied narrative documents and comparison scripts, but
-historical evidence still ranks package and release-workflow files as strongly
-related even though that held-out commit does not edit them. The next largest
+2.874 AP@5 gap across 10 seed cases; the root-document and filename-token
+priors lift strongly tied narrative documents and comparison scripts, and
+unshared script-utility suppression keeps older release helper scripts out of
+the top five for comparison-script seeds, but historical evidence still ranks
+package and release-workflow files as strongly related even though that
+held-out commit does not edit them. The next largest
 cluster is an `llm-json-extract`
 dependency bump (`6a2977eb724e`), where `tsconfig.json` is the remaining third
 expected label but historical package/changelog evidence dominates the top
