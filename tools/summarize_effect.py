@@ -262,6 +262,49 @@ def fmt_path_list(paths: list[str], limit: int = 2) -> str:
     return ", ".join(visible) + suffix
 
 
+def missing_expected_rank_diagnostics(
+    case: dict[str, Any],
+    method: str,
+    missing: list[str],
+) -> list[dict[str, Any]]:
+    diagnostics = case.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return []
+    method_diagnostics = diagnostics.get(method)
+    if not isinstance(method_diagnostics, dict):
+        return []
+    ranks = method_diagnostics.get("missing_expected_ranks")
+    if not isinstance(ranks, list):
+        return []
+    missing_set = set(missing)
+    result = []
+    for entry in ranks:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        rank = entry.get("rank")
+        if not isinstance(path, str) or path not in missing_set:
+            continue
+        if rank is not None and not isinstance(rank, int):
+            continue
+        result.append({"path": path, "rank": rank})
+    return result
+
+
+def fmt_ranked_path_list(entries: list[dict[str, Any]], limit: int = 2) -> str:
+    if not entries:
+        return ""
+    visible = entries[:limit]
+    rendered = []
+    for entry in visible:
+        rank = entry.get("rank")
+        suffix = f"@{rank}" if isinstance(rank, int) else "@>limit"
+        rendered.append(f"{entry.get('path', '')}{suffix}")
+    if len(entries) > limit:
+        rendered.append(f"+{len(entries) - limit} more")
+    return ", ".join(rendered)
+
+
 def short_commit(commit: Any) -> str:
     return str(commit)[:10] if commit else ""
 
@@ -858,6 +901,11 @@ def residual_gap_cluster_entries(
             hits = set(hits_at_k(method_top, expected, k))
             missing = sorted(expected - hits)
             false_positives = [path for path in method_top[:k] if path not in expected]
+            missing_ranks = missing_expected_rank_diagnostics(
+                case,
+                method,
+                missing,
+            )
             predictable_expected = set(case.get("predictable_expected", []))
             unpredictable_expected = set(case.get("unpredictable_expected", []))
             if expected_key == "predictable_expected":
@@ -884,6 +932,7 @@ def residual_gap_cluster_entries(
                     "seed": str(case.get("seed", "")),
                     "gap": gap,
                     "missing": missing,
+                    "missing_ranks": missing_ranks,
                     "missing_predictable": missing_predictable,
                     "missing_unpredictable": missing_unpredictable,
                     "false_positives": false_positives,
@@ -914,6 +963,7 @@ def residual_gap_cluster_entries(
                 "mean_oracle_ap": round(cluster["oracle_ap_sum"] / case_count, 3),
                 "top_seed": top_case["seed"],
                 "top_missing": top_case["missing"],
+                "top_missing_ranks": top_case["missing_ranks"],
                 "top_missing_predictable": top_case["missing_predictable"],
                 "top_missing_unpredictable": top_case["missing_unpredictable"],
                 "top_false_positives": top_case["false_positives"],
@@ -959,6 +1009,7 @@ def render_residual_gap_cluster_table(
             fmt_number(entry["mean_oracle_ap"]),
             entry["top_seed"],
             fmt_path_list(entry["top_missing"], limit=3),
+            fmt_ranked_path_list(entry["top_missing_ranks"], limit=3),
             fmt_path_list(entry["top_missing_predictable"], limit=3),
             fmt_path_list(entry["top_missing_unpredictable"], limit=3),
             fmt_path_list(entry["top_false_positives"], limit=3),
@@ -982,6 +1033,7 @@ def render_residual_gap_cluster_table(
                     "oracle AP",
                     "top seed",
                     "missing targets",
+                    "missing ranks",
                     "missing predictable",
                     "missing new",
                     "top non-targets",

@@ -36,6 +36,7 @@ RELATED_HYBRID_DEFAULT_DIRECT_WEIGHT = 0.9
 RELATED_HYBRID_LORO_METHOD = "workspace_related_hybrid_loro"
 LORO_WEIGHT_SELECTION_AP_TOLERANCE = 0.002
 LORO_WEIGHT_SELECTION_NDCG_TOLERANCE = 0.002
+RELATED_DIAGNOSTIC_MAX_RESULTS = 20
 RELATED_COMPARISON_PAIRS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "workspace_related_pagerank"),
@@ -199,6 +200,33 @@ def ranking_metrics(results: list[str], expected: set[str], k: int) -> dict[str,
         f"ndcg_at_{k}": round(dcg / idcg, 3) if idcg else 1.0,
         "hit_count": len(seen_hits),
         "expected_count": len(expected),
+    }
+
+
+def ranking_diagnostics(
+    results: list[str],
+    expected: set[str],
+    k: int,
+) -> dict[str, Any]:
+    rank_by_path: dict[str, int] = {}
+    for rank, path in enumerate(results, start=1):
+        rank_by_path.setdefault(path, rank)
+
+    hits_at_k = set(results[:k]) & expected
+    missing_expected = sorted(expected - hits_at_k)
+    return {
+        "candidate_count": len(results),
+        "diagnostic_limit": len(results),
+        "missing_expected_ranks": [
+            {
+                "path": path,
+                "rank": rank_by_path.get(path),
+            }
+            for path in missing_expected
+        ],
+        "top_false_positives": [
+            path for path in results[:k] if path not in expected
+        ],
     }
 
 
@@ -2258,6 +2286,19 @@ def measure_repo_holdout(
                     "hybrid",
                     "--json",
                 )
+                diagnostic_hybrid = workspace_json(
+                    bin_path,
+                    clone,
+                    "related",
+                    seed,
+                    "--by",
+                    "cochange",
+                    "--rank",
+                    "hybrid",
+                    "--max-results",
+                    str(max(k, RELATED_DIAGNOSTIC_MAX_RESULTS)),
+                    "--json",
+                )
                 weighted_hybrid = {
                     hybrid_weight_method(
                         "workspace_related_hybrid",
@@ -2337,6 +2378,13 @@ def measure_repo_holdout(
                             "edge_count": index["data"]["edge_count"],
                         },
                         "methods": methods,
+                        "diagnostics": {
+                            "workspace_related_hybrid": ranking_diagnostics(
+                                paths(diagnostic_hybrid, "data", "related"),
+                                expected,
+                                k,
+                            ),
+                        },
                     }
                 )
 

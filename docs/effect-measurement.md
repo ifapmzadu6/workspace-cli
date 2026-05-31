@@ -59,9 +59,10 @@ while
 `result_summary.json` extracts the headline metrics, full weight sweep, best
 weight result, per-repository holdout results, oracle-normalized AP gaps, and
 residual gap clusters with missing targets split into parent-present predictable
-targets and parent-absent new targets, top non-targets occupying the method's
-top-k list, including predictable-only clusters retargeted from case-level
-ranking lists, into a compact machine-readable form.
+targets and parent-absent new targets, the rank of missed targets when they
+appear in a wider diagnostic hybrid ranking, and top non-targets occupying the
+method's top-k list, including predictable-only clusters retargeted from
+case-level ranking lists, into a compact machine-readable form.
 Paper artifact directories also include copies of the local holdout manifest and
 source holdout manifest when available. The run manifest records the exact
 generation commands,
@@ -71,8 +72,8 @@ after writing the manifest. The verifier checks required files, JSON
 parseability, a passing threshold log, manifest hash consistency against
 `effect.json` metadata, recomputed threshold gates, Markdown re-render
 consistency with `effect.json`, result-summary consistency with `effect.json`,
-and residual-cluster diagnostic fields for missing predictable/new targets plus
-top non-targets.
+and residual-cluster diagnostic fields for missing predictable/new targets,
+missed-target ranks, and top non-targets.
 The verifier also supports `--require-clean-workspace` for CI-published paper
 artifacts; this requires `workspace_dirty: false`,
 `workspace_status_line_count: 0` as an integer, and a recorded workspace
@@ -210,7 +211,8 @@ cutoff, which defaults to 5:
   include the history-only oracle ceiling
 - residual gap clusters that group remaining hybrid-vs-oracle AP gaps by
   repository and held-out commit in both Markdown and result-summary JSON,
-  including predictable-only retargeted gaps
+  including predictable-only retargeted gaps and missed-target ranks from a
+  wider diagnostic hybrid query
 - a default cutoff sweep at @1, @3, and @5
 - an optional hybrid direct-weight sweep for ablation
 - an optional leave-one-repo-out direct-weight selection check when multiple
@@ -698,8 +700,9 @@ the same failure mode: it recovers the predictable CI target for the
 (`21764e9cfbe3`), reducing full holdout AP. `effect.md` and
 `result_summary.json` now emit
 the same repo/commit residual gap clusters with missing predictable/new target
-splits and top non-targets, plus the predictable-only retargeted clusters, so
-this diagnosis is reproducible directly from the paper artifact.
+splits, missed-target diagnostic ranks, and top non-targets, plus the
+predictable-only retargeted clusters, so this diagnosis is reproducible
+directly from the paper artifact.
 
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and

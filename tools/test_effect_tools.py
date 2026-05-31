@@ -106,6 +106,23 @@ class PValueAdjustmentTests(unittest.TestCase):
 
 
 class HoldoutOracleTests(unittest.TestCase):
+    def test_ranking_diagnostics_report_missing_expected_ranks(self) -> None:
+        diagnostics = measure_effect.ranking_diagnostics(
+            ["README.md", "Cargo.toml", "src/main.rs", "tests/cli.rs"],
+            {"Cargo.toml", "src/lib.rs", "src/main.rs"},
+            2,
+        )
+
+        self.assertEqual(diagnostics["candidate_count"], 4)
+        self.assertEqual(
+            diagnostics["missing_expected_ranks"],
+            [
+                {"path": "src/lib.rs", "rank": None},
+                {"path": "src/main.rs", "rank": 3},
+            ],
+        )
+        self.assertEqual(diagnostics["top_false_positives"], ["README.md"])
+
     def test_observable_repo_path_preserves_dot_prefixed_paths(self) -> None:
         self.assertEqual(
             measure_effect.observable_repo_path(".github/workflows/release.yml"),
@@ -929,6 +946,24 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                                     "top": ["Cargo.toml", "src/main.rs"],
                                 },
                             },
+                            "diagnostics": {
+                                "workspace_related_hybrid": {
+                                    "candidate_count": 7,
+                                    "diagnostic_limit": 7,
+                                    "missing_expected_ranks": [
+                                        {
+                                            "path": "src/main.rs",
+                                            "rank": 7,
+                                        },
+                                    ],
+                                    "top_false_positives": [
+                                        "README.md",
+                                        "Cargo.lock",
+                                        "tests/cli.rs",
+                                        ".gitignore",
+                                    ],
+                                },
+                            },
                         },
                         {
                             "repo": "/tmp/workspace-cli",
@@ -1043,6 +1078,12 @@ class EffectSummaryExtractionTests(unittest.TestCase):
         self.assertEqual(
             residual_clusters[0]["top_residual_cases"][0]["missing_expected"],
             ["src/main.rs"],
+        )
+        self.assertEqual(
+            residual_clusters[0]["top_residual_cases"][0][
+                "missing_expected_ranks"
+            ],
+            [{"path": "src/main.rs", "rank": 7}],
         )
         self.assertEqual(
             residual_clusters[0]["top_residual_cases"][0][
@@ -2093,6 +2134,13 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         self.assertTrue(
             any(
                 "method_false_positives must be a list" in failure
+                for failure in failures
+            ),
+            failures,
+        )
+        self.assertTrue(
+            any(
+                "missing_expected_ranks must be a list" in failure
                 for failure in failures
             ),
             failures,

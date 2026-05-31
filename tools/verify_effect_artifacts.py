@@ -343,6 +343,7 @@ def verify_residual_gap_case_schema(
         return
     for field in (
         "missing_expected",
+        "missing_expected_ranks",
         "missing_predictable_expected",
         "missing_unpredictable_expected",
         "method_false_positives",
@@ -350,6 +351,22 @@ def verify_residual_gap_case_schema(
     ):
         if not isinstance(case.get(field), list):
             failures.append(f"result_summary.json {label}.{field} must be a list")
+    ranks = case.get("missing_expected_ranks")
+    if isinstance(ranks, list):
+        for rank_index, entry in enumerate(ranks):
+            entry_label = f"{label}.missing_expected_ranks[{rank_index}]"
+            if not isinstance(entry, dict):
+                failures.append(f"result_summary.json {entry_label} must be an object")
+                continue
+            if not isinstance(entry.get("path"), str):
+                failures.append(f"result_summary.json {entry_label}.path must be a string")
+            rank = entry.get("rank")
+            if rank is not None and (
+                not isinstance(rank, int) or isinstance(rank, bool)
+            ):
+                failures.append(
+                    f"result_summary.json {entry_label}.rank must be an integer or null"
+                )
 
 
 def verify_result_summary_matches_report(

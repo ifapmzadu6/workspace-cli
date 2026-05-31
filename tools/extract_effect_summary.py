@@ -168,6 +168,36 @@ def average_precision_at_k(top: list[str], expected: list[str], k: int) -> float
     return round(precision_sum / len(expected_set), 3)
 
 
+def missing_expected_rank_diagnostics(
+    case: dict[str, Any],
+    method: str,
+    missing_expected: list[str],
+) -> list[dict[str, Any]]:
+    diagnostics = case.get("diagnostics")
+    if not isinstance(diagnostics, dict):
+        return []
+    method_diagnostics = diagnostics.get(method)
+    if not isinstance(method_diagnostics, dict):
+        return []
+    ranks = method_diagnostics.get("missing_expected_ranks")
+    if not isinstance(ranks, list):
+        return []
+
+    missing_set = set(missing_expected)
+    result = []
+    for entry in ranks:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        rank = entry.get("rank")
+        if not isinstance(path, str) or path not in missing_set:
+            continue
+        if rank is not None and not isinstance(rank, int):
+            continue
+        result.append({"path": path, "rank": rank})
+    return result
+
+
 def residual_gap_clusters(
     measurements: list[dict[str, Any]],
     *,
@@ -313,6 +343,11 @@ def residual_gap_clusters(
                     f"oracle_{metric}": rounded(oracle_ap),
                     "expected_count": len(expected),
                     "missing_expected": missing_expected,
+                    "missing_expected_ranks": missing_expected_rank_diagnostics(
+                        case,
+                        method,
+                        missing_expected,
+                    ),
                     "missing_predictable_expected": missing_predictable_expected,
                     "missing_unpredictable_expected": missing_unpredictable_expected,
                     "method_hits": hits,
