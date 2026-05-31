@@ -91,6 +91,7 @@ const RELATED_SHARED_EXTENSION_SCORE_MULTIPLIER: f64 = 1.03;
 const RELATED_SHARED_TEST_KIND_SCORE_MULTIPLIER: f64 = 1.04;
 const RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER: f64 = 4.25;
 const RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT: f64 = 0.3;
+const RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER: f64 = 1.2;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
@@ -4642,6 +4643,9 @@ fn related_hybrid_path_score_multiplier(
     {
         multiplier *= RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0 && is_manifest_lock_pair(target, candidate) {
+        multiplier *= RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER;
+    }
     multiplier
 }
 
@@ -4680,6 +4684,26 @@ fn is_source_code_file(path: &str) -> bool {
                 | "cs"
                 | "scala"
         )
+    )
+}
+
+fn is_manifest_lock_pair(target: &str, candidate: &str) -> bool {
+    matches!(
+        (target, candidate),
+        ("Cargo.toml", "Cargo.lock")
+            | ("Cargo.lock", "Cargo.toml")
+            | ("package.json", "package-lock.json")
+            | ("package-lock.json", "package.json")
+            | ("package.json", "pnpm-lock.yaml")
+            | ("pnpm-lock.yaml", "package.json")
+            | ("package.json", "yarn.lock")
+            | ("yarn.lock", "package.json")
+            | ("pyproject.toml", "uv.lock")
+            | ("uv.lock", "pyproject.toml")
+            | ("pyproject.toml", "poetry.lock")
+            | ("poetry.lock", "pyproject.toml")
+            | ("Gemfile", "Gemfile.lock")
+            | ("Gemfile.lock", "Gemfile")
     )
 }
 
@@ -11540,6 +11564,16 @@ src/b.rs
             related_hybrid_path_score_multiplier("src/main.rs", "Cargo.toml", 1.0),
             related_path_score_multiplier("src/main.rs", "Cargo.toml")
         );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("Cargo.toml", "Cargo.lock", 0.0),
+            related_path_score_multiplier("Cargo.toml", "Cargo.lock")
+        );
+        assert!(
+            related_hybrid_path_score_multiplier("Cargo.toml", "Cargo.lock", 1.0)
+                >= related_path_score_multiplier("Cargo.toml", "Cargo.lock")
+                    * RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER
+        );
+        assert!(is_manifest_lock_pair("package.json", "package-lock.json"));
         assert!(!is_same_source_sibling("main.rs", "lib.rs"));
         assert!(!is_source_code_file("README.md"));
         assert!(!is_source_code_file("scripts/release.sh"));

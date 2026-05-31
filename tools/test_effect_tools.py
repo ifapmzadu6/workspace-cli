@@ -718,6 +718,9 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                         "workspace_related_direct": {
                             "mean_average_precision_at_5": 0.564,
                         },
+                        "baseline_path_locality": {
+                            "mean_average_precision_at_5": 0.1,
+                        },
                         "history_oracle_ceiling": {
                             "mean_average_precision_at_5": 0.7,
                         },
@@ -776,6 +779,9 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                         "workspace_related_direct": {
                             "mean_average_precision_at_5": 0.5,
                         },
+                        "baseline_path_locality": {
+                            "mean_average_precision_at_5": 0.25,
+                        },
                         "history_oracle_ceiling": {
                             "mean_average_precision_at_5": 1.0,
                         },
@@ -817,6 +823,12 @@ class EffectSummaryExtractionTests(unittest.TestCase):
                 "average_precision_at_5"
             ]["mean"],
             0.651,
+        )
+        self.assertEqual(
+            holdout["methods"]["baseline_path_locality"][
+                "average_precision_at_5"
+            ]["mean"],
+            0.1,
         )
         self.assertEqual(
             holdout["oracle_normalized"]["workspace_related_hybrid"][
