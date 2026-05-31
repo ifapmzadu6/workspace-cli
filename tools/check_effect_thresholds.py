@@ -1407,15 +1407,30 @@ def main() -> None:
         for failure in failures:
             print(f"- {failure}", file=sys.stderr)
         raise SystemExit(1)
-    print("effect threshold check passed")
+    print(
+        render_success_output(
+            report,
+            require_holdout=args.require_holdout,
+        ),
+        end="",
+    )
+
+
+def render_success_output(
+    report: dict[str, Any],
+    *,
+    require_holdout: bool = False,
+) -> str:
+    lines = ["effect threshold check passed"]
     margin_lines = threshold_margin_report(
         report,
-        require_holdout=args.require_holdout,
+        require_holdout=require_holdout,
     )
     if margin_lines:
-        print("effect threshold margins:")
+        lines.append("effect threshold margins:")
         for line in margin_lines:
-            print(f"- {line}")
+            lines.append(f"- {line}")
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":

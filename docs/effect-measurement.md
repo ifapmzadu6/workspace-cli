@@ -72,9 +72,10 @@ runs the recorded verifier command after writing the manifest. The verifier
 checks required files, JSON parseability, a passing threshold log, manifest hash
 consistency against `effect.json` metadata, expected manifest artifact paths,
 expected generation and verification command records, recomputed threshold
-gates, Markdown re-render consistency with `effect.json`, result-summary
-consistency with `effect.json`, and residual-cluster diagnostic fields for
-missing predictable/new targets, missed-target ranks, and top non-targets.
+gates, threshold-log re-render consistency with `effect.json`, Markdown
+re-render consistency with `effect.json`, result-summary consistency with
+`effect.json`, and residual-cluster diagnostic fields for missing
+predictable/new targets, missed-target ranks, and top non-targets.
 The verifier also supports `--require-clean-workspace` for CI-published paper
 artifacts; this requires `workspace_dirty: false`,
 `workspace_status_line_count: 0` as an integer, and a recorded workspace

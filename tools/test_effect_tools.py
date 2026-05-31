@@ -1447,6 +1447,21 @@ class EffectThresholdTests(unittest.TestCase):
             margins,
         )
 
+    def test_effect_threshold_success_output_renders_margins(self) -> None:
+        output = check_effect_thresholds.render_success_output(
+            self.passing_report(),
+            require_holdout=True,
+        )
+
+        self.assertTrue(output.startswith("effect threshold check passed\n"))
+        self.assertIn("effect threshold margins:\n", output)
+        self.assertIn(
+            "- repo_temporal_holdout_aggregate.workspace_related_hybrid"
+            ".mean_average_precision_at_5: value=0.790, minimum=0.780, "
+            "margin=+0.010\n",
+            output,
+        )
+
     def test_effect_threshold_margin_entries_are_structured(self) -> None:
         entries = check_effect_thresholds.threshold_margin_entries(
             self.passing_report(),
@@ -1880,15 +1895,21 @@ class EffectArtifactVerifierTests(unittest.TestCase):
         threshold_failures: list[str] | None = None,
         extracted_summary: dict | None = None,
         rendered_markdown: str | None = None,
+        rendered_thresholds: str | None = None,
         require_clean_workspace: bool = False,
     ) -> list[str]:
         threshold_failures = threshold_failures or []
         extracted_summary = extracted_summary or self.SUMMARY_FIXTURE
         rendered_markdown = rendered_markdown or self.MARKDOWN_FIXTURE
+        rendered_thresholds = rendered_thresholds or "effect threshold check passed\n"
         with mock.patch.object(
             verify_effect_artifacts.check_effect_thresholds,
             "check_report",
             return_value=threshold_failures,
+        ), mock.patch.object(
+            verify_effect_artifacts.check_effect_thresholds,
+            "render_success_output",
+            return_value=rendered_thresholds,
         ), mock.patch.object(
             verify_effect_artifacts.extract_effect_summary,
             "extract_summary",
@@ -2407,6 +2428,30 @@ class EffectArtifactVerifierTests(unittest.TestCase):
 
         self.assertTrue(
             any("thresholds.txt does not contain" in failure for failure in failures),
+            failures,
+        )
+
+    def test_artifact_verifier_rejects_threshold_log_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "artifacts"
+            self.write_artifact_set(output_dir)
+            (output_dir / "thresholds.txt").write_text(
+                "effect threshold check passed\nstale detail\n",
+                encoding="utf-8",
+            )
+            run_manifest = json.loads((output_dir / "run_manifest.json").read_text())
+            run_manifest["sha256"]["thresholds"] = verify_effect_artifacts.file_sha256(
+                output_dir / "thresholds.txt"
+            )
+            (output_dir / "run_manifest.json").write_text(
+                json.dumps(run_manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+
+            failures = self.verify_with_patched_semantics(output_dir)
+
+        self.assertTrue(
+            any("thresholds.txt does not match" in failure for failure in failures),
             failures,
         )
 

@@ -308,7 +308,12 @@ def verify_holdout_manifest_hashes(
             )
 
 
-def verify_threshold_log(path: Path, failures: list[str]) -> None:
+def verify_threshold_log(
+    effect_report: dict[str, Any],
+    manifest: dict[str, Any],
+    path: Path,
+    failures: list[str],
+) -> None:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as error:
@@ -316,6 +321,17 @@ def verify_threshold_log(path: Path, failures: list[str]) -> None:
         return
     if PASS_MARKER not in text:
         failures.append(f"thresholds.txt does not contain {PASS_MARKER!r}")
+    require_holdout = manifest.get("require_holdout_thresholds")
+    if not isinstance(require_holdout, bool):
+        return
+    expected = check_effect_thresholds.render_success_output(
+        effect_report,
+        require_holdout=require_holdout,
+    )
+    if text != expected:
+        failures.append(
+            "thresholds.txt does not match check_effect_thresholds.py output"
+        )
 
 
 def verify_clean_workspace_metadata(
@@ -696,7 +712,12 @@ def verify_artifact_directory(
     verify_checksums(artifact_dir, manifest, failures)
     verify_holdout_manifest_hashes(effect_report, manifest, failures)
     verify_threshold_recheck(effect_report, manifest, failures)
-    verify_threshold_log(artifact_dir / "thresholds.txt", failures)
+    verify_threshold_log(
+        effect_report,
+        manifest,
+        artifact_dir / "thresholds.txt",
+        failures,
+    )
     return failures
 
 

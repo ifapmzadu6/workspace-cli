@@ -160,8 +160,9 @@ required files, parseable JSON outputs, expected generation and verification
 commands, expected manifest artifact paths, SHA-256 hashes that match the run
 manifest,
 holdout manifest hashes that match `effect.json` metadata, a recomputed
-threshold pass, a Markdown summary that re-renders from `effect.json`, and a
-result summary that matches `effect.json`. The manifest also records the
+threshold pass and threshold log that re-renders from `effect.json`, a Markdown
+summary that re-renders from `effect.json`, and a result summary that matches
+`effect.json`. The manifest also records the
 verifier command for artifact consumers.
 The fixed-ref cross-repo holdout set
 used for paper-style reproduction, including the dense hybrid weight sweep grid,
