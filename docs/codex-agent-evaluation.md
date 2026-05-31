@@ -23,12 +23,17 @@ python3 tools/run_codex_workspace_pilot.py \
 python3 tools/run_codex_workspace_pilot.py \
   --task policy_threshold_sync \
   --output-dir target/codex-workspace-pilot-policy
+python3 tools/run_codex_workspace_pilot.py \
+  --task rollback_recovery \
+  --output-dir target/codex-workspace-pilot-rollback
 ```
 
 The pilot writes `summary.json`, `summary.md`, raw Codex JSONL, stderr logs,
 command lists, final diffs, and the `workspace_cli` operation log. The summary
 captures test success, elapsed seconds, command counts, workspace command
 counts, workspace log entry counts, changed files, and the final diff.
+For rollback-oriented tasks it also records the number of `workspace rollback`
+operations observed in the workspace operation log.
 
 ## Current Pilot Results
 
@@ -61,6 +66,21 @@ patch`, `workspace impact --diff --by cochange --use-index --rank hybrid`, and
 pilot is evidence that the current tool protocol can guide Codex through
 co-change and impact-aware work, not evidence of an elapsed-time win.
 
+The first rollback-oriented pilot solved the task in both conditions:
+
+| condition | passed | seconds | commands | workspace commands | workspace log entries | rollback ops | changed files |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `shell_only` | true | 101.189 | 18 | 0 | 0 | 0 | `docs/billing.md`, `src/billing.py` |
+| `workspace_cli` | true | 88.939 | 11 | 10 | 10 | 1 | `docs/billing.md`, `src/billing.py` |
+
+In this single run, `workspace_cli` finished 12.250 seconds faster than
+`shell_only`. The important qualitative result is that Codex used the intended
+transactional workflow: `workspace patch` applied the intentionally bad proposed
+patch, `workspace run` captured the failing test, `workspace rollback` reverted
+that transaction, and a second `workspace patch` applied the correct late-fee
+cap fix. This is the first positive timing pilot, but it is still only one run
+on one controlled task.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -72,16 +92,16 @@ entries and no `operation log unreadable` status.
 
 - Codex can be run non-interactively against controlled development tasks.
 - Codex can be prompted to use `workspace-cli` for real observation,
-  verification, patch, related-file, and impact operations.
+  verification, patch, rollback, related-file, and impact operations.
 - The harness records enough evidence to compare success, overhead, command
   choice, final diffs, and workspace audit logs.
-- These pilot tasks are currently worse for `workspace-cli` on elapsed time, so
-  the paper should not claim universal speedups from them.
+- The timing evidence is mixed: simple checkout and co-change tasks were slower
+  with `workspace-cli`, while the rollback task was faster in one run. The paper
+  should not claim universal speedups from these pilots.
 
 ## Next Required Step
 
-The next evaluation should use larger, repository-like tasks where the tool is
-expected to help enough to outweigh its overhead: multi-file edits with less
-obvious related files, failing tests whose source is not obvious from a single
-stack trace, broader impact checks after a patch, and rollback from an
-intentionally bad first edit.
+The next evaluation should repeat these Codex pilots across multiple seeds and
+larger repository-like tasks, then report pass rate, elapsed time, command
+counts, rollback usage, and final diff correctness with confidence intervals or
+at least bootstrap intervals.

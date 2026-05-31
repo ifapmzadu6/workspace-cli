@@ -274,6 +274,121 @@ def create_policy_fixture_repo(repo: Path, workspace_binary: Path) -> None:
     commit_all(repo, "Add tests for 25 dollar premium cap")
 
 
+def write_late_fee_files(
+    repo: Path,
+    *,
+    cap_cents: int,
+    test_expected_cap_cents: int,
+) -> None:
+    cap_literal = "1_000" if cap_cents == 1_000 else str(cap_cents)
+    write_text(
+        repo / "src" / "billing.py",
+        f"""\
+LATE_FEE_RATE_CENTS = 150
+LATE_FEE_CAP_CENTS = {cap_literal}
+
+
+def late_fee_cents(days_late):
+    if days_late <= 0:
+        return 0
+    return min(days_late * LATE_FEE_RATE_CENTS, LATE_FEE_CAP_CENTS)
+""",
+    )
+    write_text(repo / "src" / "__init__.py", "")
+    dollars = f"${cap_cents / 100:.2f}"
+    write_text(
+        repo / "docs" / "billing.md",
+        f"""\
+# Billing Rules
+
+Late fees are 150 cents per day and capped at {dollars}.
+""",
+    )
+    expected_dollars = f"${test_expected_cap_cents / 100:.2f}"
+    write_text(
+        repo / "tests" / "test_billing.py",
+        f"""\
+import unittest
+from pathlib import Path
+
+from src.billing import LATE_FEE_CAP_CENTS, late_fee_cents
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class BillingTests(unittest.TestCase):
+    def test_short_late_fee_uses_daily_rate(self):
+        self.assertEqual(late_fee_cents(3), 450)
+
+    def test_late_fee_cap_matches_current_policy(self):
+        self.assertEqual(late_fee_cents(20), {test_expected_cap_cents})
+        self.assertEqual(LATE_FEE_CAP_CENTS, {test_expected_cap_cents})
+
+    def test_docs_record_current_late_fee_cap(self):
+        docs = (ROOT / "docs" / "billing.md").read_text()
+        self.assertIn("{expected_dollars}", docs)
+
+
+if __name__ == "__main__":
+    unittest.main()
+""",
+    )
+    write_text(
+        repo / "README.md",
+        f"""\
+# Billing Fixture
+
+Run tests with:
+
+```sh
+{TEST_COMMAND}
+```
+""",
+    )
+
+
+def write_bad_late_fee_patch(repo: Path) -> None:
+    write_text(
+        repo / "docs" / "proposed_late_fee_fix.patch",
+        "\n".join(
+            [
+                "diff --git a/src/billing.py b/src/billing.py",
+                "--- a/src/billing.py",
+                "+++ b/src/billing.py",
+                "@@ -1,5 +1,5 @@",
+                "-LATE_FEE_RATE_CENTS = 150",
+                "-LATE_FEE_CAP_CENTS = 1_000",
+                "+LATE_FEE_RATE_CENTS = 200",
+                "+LATE_FEE_CAP_CENTS = 1500",
+                " ",
+                " ",
+                " def late_fee_cents(days_late):",
+                "diff --git a/docs/billing.md b/docs/billing.md",
+                "--- a/docs/billing.md",
+                "+++ b/docs/billing.md",
+                "@@ -1,3 +1,3 @@",
+                " # Billing Rules",
+                " ",
+                "-Late fees are 150 cents per day and capped at $10.00.",
+                "+Late fees are 200 cents per day and capped at $15.00.",
+                "",
+            ]
+        ),
+    )
+
+
+def create_rollback_fixture_repo(repo: Path, workspace_binary: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    install_workspace_binary(repo, workspace_binary)
+    init_repo(repo)
+    write_late_fee_files(repo, cap_cents=1_000, test_expected_cap_cents=1_000)
+    commit_all(repo, "Initial late fee policy")
+    write_late_fee_files(repo, cap_cents=1_000, test_expected_cap_cents=1_500)
+    write_bad_late_fee_patch(repo)
+    commit_all(repo, "Add late fee cap tests and proposed patch")
+
+
 def create_fixture_repo(repo: Path, workspace_binary: Path) -> None:
     create_checkout_fixture_repo(repo, workspace_binary)
 
@@ -289,6 +404,15 @@ def task_specs() -> dict[str, TaskSpec]:
         "cap has changed to $25.00. Synchronize the production policy and "
         f"documentation, run `{TEST_COMMAND}`, and leave the working tree with "
         "the fix applied. Do not edit tests."
+    )
+    rollback_prompt = (
+        "The repository has failing billing tests. The late-fee cap has changed "
+        "to $15.00, but the daily late-fee rate must stay 150 cents. First "
+        "apply `docs/proposed_late_fee_fix.patch`, run the tests, and inspect "
+        "the failure. If that proposed patch fails, revert only that attempted "
+        "patch before implementing the correct production and documentation "
+        f"fix. Run `{TEST_COMMAND}`, leave the working tree with the correct "
+        "fix applied, and do not edit tests."
     )
     return {
         "discounted_tax_bug": TaskSpec(
@@ -322,6 +446,26 @@ def task_specs() -> dict[str, TaskSpec]:
                 "`./bin/workspace patch`."
             ),
             create_repo=create_policy_fixture_repo,
+        ),
+        "rollback_recovery": TaskSpec(
+            name="rollback_recovery",
+            prompt=rollback_prompt,
+            workspace_extra=(
+                "Use `./bin/workspace` for workspace observation, patching, "
+                "rollback, and verification whenever possible. Start with "
+                "`./bin/workspace status --json`, apply the proposed patch with "
+                "`./bin/workspace patch --description \"Validate proposed "
+                "late-fee patch\" docs/proposed_late_fee_fix.patch --json`, "
+                "then run "
+                "`./bin/workspace run \"python3 -m unittest discover -s tests\" "
+                "--json`. If the tests fail, read the patch response's "
+                "`data.transaction_id` and roll it back with "
+                "`./bin/workspace rollback <transaction_id> --json` before "
+                "creating and applying the correct patch with "
+                "`./bin/workspace patch`. Finish with the test command through "
+                "`workspace run` and `./bin/workspace diff --json`."
+            ),
+            create_repo=create_rollback_fixture_repo,
         ),
     }
 
@@ -444,9 +588,30 @@ def count_workspace_log_entries(repo: Path) -> int:
     return sum(1 for line in log_path.read_text(encoding="utf-8").splitlines() if line)
 
 
+def workspace_operation_counts(repo: Path) -> dict[str, int]:
+    log_path = repo / ".workspace" / "log.jsonl"
+    if not log_path.is_file():
+        return {}
+    counts: dict[str, int] = {}
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        op = entry.get("op")
+        if isinstance(op, str):
+            counts[op] = counts.get(op, 0) + 1
+    return counts
+
+
 def collect_condition_result(raw: dict[str, Any], repo: Path) -> dict[str, Any]:
     events = load_jsonl_events(str(raw.get("codex_stdout", "")))
     commands = command_like_values(events)
+    operation_counts = workspace_operation_counts(repo)
     test = run_command(
         ["python3", "-m", "unittest", "discover", "-s", "tests"],
         cwd=repo,
@@ -474,6 +639,8 @@ def collect_condition_result(raw: dict[str, Any], repo: Path) -> dict[str, Any]:
         ),
         "commands": commands,
         "workspace_log_entries": count_workspace_log_entries(repo),
+        "workspace_operation_counts": operation_counts,
+        "workspace_rollback_count": operation_counts.get("rollback", 0),
         "test_exit_code": test.returncode,
         "test_passed": test.returncode == 0,
         "test_stdout": test.stdout,
@@ -524,20 +691,21 @@ def render_markdown(summary: dict[str, Any]) -> str:
         f"- codex: `{summary['codex_binary']}`",
         f"- workspace: `{summary['workspace_binary']}`",
         "",
-        "| condition | passed | seconds | commands | workspace commands | workspace log entries | changed files |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| condition | passed | seconds | commands | workspace commands | workspace log entries | rollback ops | changed files |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for result in summary["results"]:
         changed = ", ".join(result["changed_files"])
         lines.append(
             "| {condition} | {passed} | {seconds} | {commands} | {workspace_commands} | "
-            "{log_entries} | {changed} |".format(
+            "{log_entries} | {rollback_ops} | {changed} |".format(
                 condition=result["condition"],
                 passed=str(result["test_passed"]).lower(),
                 seconds=result["elapsed_seconds"],
                 commands=result["command_count"],
                 workspace_commands=result["workspace_command_count"],
                 log_entries=result["workspace_log_entries"],
+                rollback_ops=result.get("workspace_rollback_count", 0),
                 changed=changed,
             )
         )
@@ -549,11 +717,24 @@ def render_markdown(summary: dict[str, Any]) -> str:
     workspace = results.get("workspace_cli")
     if shell and workspace and shell["test_passed"] and workspace["test_passed"]:
         delta = workspace["elapsed_seconds"] - shell["elapsed_seconds"]
-        lines.append(
-            "Both conditions solved this pilot task. On this pilot fixture, "
-            f"`workspace_cli` took {delta:.3f}s longer than `shell_only`, which "
-            "is evidence of overhead rather than an efficiency win for simple tasks."
-        )
+        if delta > 0:
+            lines.append(
+                "Both conditions solved this pilot task. On this pilot fixture, "
+                f"`workspace_cli` took {delta:.3f}s longer than `shell_only`, which "
+                "is evidence of overhead rather than an efficiency win for this task."
+            )
+        elif delta < 0:
+            lines.append(
+                "Both conditions solved this pilot task. On this pilot fixture, "
+                f"`workspace_cli` finished {-delta:.3f}s faster than `shell_only`. "
+                "This is a positive pilot result, but it is still a single run and "
+                "not a statistically powered efficiency claim."
+            )
+        else:
+            lines.append(
+                "Both conditions solved this pilot task in the same elapsed time. "
+                "This is neutral timing evidence for this single run."
+            )
         lines.append("")
         lines.append(
             "The useful result is methodological: the `workspace_cli` run used "

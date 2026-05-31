@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import tempfile
 import unittest
@@ -99,6 +100,80 @@ class CodexWorkspacePilotTests(unittest.TestCase):
             self.assertIn("config/discount_policy.json", related_result.stdout)
             self.assertIn("docs/discount_policy.md", related_result.stdout)
 
+    def test_rollback_fixture_recovers_from_bad_proposed_patch(self) -> None:
+        workspace_binary = ROOT / "target" / "debug" / "workspace"
+        if not workspace_binary.is_file():
+            self.skipTest("workspace binary has not been built")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo = Path(tmp_dir) / "fixture"
+            run_codex_workspace_pilot.create_rollback_fixture_repo(
+                repo,
+                workspace_binary,
+            )
+
+            initial_test = subprocess.run(
+                ["python3", "-m", "unittest", "discover", "-s", "tests"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            patch_result = subprocess.run(
+                [
+                    "./bin/workspace",
+                    "patch",
+                    "--description",
+                    "Validate proposed late-fee patch",
+                    "docs/proposed_late_fee_fix.patch",
+                    "--json",
+                ],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            bad_patch_test = subprocess.run(
+                ["python3", "-m", "unittest", "discover", "-s", "tests"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertNotEqual(initial_test.returncode, 0)
+            self.assertIn("1000 != 1500", initial_test.stderr)
+            self.assertEqual(patch_result.returncode, 0, patch_result.stderr)
+            patch = json.loads(patch_result.stdout)
+            transaction_id = patch["data"]["transaction_id"]
+            self.assertNotEqual(bad_patch_test.returncode, 0)
+            self.assertIn("600 != 450", bad_patch_test.stderr)
+
+            rollback_result = subprocess.run(
+                ["./bin/workspace", "rollback", transaction_id, "--json"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            diff_result = subprocess.run(
+                ["git", "diff", "--name-only"],
+                cwd=repo,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(rollback_result.returncode, 0, rollback_result.stderr)
+            rollback = json.loads(rollback_result.stdout)
+            self.assertEqual(rollback["kind"], "workspace_rollback")
+            self.assertEqual(rollback["data"]["transaction_id"], transaction_id)
+            self.assertEqual(diff_result.stdout, "")
+            self.assertEqual(
+                run_codex_workspace_pilot.workspace_operation_counts(repo),
+                {"patch": 1, "rollback": 1},
+            )
+
     def test_command_like_values_extracts_codex_command_events(self) -> None:
         events = [
             {
@@ -162,8 +237,44 @@ class CodexWorkspacePilotTests(unittest.TestCase):
         rendered = run_codex_workspace_pilot.render_markdown(summary)
 
         self.assertIn("| workspace_cli | true | 15.5 | 6 | 5 | 7 |", rendered)
+        self.assertIn("| workspace_cli | true | 15.5 | 6 | 5 | 7 | 0 |", rendered)
         self.assertIn("took 5.500s longer", rendered)
         self.assertIn("evidence of overhead", rendered)
+
+    def test_render_markdown_reports_faster_workspace_run(self) -> None:
+        summary = {
+            "task": "rollback_recovery",
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "codex_binary": "codex",
+            "workspace_binary": "target/debug/workspace",
+            "results": [
+                {
+                    "condition": "shell_only",
+                    "test_passed": True,
+                    "elapsed_seconds": 20.0,
+                    "command_count": 10,
+                    "workspace_command_count": 0,
+                    "workspace_log_entries": 0,
+                    "changed_files": ["src/billing.py"],
+                },
+                {
+                    "condition": "workspace_cli",
+                    "test_passed": True,
+                    "elapsed_seconds": 12.5,
+                    "command_count": 8,
+                    "workspace_command_count": 7,
+                    "workspace_log_entries": 9,
+                    "workspace_rollback_count": 1,
+                    "changed_files": ["src/billing.py"],
+                },
+            ],
+        }
+
+        rendered = run_codex_workspace_pilot.render_markdown(summary)
+
+        self.assertIn("| workspace_cli | true | 12.5 | 8 | 7 | 9 | 1 |", rendered)
+        self.assertIn("finished 7.500s faster", rendered)
+        self.assertIn("not a statistically powered efficiency claim", rendered)
 
     def test_policy_prompt_requests_related_and_impact(self) -> None:
         task = run_codex_workspace_pilot.task_specs()["policy_threshold_sync"]
@@ -175,6 +286,17 @@ class CodexWorkspacePilotTests(unittest.TestCase):
         self.assertIn("index cochange", workspace_prompt)
         self.assertIn("related tests/test_discounts.py", workspace_prompt)
         self.assertIn("impact --diff", workspace_prompt)
+
+    def test_rollback_prompt_requests_patch_transaction_rollback(self) -> None:
+        task = run_codex_workspace_pilot.task_specs()["rollback_recovery"]
+        prompts = run_codex_workspace_pilot.condition_prompts(task)
+        workspace_prompt = next(
+            prompt.prompt for prompt in prompts if prompt.name == "workspace_cli"
+        )
+
+        self.assertIn("docs/proposed_late_fee_fix.patch", workspace_prompt)
+        self.assertIn("data.transaction_id", workspace_prompt)
+        self.assertIn("rollback <transaction_id>", workspace_prompt)
 
 
 if __name__ == "__main__":
