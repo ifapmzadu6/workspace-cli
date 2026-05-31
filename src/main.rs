@@ -92,6 +92,7 @@ const RELATED_SHARED_TEST_KIND_SCORE_MULTIPLIER: f64 = 1.04;
 const RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER: f64 = 4.25;
 const RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT: f64 = 0.3;
 const RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER: f64 = 1.2;
+const RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER: f64 = 3.5;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
@@ -4646,6 +4647,9 @@ fn related_hybrid_path_score_multiplier(
     if direct_edge_weight > 0.0 && is_manifest_lock_pair(target, candidate) {
         multiplier *= RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0 && is_ci_workflow_manifest_pair(target, candidate) {
+        multiplier *= RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER;
+    }
     multiplier
 }
 
@@ -4704,6 +4708,31 @@ fn is_manifest_lock_pair(target: &str, candidate: &str) -> bool {
             | ("poetry.lock", "pyproject.toml")
             | ("Gemfile", "Gemfile.lock")
             | ("Gemfile.lock", "Gemfile")
+    )
+}
+
+fn is_ci_workflow_manifest_pair(target: &str, candidate: &str) -> bool {
+    is_ci_like_workflow_file(target) && is_root_project_manifest(candidate)
+}
+
+fn is_ci_like_workflow_file(path: &str) -> bool {
+    if path_parent(path) != ".github/workflows" {
+        return false;
+    }
+    if !matches!(path_extension(path), Some("yml" | "yaml")) {
+        return false;
+    }
+    let file_name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+    file_name.contains("ci")
+        || file_name.contains("test")
+        || file_name.contains("build")
+        || file_name.contains("check")
+}
+
+fn is_root_project_manifest(path: &str) -> bool {
+    matches!(
+        path,
+        "Cargo.toml" | "package.json" | "pyproject.toml" | "go.mod" | "Gemfile" | "pom.xml"
     )
 }
 
@@ -11573,6 +11602,27 @@ src/b.rs
                 >= related_path_score_multiplier("Cargo.toml", "Cargo.lock")
                     * RELATED_HYBRID_MANIFEST_PAIR_SCORE_MULTIPLIER
         );
+        assert_eq!(
+            related_hybrid_path_score_multiplier(".github/workflows/ci.yml", "package.json", 0.0),
+            related_path_score_multiplier(".github/workflows/ci.yml", "package.json")
+        );
+        assert!(
+            related_hybrid_path_score_multiplier(".github/workflows/ci.yml", "package.json", 1.0)
+                >= related_path_score_multiplier(".github/workflows/ci.yml", "package.json")
+                    * RELATED_HYBRID_CI_WORKFLOW_MANIFEST_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("package.json", ".github/workflows/ci.yml", 1.0),
+            related_path_score_multiplier("package.json", ".github/workflows/ci.yml")
+        );
+        assert!(!is_ci_workflow_manifest_pair(
+            ".github/workflows/release.yml",
+            "package.json"
+        ));
+        assert!(is_ci_workflow_manifest_pair(
+            ".github/workflows/test.yml",
+            "Cargo.toml"
+        ));
         assert!(is_manifest_lock_pair("package.json", "package-lock.json"));
         assert!(!is_same_source_sibling("main.rs", "lib.rs"));
         assert!(!is_source_code_file("README.md"));

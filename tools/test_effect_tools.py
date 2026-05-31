@@ -999,15 +999,15 @@ class EffectThresholdTests(unittest.TestCase):
                         "mean_average_precision_at_5": 0.61,
                     },
                     "workspace_related_hybrid": {
-                        "mean_average_precision_at_5": 0.736,
+                        "mean_average_precision_at_5": 0.749,
                     },
                     "history_oracle_ceiling": {
                         "mean_average_precision_at_5": 0.90,
                     },
                 },
-                "hybrid_weight_sweep": self.weight_sweep(0.736),
+                "hybrid_weight_sweep": self.weight_sweep(0.749),
                 "leave_one_repo_out_weight_selection": self.loro_selection(
-                    ap=0.736,
+                    ap=0.749,
                     direct_ap=0.64,
                     pagerank_ap=0.61,
                     lexical_ap=0.20,
@@ -1043,15 +1043,15 @@ class EffectThresholdTests(unittest.TestCase):
                     "mean_average_precision_at_5": 0.577,
                 },
                 "workspace_related_hybrid": {
-                    "mean_average_precision_at_5": 0.703,
+                    "mean_average_precision_at_5": 0.709,
                 },
                 "history_oracle_ceiling": {
                     "mean_average_precision_at_5": 0.853,
                 },
             },
-            "hybrid_weight_sweep": self.weight_sweep(0.703),
+            "hybrid_weight_sweep": self.weight_sweep(0.709),
             "leave_one_repo_out_weight_selection": self.loro_selection(
-                ap=0.703,
+                ap=0.709,
                 direct_ap=0.626,
                 pagerank_ap=0.577,
                 lexical_ap=0.20,
@@ -1262,7 +1262,7 @@ class EffectThresholdTests(unittest.TestCase):
                 method = entry["related"]["method"]
                 entry["related"]["aggregate"][method][
                     "mean_average_precision_at_5"
-                ] = 0.71
+                ] = 0.72
         failures = check_effect_thresholds.check_report(report)
         self.assertTrue(
             any("is below weight 0.8" in item for item in failures),
