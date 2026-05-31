@@ -99,6 +99,7 @@ const RELATED_HYBRID_ROOT_DOC_PAIR_MIN_DIRECT_SCORE: f64 = 0.4;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_COLD_START_SCORE_MULTIPLIER: f64 = 6.0;
 const RELATED_HYBRID_JS_TOOLCHAIN_CONFIG_MAX_DIRECT_SCORE: f64 = 0.1;
 const RELATED_HYBRID_EVAL_SCRIPT_DOC_SCORE_MULTIPLIER: f64 = 1.15;
+const RELATED_HYBRID_EVAL_DOC_SCRIPT_SCORE_MULTIPLIER: f64 = 3.1;
 const RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER: f64 = 1.5;
 const RELATED_HYBRID_SOURCE_CHANGELOG_SCORE_MULTIPLIER: f64 = 1.4;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
@@ -4688,6 +4689,9 @@ fn related_hybrid_path_score_multiplier(
     if direct_edge_weight > 0.0 && is_evaluation_script_documentation_pair(target, candidate) {
         multiplier *= RELATED_HYBRID_EVAL_SCRIPT_DOC_SCORE_MULTIPLIER;
     }
+    if direct_edge_weight > 0.0 && is_evaluation_documentation_script_pair(target, candidate) {
+        multiplier *= RELATED_HYBRID_EVAL_DOC_SCRIPT_SCORE_MULTIPLIER;
+    }
     if direct_edge_weight > 0.0 && shares_parent_and_name_token(target, candidate) {
         multiplier *= RELATED_HYBRID_SHARED_NAME_TOKEN_SCORE_MULTIPLIER;
     }
@@ -4814,6 +4818,10 @@ fn is_javascript_package_manifest_or_lock(path: &str) -> bool {
 
 fn is_evaluation_script_documentation_pair(target: &str, candidate: &str) -> bool {
     is_evaluation_script_file(target) && is_root_evaluation_document(candidate)
+}
+
+fn is_evaluation_documentation_script_pair(target: &str, candidate: &str) -> bool {
+    is_root_evaluation_document(target) && is_evaluation_script_file(candidate)
 }
 
 fn is_evaluation_script_file(path: &str) -> bool {
@@ -11899,6 +11907,15 @@ src/b.rs
         assert_eq!(
             related_hybrid_path_score_multiplier("COMPARISON.md", "scripts/compare.sh", 1.0, 0.1),
             related_path_score_multiplier("COMPARISON.md", "scripts/compare.sh")
+                * RELATED_HYBRID_EVAL_DOC_SCRIPT_SCORE_MULTIPLIER
+        );
+        assert!(
+            related_hybrid_path_score_multiplier(
+                "MEASUREMENTS.md",
+                "scripts/speed_compare.py",
+                1.0,
+                0.1
+            ) >= RELATED_HYBRID_EVAL_DOC_SCRIPT_SCORE_MULTIPLIER
         );
         assert_eq!(
             related_hybrid_path_score_multiplier(
