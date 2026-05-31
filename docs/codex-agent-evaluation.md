@@ -393,6 +393,39 @@ remained near parity (`-0.485s`), and subscription was slower in both pairs
 (`+10.428s`, interval `(2.149, 18.706)`) while still using exactly ten fewer
 commands per pair.
 
+Trace inspection showed that subscription latency was not in the `workspace`
+commands themselves. It came from Codex hand-writing a six-file unified diff and,
+in one run, retrying after a corrupt patch hunk. The CLI now includes
+`workspace replace --stdin --json`, which accepts exact string replacements,
+generates a rollbackable transaction patch, and lets Codex avoid manual hunk
+line accounting. The clean four-run subscription suite at commit
+`8e7666559c5fddc1163cfc6c6ea36635a2d1ce8d` produced a non-zero-crossing timing
+win:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 4 | 1.000 | 0.500 | 73.606 (61.254, 94.603) | 14.500 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 4 | 1.000 | 1.000 | 43.520 (40.223, 46.818) | 4.000 | 4.000 | 4.000 | 0.000 |
+
+The paired timing delta was `-30.086s` with interval `(-52.706, -15.713)`;
+`workspace_cli` was faster in all four pairs. The paired command-count delta was
+`-10.500` commands with interval `(-16.500, -5.500)`. The same clean commit also
+restored the four-task same-commit aggregate speedup:
+
+| condition | runs | pass rate | diff-scope correct | elapsed seconds mean (95% CI) | mean commands | mean workspace commands | mean workspace log entries | mean rollback ops |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `shell_only` | 8 | 1.000 | 1.000 | 56.594 (52.532, 61.237) | 10.500 | 0.000 | 0.000 | 0.000 |
+| `workspace_cli` | 8 | 1.000 | 1.000 | 44.824 (39.874, 50.185) | 4.750 | 4.750 | 5.000 | 0.250 |
+
+Across the eight paired passing runs, the timing delta was `-11.770s` with
+interval `(-19.055, -4.033)`, and `workspace_cli` was faster in six of eight
+pairs. The command-count delta was `-5.750` commands with interval
+`(-8.000, -3.500)`. By task, the timing deltas were
+`invoice_tax_sync = -15.326s`, `policy_threshold_sync = -12.382s`,
+`rollback_recovery = +4.860s`, and `subscription_rollout_sync = -24.232s`.
+Rollback was slower in this two-run aggregate, but it still used fewer commands,
+and the aggregate interval did not cross zero.
+
 The pilot did produce one direct product improvement. A pre-fix run showed that
 parallel Codex-issued `workspace read` operations could interleave writes to
 `.workspace/log.jsonl`, making `workspace status` report `operation log
@@ -404,7 +437,7 @@ entries and no `operation log unreadable` status.
 
 - Codex can be run non-interactively against controlled development tasks.
 - Codex can be prompted to use `workspace-cli` for real observation,
-  verification, patch, rollback, related-file, and impact operations.
+  verification, patch, replace, rollback, related-file, and impact operations.
 - The harness records enough evidence to compare success, overhead, command
   choice, final diffs, and workspace audit logs.
 - The timing evidence is now task-dependent rather than uniformly negative:
@@ -417,24 +450,22 @@ entries and no `operation log unreadable` status.
   zero. The latest three-task suite shows a same-commit twelve-pair aggregate
   timing improvement with a non-zero-crossing interval and substantially fewer
   commands, and the merged twelve-pair evidence artifact independently points in
-  the same direction. The subscription rollout task is larger; after protocol
-  shortening it shows lower mean elapsed time and three of four paired wins in
-  the standalone four-run suite, but its timing interval still crosses zero.
-  When subscription is included in a same-commit cross-task suite, the aggregate
-  timing effect moves to parity because subscription is slower in both paired
-  runs. It still shows perfect workspace diff-scope correctness in the
-  standalone shortened suite and a large command-count reduction in both
-  subscription suites. The paper can now make controlled-task speedup claims for
-  transactional recovery, invoice-style multi-file synchronization, and the
-  three-task aggregate, while presenting the four-task aggregate as parity with
-  strong command-count evidence and treating larger-task generalization as an
-  optimization target.
+  the same direction. The subscription rollout task exposed a bottleneck in
+  manual multi-file patch construction; adding `workspace replace` converted that
+  larger task from noisy/parity evidence into a clean four-run speedup with
+  perfect workspace diff-scope correctness and a large command-count reduction.
+  The updated four-task same-commit aggregate also has a non-zero-crossing timing
+  improvement. The paper can now make controlled-task speedup claims for
+  transactional recovery, invoice-style multi-file synchronization, subscription
+  rollout synchronization, and same-commit aggregate behavior, while presenting
+  rollback variance in the latest four-task suite as a remaining optimization
+  target.
 
 ## Next Required Step
 
-The next evaluation should inspect the subscription `workspace_cli` traces from
-the four-task suite, identify why the shorter command sequence still takes
-longer than shell in both pairs, and then rerun a same-commit subscription-heavy
-suite after optimizing that path. The report should keep separating single-task
-speed claims, larger-task safety claims, merged artifact claims, and same-commit
-cross-task aggregate claims.
+The next evaluation should increase repetitions for the updated four-task
+aggregate and inspect the latest rollback traces, because rollback was the only
+task that regressed in the clean two-run aggregate after `workspace replace`
+fixed the larger subscription workflow. The report should keep separating
+single-task speed claims, larger-task safety claims, merged artifact claims, and
+same-commit cross-task aggregate claims.
