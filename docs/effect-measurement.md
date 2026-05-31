@@ -647,6 +647,21 @@ Because 0.90 is the best all-target and predictable point in the expanded
 fixed-ref manifest and is stable under leave-one-repo-out selection, the CLI
 related hybrid default is 0.90.
 
+Residual gap analysis on the fixed-ref manifest shows that the remaining
+oracle gap is concentrated rather than diffuse. The largest cluster is one
+wide `related-cli` behavior-removal commit (`6447d4333c23`), contributing
+3.174 AP@5 gap across 10 seed cases; historical evidence ranks package and
+release-workflow files as strongly related even though that held-out commit
+does not edit them. The next largest clusters are `llm-json-extract` release
+and dependency bumps, where `package-lock.json` is historically coupled to
+`package.json` and often ranks ahead of the single expected release file. One
+`related-cli` source split has zero history-oracle AP because every expected
+source sibling is new at the parent revision. The implemented CI-workflow
+manifest prior is therefore intentionally one-way (`workflow -> manifest`) and
+direct-edge gated: a symmetric `package.json -> workflow` boost fixes one
+remaining case but degrades ordinary package release cases where lockfiles,
+changelogs, source, and tests are the stronger historical neighbors.
+
 Interpretation: the CLI is not just running; it measurably improves observation
 coverage and related-file discovery across direct, indirect, noisy, and
 multi-seed fixtures, while preserving auditable change/rollback evidence.
