@@ -1395,6 +1395,58 @@ class EffectThresholdTests(unittest.TestCase):
             [],
         )
 
+    def test_effect_threshold_margin_report_includes_holdout_headroom(self) -> None:
+        margins = check_effect_thresholds.threshold_margin_report(
+            self.passing_report(),
+            require_holdout=True,
+        )
+
+        self.assertTrue(
+            any("minimum=0.780" in item and "margin=+0.010" in item for item in margins),
+            margins,
+        )
+        self.assertTrue(
+            any("oracle_normalized_average_precision_at_5" in item for item in margins),
+            margins,
+        )
+        self.assertTrue(
+            any("maximum=0.0050" in item for item in margins),
+            margins,
+        )
+        self.assertTrue(
+            any(
+                "workspace_related_hybrid_minus_baseline_lexical_similarity" in item
+                and "minimum=0.480" in item
+                for item in margins
+            ),
+            margins,
+        )
+        self.assertTrue(
+            any(
+                "repo_macro_average.workspace_related_hybrid_minus_workspace_related_direct"
+                in item
+                and "minimum=0.140" in item
+                for item in margins
+            ),
+            margins,
+        )
+        self.assertTrue(
+            any(
+                "leave_one_repo_out.workspace_related_hybrid_loro_minus_workspace_related_pagerank"
+                in item
+                and "minimum=0.170" in item
+                for item in margins
+            ),
+            margins,
+        )
+        self.assertTrue(
+            any(
+                "hybrid_weight_sweep[0.9].mean_average_precision_at_5" in item
+                for item in margins
+            ),
+            margins,
+        )
+
     def test_effect_thresholds_allow_missing_holdout_by_default(self) -> None:
         report = self.passing_report()
         report["measurements"] = report["measurements"][:-1]

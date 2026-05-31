@@ -143,6 +143,9 @@ oracle-normalized AP, oracle gaps, residual gap clusters, and
 leave-one-repo-out hybrid weight selection when sweep weights are provided.
 Paper holdout threshold checks gate case-weighted and repo-macro effect sizes,
 oracle-normalized AP, plus the corrected paired significance of the key deltas.
+The generated threshold log includes each numeric gate's value, required floor
+or ceiling, and margin so artifact consumers can inspect how close the run was
+to a failing threshold.
 The artifact runner also writes `result_summary.json`, a compact machine-readable
 summary of the headline metrics, full weight sweep, best weight result, and
 per-repository holdout results, oracle-normalized AP gaps, residual gap

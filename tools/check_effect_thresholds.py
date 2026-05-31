@@ -33,6 +33,64 @@ EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT = 0.9
 FLOAT_TOLERANCE = 1e-12
 MAX_HOLDOUT_HOLM_P = 0.005
 MIN_HOLDOUT_ORACLE_NORMALIZED_AP = 0.90
+HOLDOUT_HOLM_COMPARISONS = [
+    "workspace_related_hybrid_minus_workspace_related_direct",
+    "workspace_related_hybrid_minus_workspace_related_pagerank",
+    "workspace_related_hybrid_minus_baseline_lexical_similarity",
+    "workspace_related_hybrid_minus_baseline_content_similarity",
+    "workspace_related_hybrid_minus_baseline_recent_activity",
+    "workspace_related_hybrid_minus_baseline_global_pagerank",
+]
+HOLDOUT_DELTA_THRESHOLDS = [
+    ("workspace_related_direct", "direct_delta"),
+    ("workspace_related_pagerank", "pagerank_delta"),
+    ("baseline_lexical_similarity", "lexical_delta"),
+    ("baseline_content_similarity", "content_delta"),
+    ("baseline_recent_activity", "recent_delta"),
+    ("baseline_global_pagerank", "global_delta"),
+]
+LORO_HOLM_COMPARISONS = [
+    "workspace_related_hybrid_loro_minus_workspace_related_direct",
+    "workspace_related_hybrid_loro_minus_workspace_related_pagerank",
+    "workspace_related_hybrid_loro_minus_baseline_lexical_similarity",
+    "workspace_related_hybrid_loro_minus_baseline_content_similarity",
+    "workspace_related_hybrid_loro_minus_baseline_recent_activity",
+    "workspace_related_hybrid_loro_minus_baseline_global_pagerank",
+]
+
+
+def repo_holdout_thresholds(predictable: bool) -> dict[str, float]:
+    if predictable:
+        return {
+            "hybrid_ap": 0.82,
+            "direct_delta": 0.15,
+            "lexical_delta": 0.50,
+            "content_delta": 0.35,
+            "recent_delta": 0.32,
+            "global_delta": 0.24,
+            "pagerank_delta": 0.18,
+            "oracle_normalized": MIN_HOLDOUT_ORACLE_NORMALIZED_AP,
+            "loro_ap": 0.82,
+            "macro_hybrid_ap": 0.84,
+            "macro_direct_delta": 0.16,
+            "macro_pagerank_delta": 0.19,
+            "default_weight_ap": 0.82,
+        }
+    return {
+        "hybrid_ap": 0.78,
+        "direct_delta": 0.13,
+        "lexical_delta": 0.48,
+        "content_delta": 0.33,
+        "recent_delta": 0.30,
+        "global_delta": 0.23,
+        "pagerank_delta": 0.17,
+        "oracle_normalized": MIN_HOLDOUT_ORACLE_NORMALIZED_AP,
+        "loro_ap": 0.78,
+        "macro_hybrid_ap": 0.81,
+        "macro_direct_delta": 0.14,
+        "macro_pagerank_delta": 0.18,
+        "default_weight_ap": 0.78,
+    }
 
 
 def load_report(path: str) -> dict[str, Any]:
@@ -193,18 +251,7 @@ def check_repo_holdout_thresholds(
     require_count(failures, holdout, "target_count", 180, label)
 
     aggregate = holdout.get("aggregate", {})
-    min_hybrid_ap = 0.82 if predictable else 0.78
-    min_direct_delta = 0.15 if predictable else 0.13
-    min_lexical_delta = 0.50 if predictable else 0.48
-    min_content_delta = 0.35 if predictable else 0.33
-    min_recent_delta = 0.32 if predictable else 0.30
-    min_global_delta = 0.24 if predictable else 0.23
-    min_pagerank_delta = 0.18 if predictable else 0.17
-    min_oracle_normalized = MIN_HOLDOUT_ORACLE_NORMALIZED_AP
-    min_loro_ap = 0.82 if predictable else 0.78
-    min_macro_hybrid_ap = 0.84 if predictable else 0.81
-    min_macro_direct_delta = 0.16 if predictable else 0.14
-    min_macro_pagerank_delta = 0.19 if predictable else 0.18
+    thresholds = repo_holdout_thresholds(predictable)
     ap_metric = "mean_average_precision_at_5"
     delta_metric = "average_precision_at_5"
 
@@ -213,7 +260,7 @@ def check_repo_holdout_thresholds(
         aggregate,
         "workspace_related_hybrid",
         "mean_average_precision_at_5",
-        min_hybrid_ap,
+        thresholds["hybrid_ap"],
     )
     require_mean(
         failures,
@@ -228,7 +275,7 @@ def check_repo_holdout_thresholds(
         left="workspace_related_hybrid",
         right="workspace_related_direct",
         metric=ap_metric,
-        minimum=min_direct_delta,
+        minimum=thresholds["direct_delta"],
     )
     require_delta(
         failures,
@@ -236,7 +283,7 @@ def check_repo_holdout_thresholds(
         left="workspace_related_hybrid",
         right="baseline_lexical_similarity",
         metric=ap_metric,
-        minimum=min_lexical_delta,
+        minimum=thresholds["lexical_delta"],
     )
     require_delta(
         failures,
@@ -244,7 +291,7 @@ def check_repo_holdout_thresholds(
         left="workspace_related_hybrid",
         right="baseline_content_similarity",
         metric=ap_metric,
-        minimum=min_content_delta,
+        minimum=thresholds["content_delta"],
     )
     require_delta(
         failures,
@@ -252,7 +299,7 @@ def check_repo_holdout_thresholds(
         left="workspace_related_hybrid",
         right="baseline_recent_activity",
         metric=ap_metric,
-        minimum=min_recent_delta,
+        minimum=thresholds["recent_delta"],
     )
     require_delta(
         failures,
@@ -260,7 +307,7 @@ def check_repo_holdout_thresholds(
         left="workspace_related_hybrid",
         right="baseline_global_pagerank",
         metric=ap_metric,
-        minimum=min_global_delta,
+        minimum=thresholds["global_delta"],
     )
     require_delta(
         failures,
@@ -268,7 +315,7 @@ def check_repo_holdout_thresholds(
         left="workspace_related_hybrid",
         right="workspace_related_pagerank",
         metric=ap_metric,
-        minimum=min_pagerank_delta,
+        minimum=thresholds["pagerank_delta"],
     )
     require_oracle_normalized(
         failures,
@@ -276,20 +323,13 @@ def check_repo_holdout_thresholds(
         method="workspace_related_hybrid",
         oracle="history_oracle_ceiling",
         metric=ap_metric,
-        minimum=min_oracle_normalized,
+        minimum=thresholds["oracle_normalized"],
         label=label,
     )
     require_holm_evidence(
         failures,
         holdout.get("paired_deltas", {}),
-        [
-            "workspace_related_hybrid_minus_workspace_related_direct",
-            "workspace_related_hybrid_minus_workspace_related_pagerank",
-            "workspace_related_hybrid_minus_baseline_lexical_similarity",
-            "workspace_related_hybrid_minus_baseline_content_similarity",
-            "workspace_related_hybrid_minus_baseline_recent_activity",
-            "workspace_related_hybrid_minus_baseline_global_pagerank",
-        ],
+        HOLDOUT_HOLM_COMPARISONS,
         metric=delta_metric,
         maximum=MAX_HOLDOUT_HOLM_P,
         label=label,
@@ -301,13 +341,13 @@ def check_repo_holdout_thresholds(
         check_repo_macro_thresholds(
             failures,
             repo_macro,
-            min_ap=min_macro_hybrid_ap,
-            min_direct_delta=min_macro_direct_delta,
-            min_pagerank_delta=min_macro_pagerank_delta,
-            min_lexical_delta=min_lexical_delta,
-            min_content_delta=min_content_delta,
-            min_recent_delta=min_recent_delta,
-            min_global_delta=min_global_delta,
+            min_ap=thresholds["macro_hybrid_ap"],
+            min_direct_delta=thresholds["macro_direct_delta"],
+            min_pagerank_delta=thresholds["macro_pagerank_delta"],
+            min_lexical_delta=thresholds["lexical_delta"],
+            min_content_delta=thresholds["content_delta"],
+            min_recent_delta=thresholds["recent_delta"],
+            min_global_delta=thresholds["global_delta"],
             label=f"{label}.repo_macro_average",
         )
 
@@ -331,19 +371,19 @@ def check_repo_holdout_thresholds(
         holdout,
         weight=EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT,
         metric="mean_average_precision_at_5",
-        minimum=0.82 if predictable else 0.78,
+        minimum=thresholds["default_weight_ap"],
         label=label,
     )
     require_loro_thresholds(
         failures,
         holdout,
-        min_ap=min_loro_ap,
-        min_direct_delta=min_direct_delta,
-        min_lexical_delta=min_lexical_delta,
-        min_content_delta=min_content_delta,
-        min_recent_delta=min_recent_delta,
-        min_global_delta=min_global_delta,
-        min_pagerank_delta=min_pagerank_delta,
+        min_ap=thresholds["loro_ap"],
+        min_direct_delta=thresholds["direct_delta"],
+        min_lexical_delta=thresholds["lexical_delta"],
+        min_content_delta=thresholds["content_delta"],
+        min_recent_delta=thresholds["recent_delta"],
+        min_global_delta=thresholds["global_delta"],
+        min_pagerank_delta=thresholds["pagerank_delta"],
         max_holm_p=MAX_HOLDOUT_HOLM_P,
         label=label,
     )
@@ -474,6 +514,453 @@ def check_repo_macro_thresholds(
         minimum=min_global_delta,
         label=label,
     )
+
+
+def threshold_margin_report(
+    report: dict[str, Any],
+    *,
+    require_holdout: bool = False,
+) -> list[str]:
+    lines: list[str] = []
+    retrieval = measurement_by_name(report, "retrieval_suite")
+    if retrieval:
+        aggregate = retrieval.get("aggregate", {})
+        append_mean_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_related_hybrid.mean_recall_at_5",
+            "workspace_related_hybrid",
+            "mean_recall_at_5",
+            0.99,
+        )
+        append_mean_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_related_hybrid.mean_average_precision_at_5",
+            "workspace_related_hybrid",
+            "mean_average_precision_at_5",
+            0.85,
+        )
+        append_mean_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_impact_hybrid.mean_recall_at_5",
+            "workspace_impact_hybrid",
+            "mean_recall_at_5",
+            0.99,
+        )
+        append_mean_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_impact_hybrid.mean_average_precision_at_5",
+            "workspace_impact_hybrid",
+            "mean_average_precision_at_5",
+            0.95,
+        )
+        append_delta_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_related_hybrid_minus_workspace_related_direct"
+            ".mean_average_precision_at_5",
+            "workspace_related_hybrid",
+            "workspace_related_direct",
+            "mean_average_precision_at_5",
+            0.30,
+        )
+        append_delta_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_related_hybrid_minus_baseline_lexical_similarity"
+            ".mean_average_precision_at_5",
+            "workspace_related_hybrid",
+            "baseline_lexical_similarity",
+            "mean_average_precision_at_5",
+            0.25,
+        )
+        append_delta_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_related_hybrid_minus_baseline_content_similarity"
+            ".mean_average_precision_at_5",
+            "workspace_related_hybrid",
+            "baseline_content_similarity",
+            "mean_average_precision_at_5",
+            0.25,
+        )
+        append_delta_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_impact_hybrid_minus_workspace_impact_direct"
+            ".mean_average_precision_at_5",
+            "workspace_impact_hybrid",
+            "workspace_impact_direct",
+            "mean_average_precision_at_5",
+            0.40,
+        )
+        append_delta_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_impact_hybrid_minus_baseline_lexical_similarity"
+            ".mean_average_precision_at_5",
+            "workspace_impact_hybrid",
+            "baseline_lexical_similarity",
+            "mean_average_precision_at_5",
+            0.35,
+        )
+        append_delta_margin(
+            lines,
+            aggregate,
+            "retrieval_suite.workspace_impact_hybrid_minus_baseline_content_similarity"
+            ".mean_average_precision_at_5",
+            "workspace_impact_hybrid",
+            "baseline_content_similarity",
+            "mean_average_precision_at_5",
+            0.30,
+        )
+
+    holdout = measurement_by_name(report, "repo_temporal_holdout_aggregate")
+    if holdout:
+        lines.extend(repo_holdout_margin_report(holdout, predictable=False))
+        predictable = holdout.get("predictable_only")
+        if isinstance(predictable, dict):
+            lines.extend(repo_holdout_margin_report(predictable, predictable=True))
+    elif require_holdout:
+        lines.append("repo_temporal_holdout_aggregate: missing")
+    return lines
+
+
+def repo_holdout_margin_report(
+    holdout: dict[str, Any],
+    *,
+    predictable: bool,
+) -> list[str]:
+    label = "predictable repo_temporal_holdout_aggregate" if predictable else (
+        "repo_temporal_holdout_aggregate"
+    )
+    thresholds = repo_holdout_thresholds(predictable)
+    aggregate = holdout.get("aggregate", {})
+    lines: list[str] = []
+    if not predictable:
+        append_count_margin(lines, f"{label}.repo_count", holdout.get("repo_count"), 3)
+    append_count_margin(lines, f"{label}.case_count", holdout.get("case_count"), 45)
+    append_count_margin(
+        lines,
+        f"{label}.target_count",
+        holdout.get("target_count"),
+        180,
+    )
+    append_mean_margin(
+        lines,
+        aggregate,
+        f"{label}.workspace_related_hybrid.mean_average_precision_at_5",
+        "workspace_related_hybrid",
+        "mean_average_precision_at_5",
+        thresholds["hybrid_ap"],
+    )
+    append_mean_margin(
+        lines,
+        aggregate,
+        f"{label}.history_oracle_ceiling.mean_average_precision_at_5",
+        "history_oracle_ceiling",
+        "mean_average_precision_at_5",
+        0.75,
+    )
+    append_holdout_delta_margins(
+        lines,
+        aggregate,
+        f"{label}.workspace_related_hybrid",
+        "workspace_related_hybrid",
+        "mean_average_precision_at_5",
+        thresholds,
+        HOLDOUT_DELTA_THRESHOLDS,
+    )
+    append_oracle_margin(
+        lines,
+        aggregate,
+        f"{label}.workspace_related_hybrid.oracle_normalized_average_precision_at_5",
+        "workspace_related_hybrid",
+        "history_oracle_ceiling",
+        "mean_average_precision_at_5",
+        thresholds["oracle_normalized"],
+    )
+    append_ceiling_margin(
+        lines,
+        f"{label}.paired_deltas.max_holm_p_greater_average_precision_at_5",
+        max_holm_p_value(
+            holdout.get("paired_deltas", {}),
+            HOLDOUT_HOLM_COMPARISONS,
+            "average_precision_at_5",
+        ),
+        MAX_HOLDOUT_HOLM_P,
+    )
+    repo_macro = holdout.get("repo_macro_average")
+    if isinstance(repo_macro, dict):
+        append_count_margin(
+            lines,
+            f"{label}.repo_macro_average.repo_count",
+            repo_macro.get("repo_count"),
+            3,
+        )
+        append_mean_margin(
+            lines,
+            repo_macro.get("aggregate", {}),
+            f"{label}.repo_macro_average.workspace_related_hybrid"
+            ".mean_average_precision_at_5",
+            "workspace_related_hybrid",
+            "mean_average_precision_at_5",
+            thresholds["macro_hybrid_ap"],
+        )
+        append_holdout_delta_margins(
+            lines,
+            repo_macro.get("aggregate", {}),
+            f"{label}.repo_macro_average.workspace_related_hybrid",
+            "workspace_related_hybrid",
+            "mean_average_precision_at_5",
+            thresholds,
+            [
+                ("workspace_related_direct", "macro_direct_delta"),
+                ("workspace_related_pagerank", "macro_pagerank_delta"),
+                ("baseline_lexical_similarity", "lexical_delta"),
+                ("baseline_content_similarity", "content_delta"),
+                ("baseline_recent_activity", "recent_delta"),
+                ("baseline_global_pagerank", "global_delta"),
+            ],
+        )
+    append_weight_margin(
+        lines,
+        holdout,
+        label,
+        EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT,
+        "mean_average_precision_at_5",
+        thresholds["default_weight_ap"],
+    )
+    loro = holdout.get("leave_one_repo_out_weight_selection")
+    if isinstance(loro, dict):
+        append_count_margin(
+            lines,
+            f"{label}.leave_one_repo_out.selection_count",
+            len(loro.get("selections", [])),
+            3,
+        )
+        append_mean_margin(
+            lines,
+            loro.get("aggregate", {}),
+            f"{label}.leave_one_repo_out.workspace_related_hybrid_loro"
+            ".mean_average_precision_at_5",
+            "workspace_related_hybrid_loro",
+            "mean_average_precision_at_5",
+            thresholds["loro_ap"],
+        )
+        append_holdout_delta_margins(
+            lines,
+            loro.get("aggregate", {}),
+            f"{label}.leave_one_repo_out.workspace_related_hybrid_loro",
+            "workspace_related_hybrid_loro",
+            "mean_average_precision_at_5",
+            thresholds,
+            HOLDOUT_DELTA_THRESHOLDS,
+        )
+        append_ceiling_margin(
+            lines,
+            f"{label}.leave_one_repo_out.max_holm_p_greater_average_precision_at_5",
+            max_holm_p_value(
+                loro.get("paired_deltas", {}),
+                LORO_HOLM_COMPARISONS,
+                "average_precision_at_5",
+            ),
+            MAX_HOLDOUT_HOLM_P,
+        )
+    return lines
+
+
+def append_holdout_delta_margins(
+    lines: list[str],
+    aggregate: dict[str, Any],
+    label_prefix: str,
+    left: str,
+    metric: str,
+    thresholds: dict[str, float],
+    comparisons: list[tuple[str, str]],
+) -> None:
+    for right, threshold_key in comparisons:
+        append_delta_margin(
+            lines,
+            aggregate,
+            f"{label_prefix}_minus_{right}.{metric}",
+            left,
+            right,
+            metric,
+            thresholds[threshold_key],
+        )
+
+
+def append_mean_margin(
+    lines: list[str],
+    aggregate: dict[str, Any],
+    label: str,
+    method: str,
+    metric: str,
+    minimum: float,
+) -> None:
+    summary = aggregate.get(method)
+    if not isinstance(summary, dict) or metric not in summary:
+        return
+    append_floor_margin(lines, label, float(summary[metric]), minimum)
+
+
+def append_delta_margin(
+    lines: list[str],
+    aggregate: dict[str, Any],
+    label: str,
+    left: str,
+    right: str,
+    metric: str,
+    minimum: float,
+) -> None:
+    left_summary = aggregate.get(left)
+    right_summary = aggregate.get(right)
+    if not isinstance(left_summary, dict) or not isinstance(right_summary, dict):
+        return
+    if metric not in left_summary or metric not in right_summary:
+        return
+    value = float(left_summary[metric]) - float(right_summary[metric])
+    append_floor_margin(lines, label, value, minimum)
+
+
+def append_weight_margin(
+    lines: list[str],
+    holdout: dict[str, Any],
+    label: str,
+    weight: float,
+    metric: str,
+    minimum: float,
+) -> None:
+    value = weight_sweep_value(holdout, weight=weight, metric=metric)
+    if value is None:
+        return
+    append_floor_margin(
+        lines,
+        f"{label}.hybrid_weight_sweep[{weight:g}].{metric}",
+        value,
+        minimum,
+    )
+    default_summary = holdout.get("aggregate", {}).get("workspace_related_hybrid", {})
+    if metric in default_summary:
+        append_ceiling_margin(
+            lines,
+            f"{label}.hybrid_weight_sweep[{weight:g}].default_alignment_abs_delta_"
+            f"{metric}",
+            abs(float(default_summary[metric]) - value),
+            0.001,
+        )
+    append_ceiling_margin(
+        lines,
+        f"{label}.hybrid_weight_sweep[{weight:g}].best_weight_advantage_{metric}",
+        max_weight_sweep_advantage(holdout, weight=weight, metric=metric),
+        0.001,
+    )
+
+
+def append_oracle_margin(
+    lines: list[str],
+    aggregate: dict[str, Any],
+    label: str,
+    method: str,
+    oracle: str,
+    metric: str,
+    minimum: float,
+) -> None:
+    method_summary = aggregate.get(method)
+    oracle_summary = aggregate.get(oracle)
+    if not isinstance(method_summary, dict) or not isinstance(oracle_summary, dict):
+        return
+    if metric not in method_summary or metric not in oracle_summary:
+        return
+    oracle_value = float(oracle_summary[metric])
+    if oracle_value <= 0.0:
+        return
+    append_floor_margin(
+        lines,
+        label,
+        float(method_summary[metric]) / oracle_value,
+        minimum,
+    )
+
+
+def append_count_margin(
+    lines: list[str],
+    label: str,
+    value: Any,
+    minimum: int,
+) -> None:
+    if value is None:
+        return
+    count = int(value)
+    lines.append(
+        f"{label}: value={count}, minimum={minimum}, margin={count - minimum:+d}"
+    )
+
+
+def append_floor_margin(
+    lines: list[str],
+    label: str,
+    value: float,
+    minimum: float,
+) -> None:
+    lines.append(
+        f"{label}: value={value:.3f}, minimum={minimum:.3f}, "
+        f"margin={value - minimum:+.3f}"
+    )
+
+
+def append_ceiling_margin(
+    lines: list[str],
+    label: str,
+    value: float | None,
+    maximum: float,
+) -> None:
+    if value is None:
+        return
+    lines.append(
+        f"{label}: value={value:.4f}, maximum={maximum:.4f}, "
+        f"headroom={maximum - value:+.4f}"
+    )
+
+
+def max_holm_p_value(
+    deltas: dict[str, Any],
+    comparisons: list[str],
+    metric: str,
+) -> float | None:
+    key = f"p_greater_holm_delta_{metric}"
+    values = []
+    for comparison in comparisons:
+        summary = deltas.get(comparison)
+        if isinstance(summary, dict) and key in summary:
+            values.append(float(summary[key]))
+    return max(values) if values else None
+
+
+def max_weight_sweep_advantage(
+    holdout: dict[str, Any],
+    *,
+    weight: float,
+    metric: str,
+) -> float | None:
+    selected_value = weight_sweep_value(holdout, weight=weight, metric=metric)
+    if selected_value is None:
+        return None
+    advantages = []
+    for entry in holdout.get("hybrid_weight_sweep", []):
+        candidate_weight = float(entry.get("hybrid_direct_weight", -1.0))
+        candidate_value = weight_sweep_value(
+            holdout,
+            weight=candidate_weight,
+            metric=metric,
+        )
+        if candidate_value is not None:
+            advantages.append(candidate_value - selected_value)
+    return max(advantages) if advantages else None
 
 
 def require_mean(
@@ -810,14 +1297,7 @@ def require_loro_thresholds(
     require_holm_evidence(
         failures,
         loro.get("paired_deltas", {}),
-        [
-            "workspace_related_hybrid_loro_minus_workspace_related_direct",
-            "workspace_related_hybrid_loro_minus_workspace_related_pagerank",
-            "workspace_related_hybrid_loro_minus_baseline_lexical_similarity",
-            "workspace_related_hybrid_loro_minus_baseline_content_similarity",
-            "workspace_related_hybrid_loro_minus_baseline_recent_activity",
-            "workspace_related_hybrid_loro_minus_baseline_global_pagerank",
-        ],
+        LORO_HOLM_COMPARISONS,
         metric="average_precision_at_5",
         maximum=max_holm_p,
         label=f"{label}.leave_one_repo_out_weight_selection",
@@ -846,8 +1326,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    report = load_report(args.report)
     failures = check_report(
-        load_report(args.report),
+        report,
         require_holdout=args.require_holdout,
     )
     if failures:
@@ -856,6 +1337,14 @@ def main() -> None:
             print(f"- {failure}", file=sys.stderr)
         raise SystemExit(1)
     print("effect threshold check passed")
+    margin_lines = threshold_margin_report(
+        report,
+        require_holdout=args.require_holdout,
+    )
+    if margin_lines:
+        print("effect threshold margins:")
+        for line in margin_lines:
+            print(f"- {line}")
 
 
 if __name__ == "__main__":
