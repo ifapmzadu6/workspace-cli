@@ -564,6 +564,8 @@ if __name__ == "__main__":
         self.assertIn("data.included_content", workspace_prompt)
         self.assertIn("patch --stdin --json", workspace_prompt)
         self.assertIn("do not create or delete a temporary patch file", workspace_prompt)
+        self.assertIn("complete closing-brace context", workspace_prompt)
+        self.assertIn("one complete patch", workspace_prompt)
         self.assertIn("impact --diff", workspace_prompt)
         self.assertIn("standard unified", workspace_prompt)
         self.assertIn("do not use a `--` separator", workspace_prompt)
