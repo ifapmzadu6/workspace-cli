@@ -193,7 +193,7 @@ def check_repo_holdout_thresholds(
     require_count(failures, holdout, "target_count", 180, label)
 
     aggregate = holdout.get("aggregate", {})
-    min_hybrid_ap = 0.72 if predictable else 0.64
+    min_hybrid_ap = 0.73 if predictable else 0.70
     min_direct_delta = 0.09 if predictable else 0.07
     min_lexical_delta = 0.40 if predictable else 0.35
     min_content_delta = 0.25 if predictable else 0.20
@@ -201,8 +201,8 @@ def check_repo_holdout_thresholds(
     min_global_delta = 0.18 if predictable else 0.15
     min_pagerank_delta = 0.11 if predictable else 0.10
     min_oracle_normalized = MIN_HOLDOUT_ORACLE_NORMALIZED_AP
-    min_loro_ap = 0.71 if predictable else 0.63
-    min_macro_hybrid_ap = 0.75 if predictable else 0.68
+    min_loro_ap = 0.73 if predictable else 0.70
+    min_macro_hybrid_ap = 0.76 if predictable else 0.73
     min_macro_direct_delta = 0.08 if predictable else 0.06
     min_macro_pagerank_delta = 0.12 if predictable else 0.10
     ap_metric = "mean_average_precision_at_5"
@@ -331,7 +331,7 @@ def check_repo_holdout_thresholds(
         holdout,
         weight=EXPECTED_RELATED_HYBRID_DEFAULT_WEIGHT,
         metric="mean_average_precision_at_5",
-        minimum=0.73 if predictable else 0.65,
+        minimum=0.73 if predictable else 0.70,
         label=label,
     )
     require_loro_thresholds(

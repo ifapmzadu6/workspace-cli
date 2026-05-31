@@ -89,6 +89,8 @@ const IMPACT_HYBRID_DIRECT_SCORE_WEIGHT: f64 = 0.05;
 const RELATED_SHARED_PARENT_SCORE_MULTIPLIER: f64 = 1.08;
 const RELATED_SHARED_EXTENSION_SCORE_MULTIPLIER: f64 = 1.03;
 const RELATED_SHARED_TEST_KIND_SCORE_MULTIPLIER: f64 = 1.04;
+const RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER: f64 = 4.25;
+const RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT: f64 = 0.3;
 const IMPACT_TEST_SCORE_MULTIPLIER: f64 = 1.5;
 const IMPACT_DOC_SCORE_MULTIPLIER: f64 = 0.75;
 const PAGERANK_DEFAULT_CANDIDATE_LIMIT: usize = 40;
@@ -4446,12 +4448,15 @@ fn rank_cochanges_hybrid_from_index(
     let edge_lookup = cochange_edge_lookup(index);
     let max_direct_weight = max_related_direct_edge_weight(index, &target);
     for hit in &mut hits {
-        let direct_score = find_cochange_edge(&edge_lookup, &target, &hit.path)
-            .map(|edge| normalized_direct_score(edge.weighted_cochanges, max_direct_weight))
+        let direct_edge_weight = find_cochange_edge(&edge_lookup, &target, &hit.path)
+            .map(|edge| edge.weighted_cochanges)
             .unwrap_or_default();
+        let direct_score = normalized_direct_score(direct_edge_weight, max_direct_weight);
         hit.score = hybrid_rank_score(hit.score, direct_score, direct_weight);
+        hit.score *= related_hybrid_path_score_multiplier(&target, &hit.path, direct_edge_weight);
     }
-    apply_related_pagerank_path_prior(&mut hits, &target);
+    normalize_pagerank_hit_scores(&mut hits);
+    hits.sort_by(compare_pagerank_hit_by_score);
 
     let mut related = hits
         .into_iter()
@@ -4624,6 +4629,58 @@ fn related_path_score_multiplier(target: &str, candidate: &str) -> f64 {
         multiplier *= RELATED_SHARED_TEST_KIND_SCORE_MULTIPLIER;
     }
     multiplier
+}
+
+fn related_hybrid_path_score_multiplier(
+    target: &str,
+    candidate: &str,
+    direct_edge_weight: f64,
+) -> f64 {
+    let mut multiplier = related_path_score_multiplier(target, candidate);
+    if direct_edge_weight >= RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT
+        && is_same_source_sibling(target, candidate)
+    {
+        multiplier *= RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER;
+    }
+    multiplier
+}
+
+fn is_same_source_sibling(target: &str, candidate: &str) -> bool {
+    let target_parent = path_parent(target);
+    !target_parent.is_empty()
+        && target_parent == path_parent(candidate)
+        && path_extension(target) == path_extension(candidate)
+        && is_source_code_file(target)
+        && is_source_code_file(candidate)
+}
+
+fn is_source_code_file(path: &str) -> bool {
+    matches!(
+        path_extension(path),
+        Some(
+            "rs" | "ts"
+                | "tsx"
+                | "js"
+                | "jsx"
+                | "mjs"
+                | "cjs"
+                | "py"
+                | "go"
+                | "java"
+                | "kt"
+                | "kts"
+                | "c"
+                | "cc"
+                | "cpp"
+                | "h"
+                | "hpp"
+                | "swift"
+                | "rb"
+                | "php"
+                | "cs"
+                | "scala"
+        )
+    )
 }
 
 fn path_parent(path: &str) -> &str {
@@ -11458,6 +11515,34 @@ src/b.rs
             test_position < first_doc_position,
             "impact ranking should put test evidence before doc noise: {paths:?}"
         );
+    }
+
+    #[test]
+    fn related_hybrid_path_prior_boosts_source_siblings() {
+        let pagerank_multiplier = related_path_score_multiplier("src/main.rs", "src/filters.rs");
+        let weak_hybrid_multiplier = related_hybrid_path_score_multiplier(
+            "src/main.rs",
+            "src/filters.rs",
+            RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT / 2.0,
+        );
+        let hybrid_multiplier = related_hybrid_path_score_multiplier(
+            "src/main.rs",
+            "src/filters.rs",
+            RELATED_HYBRID_SOURCE_SIBLING_MIN_DIRECT_WEIGHT,
+        );
+
+        assert_eq!(weak_hybrid_multiplier, pagerank_multiplier);
+        assert!(
+            hybrid_multiplier
+                >= pagerank_multiplier * RELATED_HYBRID_SOURCE_SIBLING_SCORE_MULTIPLIER
+        );
+        assert_eq!(
+            related_hybrid_path_score_multiplier("src/main.rs", "Cargo.toml", 1.0),
+            related_path_score_multiplier("src/main.rs", "Cargo.toml")
+        );
+        assert!(!is_same_source_sibling("main.rs", "lib.rs"));
+        assert!(!is_source_code_file("README.md"));
+        assert!(!is_source_code_file("scripts/release.sh"));
     }
 
     #[test]

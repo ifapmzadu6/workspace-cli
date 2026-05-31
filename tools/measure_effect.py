@@ -32,8 +32,10 @@ DEFAULT_CUTOFF_SWEEP = [1, 3, 5]
 RECENT_ACTIVITY_MAX_COMMITS = 500
 GLOBAL_PAGERANK_ITERATIONS = 50
 CONTENT_SIMILARITY_MAX_BYTES = 200_000
-RELATED_HYBRID_DEFAULT_DIRECT_WEIGHT = 0.8
+RELATED_HYBRID_DEFAULT_DIRECT_WEIGHT = 0.9
 RELATED_HYBRID_LORO_METHOD = "workspace_related_hybrid_loro"
+LORO_WEIGHT_SELECTION_AP_TOLERANCE = 0.002
+LORO_WEIGHT_SELECTION_NDCG_TOLERANCE = 0.002
 RELATED_COMPARISON_PAIRS = [
     ("workspace_related_hybrid", "workspace_related_direct"),
     ("workspace_related_hybrid", "workspace_related_pagerank"),
@@ -696,18 +698,7 @@ def repo_holdout_leave_one_repo_out_weight_selection(
         if not weight_summaries:
             continue
 
-        selected = max(
-            weight_summaries,
-            key=lambda summary: (
-                summary[f"train_average_precision_at_{k}"],
-                summary[f"train_ndcg_at_{k}"],
-                -abs(
-                    summary["hybrid_direct_weight"]
-                    - RELATED_HYBRID_DEFAULT_DIRECT_WEIGHT
-                ),
-                -summary["hybrid_direct_weight"],
-            ),
-        )
+        selected = select_loro_weight_summary(weight_summaries, k)
         selected_method = selected["method"]
         repo_selected_scenarios = []
         for scenario in test_scenarios:
@@ -780,6 +771,40 @@ def repo_holdout_leave_one_repo_out_weight_selection(
         if selected_scenarios
         else {},
     }
+
+
+def select_loro_weight_summary(
+    weight_summaries: list[dict[str, Any]],
+    k: int,
+) -> dict[str, Any]:
+    ap_metric = f"train_average_precision_at_{k}"
+    ndcg_metric = f"train_ndcg_at_{k}"
+    best_ap = max(float(summary[ap_metric]) for summary in weight_summaries)
+    ap_candidates = [
+        summary
+        for summary in weight_summaries
+        if float(summary[ap_metric])
+        >= best_ap - LORO_WEIGHT_SELECTION_AP_TOLERANCE
+    ]
+    best_ndcg = max(float(summary[ndcg_metric]) for summary in ap_candidates)
+    ndcg_candidates = [
+        summary
+        for summary in ap_candidates
+        if float(summary[ndcg_metric])
+        >= best_ndcg - LORO_WEIGHT_SELECTION_NDCG_TOLERANCE
+    ]
+    return max(
+        ndcg_candidates,
+        key=lambda summary: (
+            -abs(
+                summary["hybrid_direct_weight"]
+                - RELATED_HYBRID_DEFAULT_DIRECT_WEIGHT
+            ),
+            -summary["hybrid_direct_weight"],
+            summary[ap_metric],
+            summary[ndcg_metric],
+        ),
+    )
 
 
 def paired_delta_metric_sets(
@@ -1022,7 +1047,9 @@ def paths(value: dict[str, Any], *segments: str) -> list[str]:
 
 
 def observable_repo_path(path: str) -> str | None:
-    normalized = path.strip().lstrip("./").replace("\\", "/").rstrip("/")
+    normalized = path.strip().replace("\\", "/").rstrip("/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
     if (
         not normalized
         or normalized.startswith("/")
