@@ -7987,12 +7987,14 @@ impl PatchHeaderState {
             return Ok(false);
         }
         if line.starts_with(b"@@ ") {
-            let header = std::str::from_utf8(line).context("invalid UTF-8 patch hunk header")?;
-            let mut fields = header.split_ascii_whitespace();
+            // Only the range tokens are ASCII; function context can be arbitrary bytes.
+            let mut fields = line
+                .split(|byte| byte.is_ascii_whitespace())
+                .filter(|field| !field.is_empty());
             fields.next();
-            self.old_lines = patch_hunk_count(fields.next(), '-')?;
-            self.new_lines = patch_hunk_count(fields.next(), '+')?;
-            if fields.next() != Some("@@") {
+            self.old_lines = patch_hunk_count(fields.next(), b'-')?;
+            self.new_lines = patch_hunk_count(fields.next(), b'+')?;
+            if fields.next() != Some(b"@@".as_slice()) {
                 bail!("invalid patch hunk header");
             }
             return Ok(false);
@@ -8001,10 +8003,11 @@ impl PatchHeaderState {
     }
 }
 
-fn patch_hunk_count(field: Option<&str>, prefix: char) -> Result<usize> {
+fn patch_hunk_count(field: Option<&[u8]>, prefix: u8) -> Result<usize> {
     let range = field
-        .and_then(|field| field.strip_prefix(prefix))
+        .and_then(|field| field.strip_prefix(&[prefix]))
         .context("invalid patch hunk range")?;
+    let range = std::str::from_utf8(range).context("invalid patch hunk range")?;
     let (start, count) = range.split_once(',').unwrap_or((range, "1"));
     start.parse::<usize>().context("invalid patch hunk start")?;
     count.parse().context("invalid patch hunk count")
@@ -9434,6 +9437,17 @@ diff --git a/src/main.rs b/src/main.rs
 +new
 ";
         assert_eq!(extract_patch_files(patch), vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn patch_hunk_context_bytes_are_opaque() {
+        let patch = b"diff --git a/note.txt b/note.txt\n--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@ function caf\xe9 \xff\n-old\n+new\n";
+        assert_eq!(
+            extract_patch_files_from_reader(patch.as_slice()).unwrap(),
+            vec!["note.txt"]
+        );
+        let malformed = b"--- a/note.txt\n+++ b/note.txt\n@@ -\xff +1 @@\n-old\n+new\n";
+        assert!(extract_patch_files_from_reader(malformed.as_slice()).is_err());
     }
 
     #[test]

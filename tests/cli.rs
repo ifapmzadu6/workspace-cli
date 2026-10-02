@@ -79,6 +79,10 @@ fn run_workspace_failure_with_stdin(cwd: &Path, args: &[&str], stdin: &str) -> S
 }
 
 fn run_workspace_with_stdin(cwd: &Path, args: &[&str], stdin: &str) -> Value {
+    run_workspace_with_stdin_bytes(cwd, args, stdin.as_bytes())
+}
+
+fn run_workspace_with_stdin_bytes(cwd: &Path, args: &[&str], stdin: &[u8]) -> Value {
     let mut child = Command::new(workspace_bin())
         .current_dir(cwd)
         .args(args)
@@ -92,7 +96,7 @@ fn run_workspace_with_stdin(cwd: &Path, args: &[&str], stdin: &str) -> Value {
         .stdin
         .as_mut()
         .expect("stdin should be piped")
-        .write_all(stdin.as_bytes())
+        .write_all(stdin)
         .expect("stdin should be written");
     let output = child
         .wait_with_output()
@@ -2341,6 +2345,60 @@ fn patch_custom_prefix_copy_keeps_repository_relative_paths() {
         fs::read(root.join("b/copy.txt")).unwrap(),
         b"copy this note\n"
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn patch_generated_non_utf8_function_context_and_rollback_bytes() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    let declaration = b"void function(void) { /* caf\xe9 */\n";
+    let line = b"    keep();\n";
+    let mut before = declaration.to_vec();
+    for _ in 0..12 {
+        before.extend_from_slice(line);
+    }
+    before.extend_from_slice(b"}\n");
+    let mut after = before.clone();
+    let start = declaration.len() + 8 * line.len();
+    after.splice(
+        start..start + line.len(),
+        b"    changed();\n".iter().copied(),
+    );
+    fs::write(root.join("sample.c"), &before).unwrap();
+    commit_all(root, "initial Latin-1 source");
+    fs::create_dir(root.join("old")).unwrap();
+    fs::create_dir(root.join("new")).unwrap();
+    fs::write(root.join("old/sample.c"), &before).unwrap();
+    fs::write(root.join("new/sample.c"), &after).unwrap();
+    let diff = Command::new("diff")
+        .current_dir(root)
+        .env("LC_ALL", "C")
+        .args(["-up", "old/sample.c", "new/sample.c"])
+        .output()
+        .unwrap();
+    assert_eq!(diff.status.code(), Some(1));
+    assert!(
+        diff.stdout
+            .split(|byte| *byte == b'\n')
+            .any(|line| line.starts_with(b"@@ ") && line.contains(&0xe9))
+    );
+    let applied =
+        run_workspace_with_stdin_bytes(root, &["patch", "--stdin", "--json"], &diff.stdout);
+    assert_eq!(
+        applied["data"]["files_changed"],
+        serde_json::json!(["sample.c"])
+    );
+    assert_eq!(fs::read(root.join("sample.c")).unwrap(), after);
+    run_workspace(
+        root,
+        &[
+            "rollback",
+            applied["data"]["transaction_id"].as_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert_eq!(fs::read(root.join("sample.c")).unwrap(), before);
 }
 
 #[test]
