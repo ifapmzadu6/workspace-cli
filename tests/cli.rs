@@ -1236,6 +1236,12 @@ diff --git a/note.txt b/note.txt
         .as_str()
         .expect("transaction id should be a string")
         .to_string();
+    assert!(
+        !root
+            .join(patch["data"]["stored_patch"].as_str().unwrap())
+            .with_extension("apply-failed.json")
+            .exists()
+    );
 
     let diff = run_workspace(root, &["diff", "--summary", "--json"]);
     assert_eq!(diff["kind"], "workspace_diff");
@@ -1966,6 +1972,171 @@ fn status_truncates_large_git_file_lists() {
     assert_eq!(map["truncated"], true);
     assert_eq!(map["data"]["git"]["dirty_file_count"], 90);
     assert_eq!(map["data"]["git"]["untracked_file_count"], 90);
+}
+
+#[test]
+#[cfg(unix)]
+fn git_apply_io_failures_preserve_records_and_refuse_automatic_rollback() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for with_copy in [false, true] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        write_file(root, "source.txt", "original\n");
+        commit_all(root, "initial source");
+        fs::create_dir(root.join("locked")).unwrap();
+        fs::set_permissions(root.join("locked"), fs::Permissions::from_mode(0o555)).unwrap();
+        if fs::File::create(root.join("locked/permission-probe")).is_ok() {
+            // Root can bypass directory permissions; this fixture needs enforcement.
+            fs::set_permissions(root.join("locked"), fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+        let mut patch = String::new();
+        if with_copy {
+            patch.push_str("diff --git a/source.txt b/copy.txt\nsimilarity index 100%\ncopy from source.txt\ncopy to copy.txt\n");
+        }
+        patch.push_str("diff --git a/locked/new.txt b/locked/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/locked/new.txt\n@@ -0,0 +1 @@\n+new\n");
+        let mut check = Command::new("git")
+            .current_dir(root)
+            .args(["apply", "-p1", "--check", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        check
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(patch.as_bytes())
+            .unwrap();
+        let check = check.wait_with_output().unwrap();
+        assert!(
+            check.status.success(),
+            "preflight should pass: {:?}",
+            check.stderr
+        );
+        let stderr =
+            run_workspace_failure_with_stdin(root, &["patch", "--stdin", "--json"], &patch);
+        fs::set_permissions(root.join("locked"), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(
+            stderr.contains("git apply failed"),
+            "unexpected stderr: {stderr}"
+        );
+        assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"original\n");
+        assert!(!root.join("locked/new.txt").exists());
+        assert_eq!(root.join("copy.txt").exists(), with_copy);
+        if with_copy {
+            assert_eq!(fs::read(root.join("copy.txt")).unwrap(), b"original\n");
+        }
+        assert!(
+            stderr.contains("may be partially modified"),
+            "unexpected stderr: {stderr}"
+        );
+        let mut records = fs::read_dir(root.join(".workspace/transactions"))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        records.sort();
+        let receipt_path = records
+            .iter()
+            .find(|path| path.to_string_lossy().ends_with(".apply-failed.json"))
+            .expect("failure receipt should be preserved");
+        let receipt: Value = serde_json::from_slice(&fs::read(receipt_path).unwrap()).unwrap();
+        assert_eq!(receipt["status"], "apply_failed");
+        assert_eq!(receipt["worktree_state"], "unknown");
+        assert_eq!(receipt["automatic_rollback_allowed"], false);
+        assert!(
+            receipt["error"]
+                .as_str()
+                .unwrap()
+                .contains("git apply failed")
+        );
+        assert_eq!(receipt["patch_file"], "<stdin>");
+        assert!(strings_at(&receipt, &["target_files"]).contains(&"locked/new.txt".to_string()));
+        let transaction_id = receipt["transaction_id"].as_str().unwrap();
+        assert!(stderr.contains(transaction_id));
+        let stored = root.join(receipt["stored_patch"].as_str().unwrap());
+        assert_eq!(fs::read(&stored).unwrap(), patch.as_bytes());
+        assert_eq!(records.len(), if with_copy { 4 } else { 2 });
+        if with_copy {
+            assert!(stored.with_extension("rollback.patch").is_file());
+            assert!(stored.with_extension("rollback.json").is_file());
+            write_file(root, "copy.txt", "post-failure user edit\n");
+        }
+        let before = records
+            .iter()
+            .map(|path| fs::read(path).unwrap())
+            .collect::<Vec<_>>();
+        let refusal = run_workspace_failure(root, &["rollback", transaction_id, "--json"]);
+        assert!(
+            refusal.contains("recorded apply failure"),
+            "unexpected stderr: {refusal}"
+        );
+        assert!(
+            refusal.contains("manual recovery"),
+            "unexpected stderr: {refusal}"
+        );
+        assert_eq!(
+            records
+                .iter()
+                .map(|path| fs::read(path).unwrap())
+                .collect::<Vec<_>>(),
+            before
+        );
+        assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"original\n");
+        if with_copy {
+            assert_eq!(
+                fs::read(root.join("copy.txt")).unwrap(),
+                b"post-failure user edit\n"
+            );
+        }
+        assert!(
+            fs::read(root.join(".workspace/log.jsonl"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn rollback_refuses_incomplete_or_damaged_apply_state_without_changing_files() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "source.txt", "original\n");
+    commit_all(root, "initial source");
+    let patch = "diff --git a/source.txt b/copy.txt\nsimilarity index 100%\ncopy from source.txt\ncopy to copy.txt\n";
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    let transaction_id = applied["data"]["transaction_id"].as_str().unwrap();
+    let stored = root.join(applied["data"]["stored_patch"].as_str().unwrap());
+    let apply_state = stored.with_extension("apply-failed.json");
+    assert!(!apply_state.exists());
+    let log_before = fs::read(root.join(".workspace/log.jsonl")).unwrap();
+    for state in [
+        b"{\"status\":\"apply_in_progress\"}".as_slice(),
+        b"".as_slice(),
+    ] {
+        fs::write(&apply_state, state).unwrap();
+        let stderr = run_workspace_failure(root, &["rollback", transaction_id, "--json"]);
+        assert!(
+            stderr.contains("incomplete apply"),
+            "unexpected stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains("manual recovery"),
+            "unexpected stderr: {stderr}"
+        );
+        assert_eq!(fs::read(&apply_state).unwrap(), state);
+        assert_eq!(fs::read(&stored).unwrap(), patch.as_bytes());
+        assert!(stored.with_extension("rollback.patch").is_file());
+        assert!(stored.with_extension("rollback.json").is_file());
+        assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"original\n");
+        assert_eq!(fs::read(root.join("copy.txt")).unwrap(), b"original\n");
+        assert_eq!(
+            fs::read(root.join(".workspace/log.jsonl")).unwrap(),
+            log_before
+        );
+    }
 }
 
 #[test]

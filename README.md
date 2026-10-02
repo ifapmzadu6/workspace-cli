@@ -546,6 +546,14 @@ transaction if a copy source or another target has since changed, or if its
 rollback snapshot is missing or damaged. Older copy transactions without a
 snapshot are left intact rather than guessing which files can be removed.
 
+An I/O failure during `git apply` can leave only part of a patch applied even
+after its preflight check passed. Failed or interrupted applies keep their
+transaction patch, any copy rollback snapshots, and an `apply-failed.json` state
+record in `.workspace/transactions`. The error identifies the transaction;
+automatic rollback refuses it because the resulting workspace state is unknown.
+Inspect the preserved records and current files for manual recovery. Successful
+applies remove the state record and support normal rollback.
+
 ## Abstract Model
 
 Core concepts:

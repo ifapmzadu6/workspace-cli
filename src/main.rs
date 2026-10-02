@@ -1830,10 +1830,44 @@ fn apply_patch_transaction_from_path(
             return Err(error);
         }
     };
-    if let Err(error) = run_git_apply(workspace, &stored_patch, []) {
+    // Persist uncertainty before Git can modify files, including interrupted applies.
+    let apply_state = stored_patch.with_extension("apply-failed.json");
+    if let Err(error) = store_apply_state(
+        workspace,
+        &transaction_id,
+        &patch_file,
+        &stored_patch,
+        &files_changed,
+        None,
+    ) {
         remove_failed_transaction_files(&stored_patch);
         return Err(error);
     }
+    if let Err(error) = run_git_apply(workspace, &stored_patch, []) {
+        let record_result = store_apply_state(
+            workspace,
+            &transaction_id,
+            &patch_file,
+            &stored_patch,
+            &files_changed,
+            Some(&error),
+        );
+        let mut context = format!(
+            "transaction {transaction_id} apply failed; workspace may be partially modified; transaction files preserved at {}; automatic rollback refused; inspect {} for manual recovery",
+            workspace.relative(&stored_patch),
+            workspace.relative(&apply_state),
+        );
+        if let Err(record_error) = record_result {
+            context.push_str(&format!("; failed to update apply state: {record_error:#}"));
+        }
+        return Err(error.context(context));
+    }
+    fs::remove_file(&apply_state).with_context(|| {
+        format!(
+            "transaction {transaction_id} was applied, but its apply state could not be cleared; transaction files preserved; automatic rollback refused; inspect {} for manual recovery",
+            workspace.relative(&apply_state),
+        )
+    })?;
 
     Ok(AppliedPatchTransaction {
         transaction_id,
@@ -1843,11 +1877,46 @@ fn apply_patch_transaction_from_path(
     })
 }
 
+fn store_apply_state(
+    workspace: &Workspace,
+    transaction_id: &str,
+    patch_file: &str,
+    stored_patch: &Path,
+    target_files: &[String],
+    error: Option<&anyhow::Error>,
+) -> Result<()> {
+    let path = stored_patch.with_extension("apply-failed.json");
+    let state = serde_json::json!({
+        "version": 1,
+        "transaction_id": transaction_id,
+        "status": if error.is_some() { "apply_failed" } else { "apply_in_progress" },
+        "worktree_state": "unknown",
+        "automatic_rollback_allowed": false,
+        "patch_file": patch_file,
+        "stored_patch": workspace.relative(stored_patch),
+        "target_files": target_files,
+        "error": error.map(|error| format!("{error:#}")),
+    });
+    let content = serde_json::to_vec(&state)?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(error.is_none())
+        .truncate(error.is_some())
+        .open(&path)
+        .with_context(|| format!("failed to open transaction apply state {}", path.display()))?;
+    file.write_all(&content)
+        .with_context(|| format!("failed to write transaction apply state {}", path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync transaction apply state {}", path.display()))?;
+    Ok(())
+}
+
 fn remove_failed_transaction_files(stored_patch: &Path) {
     for path in [
         stored_patch.to_path_buf(),
         stored_patch.with_extension("rollback.patch"),
         stored_patch.with_extension("rollback.json"),
+        stored_patch.with_extension("apply-failed.json"),
     ] {
         let _ = fs::remove_file(path);
     }
@@ -2666,6 +2735,22 @@ fn apply_rollback_transaction(
     transaction_id: &str,
 ) -> Result<AppliedRollbackTransaction> {
     let stored_patch = transaction_patch_path(workspace, transaction_id)?;
+    let apply_state = stored_patch.with_extension("apply-failed.json");
+    match fs::symlink_metadata(&apply_state) {
+        Ok(_) => bail!(
+            "transaction {transaction_id} has a recorded apply failure or incomplete apply; workspace may be partially modified; automatic rollback refused; inspect {} and the preserved transaction files for manual recovery",
+            workspace.relative(&apply_state),
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to inspect transaction apply state {}",
+                    apply_state.display()
+                )
+            });
+        }
+    }
     if !stored_patch.exists() {
         bail!(
             "transaction patch not found: {}",
