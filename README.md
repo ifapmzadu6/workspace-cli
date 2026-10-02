@@ -540,6 +540,12 @@ side.
 Rolls back a specific change. The goal is transaction-level rollback for changes
 applied by `workspace cli`, not broad operations such as `git reset`.
 
+Copy transactions record a rollback patch and fingerprints of post-transaction
+contents and Git file modes before applying the change. Rollback refuses the entire
+transaction if a copy source or another target has since changed, or if its
+rollback snapshot is missing or damaged. Older copy transactions without a
+snapshot are left intact rather than guessing which files can be removed.
+
 ## Abstract Model
 
 Core concepts:

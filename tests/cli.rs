@@ -2399,6 +2399,444 @@ fn rollback_legacy_transaction_ignores_metadata_like_hunk_body() {
 }
 
 #[test]
+fn copy_patch_rollback_removes_only_the_unchanged_copy() {
+    for content in [
+        b"copy this note\n".as_slice(),
+        b"hello\r\n\r\n",
+        b"\0binary\xff",
+        b"",
+    ] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        write_file(root, "a/source.txt", "");
+        fs::write(root.join("a/source.txt"), content).unwrap();
+        commit_all(root, "initial source");
+        let patch = "diff --git old/a/source.txt new/b/copy.txt\nsimilarity index 100%\ncopy from a/source.txt\ncopy to b/copy.txt\n";
+        let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+        let transaction_id = applied["data"]["transaction_id"].as_str().unwrap();
+        let stored_patch = root.join(applied["data"]["stored_patch"].as_str().unwrap());
+        let original_patch = fs::read(&stored_patch).unwrap();
+        assert_eq!(fs::read(root.join("b/copy.txt")).unwrap(), content);
+
+        run_workspace(root, &["rollback", transaction_id, "--json"]);
+        assert_eq!(fs::read(root.join("a/source.txt")).unwrap(), content);
+        assert!(!root.join("b/copy.txt").exists());
+        assert_eq!(fs::read(stored_patch).unwrap(), original_patch);
+    }
+}
+
+#[test]
+fn copy_patch_rollback_conflicts_preserve_files_and_transaction() {
+    for change in ["source", "destination", "both", "missing_destination"] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        write_file(root, "a/source.txt", "original\n");
+        commit_all(root, "initial source");
+        let patch = "diff --git a/a/source.txt b/b/copy.txt\nsimilarity index 100%\ncopy from a/source.txt\ncopy to b/copy.txt\n";
+        let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+        let transaction_id = applied["data"]["transaction_id"].as_str().unwrap();
+        let stored_patch = root.join(applied["data"]["stored_patch"].as_str().unwrap());
+        let stored_before = fs::read(&stored_patch).unwrap();
+        let log_before = fs::read(root.join(".workspace/log.jsonl")).unwrap();
+        if matches!(change, "source" | "both") {
+            write_file(root, "a/source.txt", "user edit\n");
+        }
+        if matches!(change, "destination" | "both") {
+            write_file(root, "b/copy.txt", "user edit\n");
+        }
+        if change == "missing_destination" {
+            fs::remove_file(root.join("b/copy.txt")).unwrap();
+        }
+        let source_before = fs::read(root.join("a/source.txt")).unwrap();
+        let destination_before = fs::read(root.join("b/copy.txt")).ok();
+        let stderr = run_workspace_failure(root, &["rollback", transaction_id, "--json"]);
+        assert!(
+            stderr.contains("rollback conflict"),
+            "unexpected stderr: {stderr}"
+        );
+        assert_eq!(fs::read(root.join("a/source.txt")).unwrap(), source_before);
+        assert_eq!(fs::read(root.join("b/copy.txt")).ok(), destination_before);
+        assert_eq!(fs::read(stored_patch).unwrap(), stored_before);
+        assert_eq!(
+            fs::read(root.join(".workspace/log.jsonl")).unwrap(),
+            log_before
+        );
+    }
+}
+
+#[test]
+fn copy_rollback_does_not_require_a_git_repository() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    write_file(root, "source.txt", "original\n");
+    let patch = "diff --git a/source.txt b/copy.txt\nsimilarity index 100%\ncopy from source.txt\ncopy to copy.txt\n";
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    assert_eq!(fs::read(root.join("copy.txt")).unwrap(), b"original\n");
+    run_workspace(
+        root,
+        &[
+            "rollback",
+            applied["data"]["transaction_id"].as_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"original\n");
+    assert!(!root.join("copy.txt").exists());
+    assert!(!root.join(".git").exists());
+}
+
+#[test]
+fn copy_rollback_binary_content_in_sha256_repository() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    run(root, "git", &["init", "-q", "--object-format=sha256"]);
+    run(root, "git", &["config", "user.email", "test@example.com"]);
+    run(root, "git", &["config", "user.name", "Test"]);
+    fs::write(root.join("source.bin"), b"\0binary\xff").unwrap();
+    commit_all(root, "initial source");
+    let patch = "diff --git a/source.bin b/copy.bin\nsimilarity index 100%\ncopy from source.bin\ncopy to copy.bin\n";
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    assert_eq!(fs::read(root.join("copy.bin")).unwrap(), b"\0binary\xff");
+    run_workspace(
+        root,
+        &[
+            "rollback",
+            applied["data"]["transaction_id"].as_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert_eq!(fs::read(root.join("source.bin")).unwrap(), b"\0binary\xff");
+    assert!(!root.join("copy.bin").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn copy_rollback_preserves_symlink_source_and_target() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "note.txt", "untouched\n");
+    std::os::unix::fs::symlink("note.txt", root.join("source.link")).unwrap();
+    commit_all(root, "initial symlink");
+    let patch = "diff --git a/source.link b/copy.link\nsimilarity index 100%\ncopy from source.link\ncopy to copy.link\n";
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    assert_eq!(
+        fs::read_link(root.join("copy.link")).unwrap(),
+        Path::new("note.txt")
+    );
+    run_workspace(
+        root,
+        &[
+            "rollback",
+            applied["data"]["transaction_id"].as_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert_eq!(
+        fs::read_link(root.join("source.link")).unwrap(),
+        Path::new("note.txt")
+    );
+    assert!(!root.join("copy.link").exists());
+    assert_eq!(fs::read(root.join("note.txt")).unwrap(), b"untouched\n");
+}
+
+#[test]
+fn copy_rollback_log_failure_keeps_all_transaction_files() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "source.txt", "original\n");
+    commit_all(root, "initial source");
+    let patch = "diff --git a/source.txt b/copy.txt\nsimilarity index 100%\ncopy from source.txt\ncopy to copy.txt\n";
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    let stored = root.join(applied["data"]["stored_patch"].as_str().unwrap());
+    let files = [
+        stored.clone(),
+        stored.with_extension("rollback.patch"),
+        stored.with_extension("rollback.json"),
+    ];
+    let before = files
+        .iter()
+        .map(|path| fs::read(path).unwrap())
+        .collect::<Vec<_>>();
+    fs::remove_file(root.join(".workspace/log.jsonl")).unwrap();
+    fs::create_dir(root.join(".workspace/log.jsonl")).unwrap();
+    let stderr = run_workspace_failure(
+        root,
+        &[
+            "rollback",
+            applied["data"]["transaction_id"].as_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(
+        stderr.contains("failed to open"),
+        "unexpected stderr: {stderr}"
+    );
+    assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"original\n");
+    assert_eq!(fs::read(root.join("copy.txt")).unwrap(), b"original\n");
+    assert_eq!(
+        files
+            .iter()
+            .map(|path| fs::read(path).unwrap())
+            .collect::<Vec<_>>(),
+        before
+    );
+}
+
+#[test]
+fn copy_patch_storage_failure_does_not_create_the_destination() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "source.txt", "original\n");
+    commit_all(root, "initial source");
+    write_file(root, ".workspace/transactions", "storage guard\n");
+    let patch = "diff --git a/source.txt b/copy.txt\nsimilarity index 100%\ncopy from source.txt\ncopy to copy.txt\n";
+    let stderr = run_workspace_failure_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    assert!(
+        stderr.contains("failed to create transaction directory"),
+        "unexpected stderr: {stderr}"
+    );
+    assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"original\n");
+    assert!(!root.join("copy.txt").exists());
+    assert_eq!(
+        fs::read(root.join(".workspace/transactions")).unwrap(),
+        b"storage guard\n"
+    );
+}
+
+#[test]
+fn copy_rollback_preserves_bytes_with_whitespace_fix_configuration() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "source.txt", "original  \n");
+    write_file(root, ".gitattributes", "copy.txt -whitespace\n");
+    commit_all(root, "initial source");
+    run(root, "git", &["config", "apply.whitespace", "fix"]);
+    let patch = "diff --git a/source.txt b/copy.txt\nsimilarity index 50%\ncopy from source.txt\ncopy to copy.txt\n--- a/source.txt\n+++ b/copy.txt\n@@ -1 +1 @@\n-original  \n+copy edit  \ndiff --git a/source.txt b/source.txt\n--- a/source.txt\n+++ b/source.txt\n@@ -1 +1 @@\n-original  \n+source edit  \n";
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"source edit\n");
+    assert_eq!(fs::read(root.join("copy.txt")).unwrap(), b"copy edit  \n");
+    run_workspace(
+        root,
+        &[
+            "rollback",
+            applied["data"]["transaction_id"].as_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"original  \n");
+    assert!(!root.join("copy.txt").exists());
+    assert_eq!(
+        fs::read(root.join(".gitattributes")).unwrap(),
+        b"copy.txt -whitespace\n"
+    );
+}
+
+#[test]
+fn edited_copy_patch_and_source_edit_rollback_together() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "source name.txt", "one\ntwo\nthree\n");
+    commit_all(root, "initial source");
+    let patch = "diff --git old/source name.txt new/copy name.txt\nsimilarity index 66%\ncopy from source name.txt\ncopy to copy name.txt\n--- old/source name.txt\n+++ new/copy name.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+copied edit\n three\ndiff --git old/source name.txt new/source name.txt\n--- old/source name.txt\n+++ new/source name.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+source edit\n three\n";
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    assert_eq!(
+        fs::read(root.join("source name.txt")).unwrap(),
+        b"one\nsource edit\nthree\n"
+    );
+    assert_eq!(
+        fs::read(root.join("copy name.txt")).unwrap(),
+        b"one\ncopied edit\nthree\n"
+    );
+    run_workspace(
+        root,
+        &[
+            "rollback",
+            applied["data"]["transaction_id"].as_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert_eq!(
+        fs::read(root.join("source name.txt")).unwrap(),
+        b"one\ntwo\nthree\n"
+    );
+    assert!(!root.join("copy name.txt").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn copy_transaction_binary_mode_rename_and_conflict_rollback() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "source.txt", "unique copy source\n");
+    write_file(root, "old.txt", "unique rename source\n");
+    write_file(root, "mode.txt", "mode only\n");
+    fs::write(root.join("binary.bin"), b"\0before\xff").unwrap();
+    commit_all(root, "initial files");
+    fs::copy(root.join("source.txt"), root.join("copy.txt")).unwrap();
+    fs::rename(root.join("old.txt"), root.join("new.txt")).unwrap();
+    fs::write(root.join("binary.bin"), b"\0after\xfe").unwrap();
+    fs::set_permissions(root.join("mode.txt"), fs::Permissions::from_mode(0o755)).unwrap();
+    run(root, "git", &["add", "."]);
+    let diff = Command::new("git")
+        .current_dir(root)
+        .args([
+            "diff",
+            "--cached",
+            "--binary",
+            "--find-renames",
+            "--find-copies",
+            "--find-copies-harder",
+            "--src-prefix=old/",
+            "--dst-prefix=new/",
+        ])
+        .output()
+        .unwrap();
+    assert!(diff.status.success());
+    let patch = String::from_utf8(diff.stdout).unwrap();
+    assert!(patch.contains("copy from source.txt"));
+    assert!(patch.contains("rename from old.txt"));
+    assert!(patch.contains("GIT binary patch"));
+    run(root, "git", &["reset", "--hard", "-q"]);
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], &patch);
+    let transaction_id = applied["data"]["transaction_id"].as_str().unwrap();
+    write_file(root, "copy.txt", "user change\n");
+    let stderr = run_workspace_failure(root, &["rollback", transaction_id, "--json"]);
+    assert!(stderr.contains("rollback conflict"));
+    assert_eq!(fs::read(root.join("copy.txt")).unwrap(), b"user change\n");
+    assert_eq!(fs::read(root.join("binary.bin")).unwrap(), b"\0after\xfe");
+    assert!(!root.join("old.txt").exists());
+    assert_eq!(
+        fs::read(root.join("new.txt")).unwrap(),
+        b"unique rename source\n"
+    );
+    assert_ne!(
+        fs::metadata(root.join("mode.txt"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o111,
+        0
+    );
+
+    write_file(root, "copy.txt", "unique copy source\n");
+    run_workspace(root, &["rollback", transaction_id, "--json"]);
+    assert_eq!(
+        fs::read(root.join("source.txt")).unwrap(),
+        b"unique copy source\n"
+    );
+    assert_eq!(
+        fs::read(root.join("old.txt")).unwrap(),
+        b"unique rename source\n"
+    );
+    assert!(!root.join("copy.txt").exists());
+    assert!(!root.join("new.txt").exists());
+    assert_eq!(fs::read(root.join("binary.bin")).unwrap(), b"\0before\xff");
+    assert_eq!(
+        fs::metadata(root.join("mode.txt"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o111,
+        0
+    );
+}
+
+#[test]
+fn copy_rollback_snapshot_failures_preserve_the_transaction() {
+    for change in [
+        "guard_missing",
+        "guard_invalid",
+        "undo_missing",
+        "undo_changed",
+        "original_changed",
+    ] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        write_file(root, "source.txt", "original\n");
+        commit_all(root, "initial source");
+        let patch = "diff --git a/source.txt b/copy.txt\nsimilarity index 100%\ncopy from source.txt\ncopy to copy.txt\n";
+        let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+        let transaction_id = applied["data"]["transaction_id"].as_str().unwrap();
+        let stored = root.join(applied["data"]["stored_patch"].as_str().unwrap());
+        let log_before = fs::read(root.join(".workspace/log.jsonl")).unwrap();
+        match change {
+            "guard_missing" => fs::remove_file(stored.with_extension("rollback.json")).unwrap(),
+            "guard_invalid" => {
+                fs::write(stored.with_extension("rollback.json"), b"invalid").unwrap()
+            }
+            "undo_missing" => fs::remove_file(stored.with_extension("rollback.patch")).unwrap(),
+            "undo_changed" => {
+                fs::write(stored.with_extension("rollback.patch"), b"invalid").unwrap()
+            }
+            "original_changed" => fs::write(&stored, b"diff --git a/copy.txt b/copy.txt\nnew file mode 100644\n--- /dev/null\n+++ b/copy.txt\n@@ -0,0 +1 @@\n+original\n").unwrap(),
+            _ => unreachable!(),
+        }
+        let original = fs::read(&stored).unwrap();
+        let stderr = run_workspace_failure(root, &["rollback", transaction_id, "--json"]);
+        assert!(stderr.contains("snapshot"), "unexpected stderr: {stderr}");
+        assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"original\n");
+        assert_eq!(fs::read(root.join("copy.txt")).unwrap(), b"original\n");
+        assert_eq!(fs::read(stored).unwrap(), original);
+        assert_eq!(
+            fs::read(root.join(".workspace/log.jsonl")).unwrap(),
+            log_before
+        );
+    }
+}
+
+#[test]
+fn legacy_copy_rollback_without_snapshot_refuses_to_guess() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "source.txt", "original\n");
+    write_file(root, "copy.txt", "original\n");
+    let patch = "diff --git a/source.txt b/copy.txt\nsimilarity index 100%\ncopy from source.txt\ncopy to copy.txt\n";
+    write_file(root, ".workspace/transactions/tx-123.patch", patch);
+    let stderr = run_workspace_failure(root, &["rollback", "tx-123", "--json"]);
+    assert!(stderr.contains("rollback snapshot is missing"));
+    assert_eq!(fs::read(root.join("source.txt")).unwrap(), b"original\n");
+    assert_eq!(fs::read(root.join("copy.txt")).unwrap(), b"original\n");
+    assert_eq!(
+        fs::read(root.join(".workspace/transactions/tx-123.patch")).unwrap(),
+        patch.as_bytes()
+    );
+    assert!(!root.join(".workspace/log.jsonl").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn copy_rollback_mode_conflict_preserves_the_destination() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "source.txt", "original\n");
+    commit_all(root, "initial source");
+    let patch = "diff --git a/source.txt b/copy.txt\nsimilarity index 100%\ncopy from source.txt\ncopy to copy.txt\n";
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    fs::set_permissions(root.join("copy.txt"), fs::Permissions::from_mode(0o755)).unwrap();
+    let stderr = run_workspace_failure(
+        root,
+        &[
+            "rollback",
+            applied["data"]["transaction_id"].as_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(stderr.contains("rollback conflict"));
+    assert_eq!(fs::read(root.join("copy.txt")).unwrap(), b"original\n");
+    assert_ne!(
+        fs::metadata(root.join("copy.txt"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o111,
+        0
+    );
+}
+
+#[test]
 fn patch_custom_prefix_unsafe_paths_are_rejected_without_mutation() {
     for path in [
         ".git/workspace-test",
