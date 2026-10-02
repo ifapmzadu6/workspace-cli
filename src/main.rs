@@ -7392,11 +7392,72 @@ fn ensure_no_pending_utf8(pending_utf8: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 fn extract_patch_files(patch_content: &str) -> Vec<String> {
-    let mut files = BTreeSet::new();
-    for line in patch_content.lines() {
-        collect_patch_file_line(line, &mut files);
+    extract_patch_files_from_reader(std::io::Cursor::new(patch_content))
+        .expect("test patch headers should parse")
+}
+
+#[derive(Default)]
+struct PatchHeaderState {
+    old_lines: usize,
+    new_lines: usize,
+    binary_body: bool,
+}
+
+impl PatchHeaderState {
+    fn is_file_header(&mut self, line: &[u8]) -> Result<bool> {
+        if self.old_lines != 0 || self.new_lines != 0 {
+            let (old, new) = match line.first() {
+                Some(b'-') => (1, 0),
+                Some(b'+') => (0, 1),
+                Some(b' ') | None => (1, 1),
+                Some(b'\\') => (0, 0),
+                _ => bail!("invalid patch hunk body"),
+            };
+            self.old_lines = self
+                .old_lines
+                .checked_sub(old)
+                .context("patch hunk has too many old lines")?;
+            self.new_lines = self
+                .new_lines
+                .checked_sub(new)
+                .context("patch hunk has too many new lines")?;
+            return Ok(false);
+        }
+        if line.starts_with(b"diff --git ") {
+            self.binary_body = false;
+        }
+        if self.binary_body {
+            if !patch_line_has_file_header_prefix(line) {
+                return Ok(false);
+            }
+            self.binary_body = false;
+        }
+        if line.starts_with(b"GIT binary patch") {
+            self.binary_body = true;
+            return Ok(false);
+        }
+        if line.starts_with(b"@@ ") {
+            let header = std::str::from_utf8(line).context("invalid UTF-8 patch hunk header")?;
+            let mut fields = header.split_ascii_whitespace();
+            fields.next();
+            self.old_lines = patch_hunk_count(fields.next(), '-')?;
+            self.new_lines = patch_hunk_count(fields.next(), '+')?;
+            if fields.next() != Some("@@") {
+                bail!("invalid patch hunk header");
+            }
+            return Ok(false);
+        }
+        Ok(patch_line_has_file_header_prefix(line))
     }
-    files.into_iter().collect()
+}
+
+fn patch_hunk_count(field: Option<&str>, prefix: char) -> Result<usize> {
+    let range = field
+        .and_then(|field| field.strip_prefix(prefix))
+        .context("invalid patch hunk range")?;
+    let (start, count) = range.split_once(',').unwrap_or((range, "1"));
+    start.parse::<usize>().context("invalid patch hunk start")?;
+    count.parse().context("invalid patch hunk count")
 }
 
 fn extract_patch_files_from_path(path: &Path) -> Result<Vec<String>> {
@@ -7408,12 +7469,16 @@ fn extract_patch_files_from_reader<R: Read>(reader: R) -> Result<Vec<String>> {
     let mut reader = BufReader::new(reader);
     let mut files = BTreeSet::new();
     let mut line_number = 1usize;
+    let mut state = PatchHeaderState::default();
 
     while let Some(line) =
         read_bounded_output_line(&mut reader, line_number, MAX_PATCH_LINE_BYTES, "patch")?
     {
         line_number += 1;
-        if !patch_line_has_file_header_prefix(&line.bytes) {
+        if !state
+            .is_file_header(&line.bytes)
+            .with_context(|| format!("invalid patch structure at line {}", line.line_number))?
+        {
             continue;
         }
         if line.exceeded {
@@ -8804,6 +8869,17 @@ diff --git a/src/main.rs b/src/main.rs
 +new
 ";
         assert_eq!(extract_patch_files(patch), vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn patch_hunks_do_not_contribute_file_headers() {
+        let patch = "--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@\n--- nested/.workspace/config\n+++ nested/.git/config\n--- a/next.txt\n+++ b/next.txt\n@@ -1,2 +1,2 @@\n context\n-old\n+new\n\\ No newline at end of file\n";
+        assert_eq!(extract_patch_files(patch), vec!["next.txt", "note.txt"]);
+        let patch = format!(
+            "diff --git a/note.txt b/note.txt\n--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@\n--- nested/.workspace/{}\n+ordinary\n",
+            "x".repeat(MAX_PATCH_LINE_BYTES)
+        );
+        assert_eq!(extract_patch_files(&patch), vec!["note.txt"]);
     }
 
     #[test]

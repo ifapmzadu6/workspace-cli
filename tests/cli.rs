@@ -2344,6 +2344,61 @@ fn patch_custom_prefix_copy_keeps_repository_relative_paths() {
 }
 
 #[test]
+fn patch_hunk_body_is_not_a_metadata_header() {
+    for metadata in [".workspace", ".git"] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        let before = format!("-- nested/{metadata}/config\n");
+        write_file(root, "note.txt", &before);
+        commit_all(root, "initial note");
+        let patch = format!(
+            "diff --git a/note.txt b/note.txt\n--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@\n-{before}+ordinary\n"
+        );
+        let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], &patch);
+        assert_eq!(
+            applied["data"]["files_changed"],
+            serde_json::json!(["note.txt"])
+        );
+        assert_eq!(fs::read(root.join("note.txt")).unwrap(), b"ordinary\n");
+        let transaction_id = applied["data"]["transaction_id"].as_str().unwrap();
+        run_workspace(root, &["rollback", transaction_id, "--json"]);
+        assert_eq!(fs::read(root.join("note.txt")).unwrap(), before.as_bytes());
+        assert_replace_and_rollback_bytes(&before, &before, "ordinary\n", "ordinary\n");
+    }
+}
+
+#[test]
+fn rollback_legacy_transaction_ignores_metadata_like_hunk_body() {
+    for metadata in [".workspace", ".git"] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        let before = format!("-- nested/{metadata}/config\n");
+        write_file(root, "note.txt", &before);
+        commit_all(root, "initial note");
+        let patch = format!(
+            "diff --git a/note.txt b/note.txt\n--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@\n-{before}+ordinary\n"
+        );
+        // Reproduce the original transaction format without using the new CLI to apply.
+        write_file(root, ".workspace/transactions/tx-123.patch", &patch);
+        run(
+            root,
+            "git",
+            &["apply", "-p1", ".workspace/transactions/tx-123.patch"],
+        );
+        let rollback = run_workspace(root, &["rollback", "tx-123", "--json"]);
+        assert_eq!(
+            rollback["data"]["files_changed"],
+            serde_json::json!(["note.txt"])
+        );
+        assert_eq!(fs::read(root.join("note.txt")).unwrap(), before.as_bytes());
+        assert_eq!(
+            fs::read(root.join(".workspace/transactions/tx-123.patch")).unwrap(),
+            patch.as_bytes()
+        );
+    }
+}
+
+#[test]
 fn patch_custom_prefix_unsafe_paths_are_rejected_without_mutation() {
     for path in [
         ".git/workspace-test",
