@@ -2198,6 +2198,7 @@ fn apply_rollback_transaction(
 
     let files_changed = extract_patch_files_from_path(&stored_patch)
         .with_context(|| format!("failed to read stored patch {}", stored_patch.display()))?;
+    validate_patch_targets(&files_changed)?;
     run_git_apply(workspace, &stored_patch, ["--reverse", "--check"])?;
     ensure_log_writable(workspace)?;
     run_git_apply(workspace, &stored_patch, ["--reverse"])?;
@@ -6374,6 +6375,7 @@ fn should_include_repo_file(path: &str) -> bool {
         && !has_windows_drive_prefix(path)
         && path != LOG_DIR
         && !path.starts_with(&format!("{LOG_DIR}/"))
+        && path != ".git"
         && !path.starts_with(".git/")
         && path
             .split('/')
@@ -7435,6 +7437,10 @@ fn patch_line_has_file_header_prefix(line: &[u8]) -> bool {
         || line.starts_with(b"--- ")
         || line.starts_with(b"rename from ")
         || line.starts_with(b"rename to ")
+        || line.starts_with(b"rename old ")
+        || line.starts_with(b"rename new ")
+        || line.starts_with(b"copy from ")
+        || line.starts_with(b"copy to ")
         || line.starts_with(b"diff --git ")
 }
 
@@ -7443,9 +7449,19 @@ fn collect_patch_file_line(line: &str, files: &mut BTreeSet<String>) {
         files.insert(path);
     } else if let Some(path) = line.strip_prefix("--- ").and_then(clean_patch_path) {
         files.insert(path);
-    } else if let Some(path) = line.strip_prefix("rename from ").and_then(clean_patch_path) {
-        files.insert(path);
-    } else if let Some(path) = line.strip_prefix("rename to ").and_then(clean_patch_path) {
+    } else if let Some(path) = [
+        "rename from ",
+        "rename to ",
+        "rename old ",
+        "rename new ",
+        "copy from ",
+        "copy to ",
+    ]
+    .iter()
+    .find_map(|prefix| line.strip_prefix(prefix))
+    .and_then(decode_patch_path)
+    {
+        // Rename/copy headers are already repository-relative, unlike ---/+++.
         files.insert(path);
     } else if let Some((old_path, new_path)) = diff_git_paths(line) {
         if let Some(path) = clean_diff_git_path(&old_path) {
@@ -7471,39 +7487,94 @@ fn diff_git_paths(line: &str) -> Option<(String, String)> {
     let rest = line.strip_prefix("diff --git ")?;
     if rest.starts_with('"') {
         let (old_path, rest) = unquote_git_path(rest)?;
-        let (new_path, rest) = unquote_git_path(rest.trim_start())?;
-        if rest.trim().is_empty() {
+        let rest = rest.trim_start();
+        if !rest.starts_with('"') {
+            return Some((old_path, rest.to_string()));
+        }
+        let (new_path, rest) = unquote_git_path(rest)?;
+        if rest.is_empty() {
             return Some((old_path, new_path));
         }
         return None;
     }
 
+    // Git obtains diff-only targets by finding the same name on both sides
+    // after -p1. Spaces in unquoted names are not necessarily separators.
+    let old_name_start = if rest.starts_with('/') {
+        0
+    } else {
+        rest.find('/')? + 1
+    };
+    let mut next_slash = rest.find('/');
+    for (index, separator) in rest.char_indices() {
+        if index < old_name_start || !matches!(separator, ' ' | '\t') {
+            continue;
+        }
+        let old_path = &rest[..index];
+        let new_path = &rest[index + 1..];
+        let old_name = &rest[old_name_start..index];
+        if new_path.starts_with('"') {
+            if let Some((new_path, tail)) = unquote_git_path(new_path)
+                && tail.is_empty()
+                && old_name == strip_patch_path_prefix(&new_path)
+            {
+                return Some((old_path.to_string(), new_path));
+            }
+        } else {
+            // Advance once through slashes instead of rescanning each candidate.
+            while let Some(slash) = next_slash
+                && slash <= index
+            {
+                next_slash = rest[slash + 1..].find('/').map(|offset| slash + 1 + offset);
+            }
+            let new_name = if new_path.starts_with('/') {
+                new_path
+            } else if let Some(slash) = next_slash {
+                &rest[slash + 1..]
+            } else {
+                new_path
+            };
+            if old_name == new_name {
+                return Some((old_path.to_string(), new_path.to_string()));
+            }
+        }
+    }
     let rest = rest.strip_prefix("a/")?;
     let (old_path, new_path) = rest.rsplit_once(" b/")?;
-    Some((old_path.to_string(), new_path.to_string()))
+    Some((format!("a/{old_path}"), format!("b/{new_path}")))
 }
 
 fn clean_patch_path(raw: &str) -> Option<String> {
-    let raw = raw.trim();
-    let path = if raw.starts_with('"') {
-        unquote_git_path(raw)?.0
+    clean_diff_git_path(&decode_patch_path(raw)?)
+}
+
+fn decode_patch_path(raw: &str) -> Option<String> {
+    if raw.starts_with('"') {
+        Some(unquote_git_path(raw)?.0)
     } else {
-        raw.split_once('\t')
-            .map_or(raw, |(path, _)| path)
-            .to_string()
-    };
-    clean_diff_git_path(&path)
+        Some(
+            raw.split_once('\t')
+                .map_or(raw, |(path, _)| path)
+                .to_string(),
+        )
+    }
 }
 
 fn clean_diff_git_path(raw: &str) -> Option<String> {
-    let path = raw
-        .strip_prefix("a/")
-        .or_else(|| raw.strip_prefix("b/"))
-        .unwrap_or(raw);
-    if path.is_empty() || path == "/dev/null" {
+    if raw.is_empty() || raw == "/dev/null" {
         None
     } else {
-        Some(path.to_string())
+        Some(strip_patch_path_prefix(raw).to_string())
+    }
+}
+
+fn strip_patch_path_prefix(raw: &str) -> &str {
+    // Match the explicit git apply -p1 for every traditional/diff header prefix.
+    // Keep absolute paths intact so validation can reject them.
+    if raw.starts_with('/') {
+        raw
+    } else {
+        raw.split_once('/').map_or(raw, |(_, path)| path)
     }
 }
 
@@ -7564,7 +7635,7 @@ fn run_git_apply<const N: usize>(
     extra_args: [&str; N],
 ) -> Result<()> {
     let mut command = Command::new("git");
-    command.current_dir(&workspace.root).arg("apply");
+    command.current_dir(&workspace.root).args(["apply", "-p1"]);
     for arg in extra_args {
         command.arg(arg);
     }
@@ -8733,6 +8804,92 @@ diff --git a/src/main.rs b/src/main.rs
 +new
 ";
         assert_eq!(extract_patch_files(patch), vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn extracts_custom_prefix_patch_targets_like_git_p1() {
+        for (old_prefix, new_prefix) in [("old", "new"), ("i", "w")] {
+            let patch = format!(
+                "diff --git {old_prefix}/src/note.txt {new_prefix}/src/note.txt\n--- {old_prefix}/src/note.txt\n+++ {new_prefix}/src/note.txt\n@@ -1 +1 @@\n-old\n+new\n"
+            );
+            assert_eq!(extract_patch_files(&patch), vec!["src/note.txt"]);
+        }
+    }
+
+    #[test]
+    fn extracts_custom_prefix_diff_only_and_quoted_targets() {
+        for (header, expected) in [
+            ("old/space name.txt new/space name.txt", "space name.txt"),
+            ("old/src/a.txt new/src/a.txt", "src/a.txt"),
+            (
+                "\"old/src/tab\\tname.txt\" \"new/src/tab\\tname.txt\"",
+                "src/tab\tname.txt",
+            ),
+            (
+                "\"old/space name.txt\" new/space name.txt",
+                "space name.txt",
+            ),
+            (
+                "old/space name.txt \"new/space name.txt\"",
+                "space name.txt",
+            ),
+            ("a/has b/name.txt \"b/has b/name.txt\"", "has b/name.txt"),
+        ] {
+            let patch = format!("diff --git {header}\nold mode 100644\nnew mode 100755\n");
+            let files = extract_patch_files(&patch);
+            assert_eq!(files, vec![expected], "header: {header}");
+        }
+    }
+
+    #[test]
+    fn rename_and_copy_headers_keep_repository_relative_components() {
+        for operation in ["rename", "copy"] {
+            let patch = format!(
+                "diff --git old/a/old name.txt new/b/new name.txt\nsimilarity index 100%\n{operation} from a/old name.txt\n{operation} to b/new name.txt\n"
+            );
+            assert_eq!(
+                extract_patch_files(&patch),
+                vec!["a/old name.txt", "b/new name.txt"]
+            );
+        }
+    }
+
+    #[test]
+    fn custom_prefix_patch_targets_reject_metadata_and_unsafe_paths() {
+        for path in [
+            ".workspace/transactions/sentinel.patch",
+            ".git/config",
+            ".git",
+            "/tmp/outside.txt",
+            "../outside.txt",
+            "src/../outside.txt",
+            "src//note.txt",
+        ] {
+            let patch = format!(
+                "diff --git old/{path} new/{path}\n--- old/{path}\n+++ new/{path}\n@@ -1 +1 @@\n-old\n+new\n"
+            );
+            let files = extract_patch_files(&patch);
+            assert!(
+                validate_patch_targets(&files).is_err(),
+                "target should be rejected: {path}, extracted: {files:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_prefix_diff_only_and_relative_headers_reject_metadata() {
+        for patch in [
+            "diff --git old/.workspace/log.jsonl new/.workspace/log.jsonl\nold mode 100644\nnew mode 100755\n",
+            "diff --git \"old/\\056workspace/log.jsonl\" \"new/.workspace/log.jsonl\"\nold mode 100644\nnew mode 100755\n",
+            "diff --git old/.workspace/log.jsonl new/safe.txt\nsimilarity index 100%\nrename from .workspace/log.jsonl\nrename to safe.txt\n",
+            "diff --git old/safe.txt new/.workspace/log.jsonl\nsimilarity index 100%\ncopy from safe.txt\ncopy to .workspace/log.jsonl\n",
+        ] {
+            let files = extract_patch_files_from_reader(std::io::Cursor::new(patch)).unwrap();
+            assert!(
+                validate_patch_targets(&files).is_err(),
+                "should reject protected target: {files:?}"
+            );
+        }
     }
 
     #[test]

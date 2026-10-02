@@ -2134,6 +2134,294 @@ new file mode 100644
 }
 
 #[test]
+fn patch_custom_prefixes_report_actual_paths_and_rollback_bytes() {
+    for mnemonic in [false, true] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        let paths = [
+            "src/note.txt",
+            "space name.txt",
+            "src/tab\tname.txt",
+            "src/quote\"name.txt",
+            " leading.txt",
+            "trailing.txt ",
+            "dir/has b/file.txt",
+        ];
+        for path in paths {
+            write_file(root, path, "old\n");
+        }
+        commit_all(root, "initial paths");
+        for path in paths {
+            write_file(root, path, "new\n");
+        }
+        let mut command = Command::new("git");
+        command.current_dir(root);
+        if mnemonic {
+            command.args(["-c", "diff.mnemonicPrefix=true", "diff"]);
+        } else {
+            command.args(["diff", "--src-prefix=old/", "--dst-prefix=new/"]);
+        }
+        let diff = command.output().expect("git diff should run");
+        assert!(diff.status.success());
+        let patch = String::from_utf8(diff.stdout).unwrap();
+        run(root, "git", &["reset", "--hard", "-q"]);
+        let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], &patch);
+        let mut reported = strings_at(&applied, &["data", "files_changed"]);
+        reported.sort();
+        let mut expected = paths.map(str::to_string).to_vec();
+        expected.sort();
+        assert_eq!(reported, expected);
+        for path in paths {
+            assert_eq!(fs::read(root.join(path)).unwrap(), b"new\n");
+        }
+        let transaction_id = applied["data"]["transaction_id"].as_str().unwrap();
+        run_workspace(root, &["rollback", transaction_id, "--json"]);
+        for path in paths {
+            assert_eq!(fs::read(root.join(path)).unwrap(), b"old\n");
+        }
+    }
+}
+
+#[test]
+fn patch_custom_prefix_metadata_is_rejected_before_transaction_storage() {
+    for (old_prefix, new_prefix) in [("old", "new"), ("i", "w")] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        write_file(root, "note.txt", "safe\n");
+        commit_all(root, "initial note");
+        write_file(root, ".workspace/metadata.txt", "old\n");
+        // Even the unfixed CLI cannot apply the protected patch: storage is blocked.
+        write_file(root, ".workspace/transactions", "storage guard\n");
+        let patch = format!(
+            "diff --git {old_prefix}/.workspace/metadata.txt {new_prefix}/.workspace/metadata.txt\n--- {old_prefix}/.workspace/metadata.txt\n+++ {new_prefix}/.workspace/metadata.txt\n@@ -1 +1 @@\n-old\n+new\n"
+        );
+        let mut check = Command::new("git")
+            .current_dir(root)
+            .args(["apply", "-p1", "--check", "--numstat", "-z", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        check
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(patch.as_bytes())
+            .unwrap();
+        let check = check.wait_with_output().unwrap();
+        assert!(
+            check.status.success(),
+            "git check failed: {:?}",
+            check.stderr
+        );
+        assert_eq!(check.stdout, b"1\t1\t.workspace/metadata.txt\0");
+        let stderr =
+            run_workspace_failure_with_stdin(root, &["patch", "--stdin", "--json"], &patch);
+        assert!(
+            stderr.contains("outside observable workspace files"),
+            "unexpected stderr: {stderr}"
+        );
+        assert_eq!(
+            fs::read(root.join(".workspace/metadata.txt")).unwrap(),
+            b"old\n"
+        );
+        assert_eq!(
+            fs::read(root.join(".workspace/transactions")).unwrap(),
+            b"storage guard\n"
+        );
+        assert!(!root.join(".workspace/log.jsonl").exists());
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn patch_custom_prefix_binary_mode_and_rename_rollback() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "a/old name.txt", "rename this note\n");
+    write_file(root, "mode file.txt", "mode only\n");
+    fs::write(root.join("binary.bin"), b"\0before\xff").unwrap();
+    commit_all(root, "initial files");
+    run(root, "git", &["config", "core.filemode", "true"]);
+    fs::create_dir(root.join("b")).unwrap();
+    fs::rename(root.join("a/old name.txt"), root.join("b/new name.txt")).unwrap();
+    fs::write(root.join("binary.bin"), b"\0after\xfe").unwrap();
+    let original_mode = fs::metadata(root.join("mode file.txt"))
+        .unwrap()
+        .permissions()
+        .mode();
+    fs::set_permissions(
+        root.join("mode file.txt"),
+        fs::Permissions::from_mode(original_mode | 0o111),
+    )
+    .unwrap();
+    run(root, "git", &["add", "."]);
+    let diff = Command::new("git")
+        .current_dir(root)
+        .args([
+            "diff",
+            "--cached",
+            "--binary",
+            "--find-renames",
+            "--src-prefix=old/",
+            "--dst-prefix=new/",
+        ])
+        .output()
+        .unwrap();
+    assert!(diff.status.success());
+    let patch = String::from_utf8(diff.stdout).unwrap();
+    assert!(patch.contains("GIT binary patch"));
+    assert!(patch.contains("old mode 100644\nnew mode 100755"));
+    assert!(patch.contains("rename from a/old name.txt"));
+    run(root, "git", &["reset", "--hard", "-q"]);
+
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], &patch);
+    assert_eq!(
+        strings_at(&applied, &["data", "files_changed"]),
+        vec![
+            "a/old name.txt",
+            "b/new name.txt",
+            "binary.bin",
+            "mode file.txt"
+        ]
+    );
+    assert!(!root.join("a/old name.txt").exists());
+    assert_eq!(
+        fs::read(root.join("b/new name.txt")).unwrap(),
+        b"rename this note\n"
+    );
+    assert_eq!(fs::read(root.join("binary.bin")).unwrap(), b"\0after\xfe");
+    assert_ne!(
+        fs::metadata(root.join("mode file.txt"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o111,
+        0
+    );
+
+    let transaction_id = applied["data"]["transaction_id"].as_str().unwrap();
+    run_workspace(root, &["rollback", transaction_id, "--json"]);
+    assert_eq!(
+        fs::read(root.join("a/old name.txt")).unwrap(),
+        b"rename this note\n"
+    );
+    assert!(!root.join("b/new name.txt").exists());
+    assert_eq!(fs::read(root.join("binary.bin")).unwrap(), b"\0before\xff");
+    assert_eq!(
+        fs::metadata(root.join("mode file.txt"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o111,
+        0
+    );
+}
+
+#[test]
+fn patch_custom_prefix_copy_keeps_repository_relative_paths() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "a/source.txt", "copy this note\n");
+    commit_all(root, "initial source");
+    let patch = "diff --git old/a/source.txt new/b/copy.txt\nsimilarity index 100%\ncopy from a/source.txt\ncopy to b/copy.txt\n";
+    let applied = run_workspace_with_stdin(root, &["patch", "--stdin", "--json"], patch);
+    assert_eq!(
+        strings_at(&applied, &["data", "files_changed"]),
+        vec!["a/source.txt", "b/copy.txt"]
+    );
+    assert_eq!(
+        fs::read(root.join("a/source.txt")).unwrap(),
+        b"copy this note\n"
+    );
+    assert_eq!(
+        fs::read(root.join("b/copy.txt")).unwrap(),
+        b"copy this note\n"
+    );
+}
+
+#[test]
+fn patch_custom_prefix_unsafe_paths_are_rejected_without_mutation() {
+    for path in [
+        ".git/workspace-test",
+        ".git",
+        "/tmp/workspace-outside-test",
+        "../workspace-outside-test",
+        "src/../outside.txt",
+        "src//note.txt",
+    ] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        write_file(root, "note.txt", "safe\n");
+        commit_all(root, "initial note");
+        let config_before = fs::read(root.join(".git/config")).unwrap();
+        write_file(root, ".workspace/transactions", "storage guard\n");
+        let patch = format!(
+            "diff --git old/{path} new/{path}\nnew file mode 100644\n--- /dev/null\n+++ new/{path}\n@@ -0,0 +1 @@\n+unsafe\n"
+        );
+        let mut check = Command::new("git")
+            .current_dir(root)
+            .args(["apply", "-p1", "--check", "--numstat", "-z", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        check
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(patch.as_bytes())
+            .unwrap();
+        let check = check.wait_with_output().unwrap();
+        if check.status.success() {
+            assert!(path.contains("//"), "unexpected git acceptance: {path}");
+        }
+        let stderr =
+            run_workspace_failure_with_stdin(root, &["patch", "--stdin", "--json"], &patch);
+        assert!(
+            stderr.contains("outside observable workspace files"),
+            "target {path}, unexpected stderr: {stderr}"
+        );
+        assert_eq!(fs::read(root.join("note.txt")).unwrap(), b"safe\n");
+        assert_eq!(fs::read(root.join(".git/config")).unwrap(), config_before);
+        assert_eq!(
+            fs::read(root.join(".workspace/transactions")).unwrap(),
+            b"storage guard\n"
+        );
+        assert!(!root.join(".workspace/log.jsonl").exists());
+    }
+}
+
+#[test]
+fn rollback_rejects_custom_prefix_metadata_targets() {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "note.txt", "safe\n");
+    commit_all(root, "initial note");
+    write_file(root, ".workspace/metadata.txt", "new\n");
+    write_file(
+        root,
+        ".workspace/transactions/tx-123.patch",
+        "diff --git old/.workspace/metadata.txt new/.workspace/metadata.txt\n--- old/.workspace/metadata.txt\n+++ new/.workspace/metadata.txt\n@@ -1 +1 @@\n-old\n+new\n",
+    );
+    // A missed validation cannot apply the reverse patch because logging is blocked.
+    fs::create_dir(root.join(".workspace/log.jsonl")).unwrap();
+    let stderr = run_workspace_failure(root, &["rollback", "tx-123", "--json"]);
+    assert!(
+        stderr.contains("outside observable workspace files"),
+        "unexpected stderr: {stderr}"
+    );
+    assert_eq!(
+        fs::read(root.join(".workspace/metadata.txt")).unwrap(),
+        b"new\n"
+    );
+}
+
+#[test]
 fn patch_reports_files_from_binary_patch_headers() {
     let temp = init_git_repo();
     let root = temp.path();
