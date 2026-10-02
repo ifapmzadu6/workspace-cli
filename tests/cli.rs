@@ -1508,6 +1508,90 @@ fn replace_can_apply_exact_replacements_from_stdin_and_rollback() {
 }
 
 #[test]
+fn replace_preserves_added_trailing_blank_line_and_rollback_bytes() {
+    assert_replace_and_rollback_bytes("hello\n", "hello", "good\n", "good\n\n");
+}
+
+#[test]
+fn replace_preserves_line_endings_and_rollback_bytes() {
+    for (before, find, replacement, after) in [
+        ("hello\n\n", "hello", "good", "good\n\n"),
+        ("hello\n\n\n", "hello", "good\n", "good\n\n\n\n"),
+        ("hello\n\n\n", "\n\n", "\n", "hello\n\n"),
+        ("hello\n\n", "\n\n", "\n", "hello\n"),
+        ("hello\n\n", "hello\n\n", "", ""),
+        ("\n\n", "\n\n", "", ""),
+        ("\n\n", "\n\n", "\n", "\n"),
+        ("hello\r\n\r\n", "hello", "good", "good\r\n\r\n"),
+        ("hello\r\n", "hello", "good\r\n", "good\r\n\r\n"),
+    ] {
+        assert_replace_and_rollback_bytes(before, find, replacement, after);
+    }
+}
+
+fn assert_replace_and_rollback_bytes(before: &str, find: &str, replacement: &str, after: &str) {
+    let temp = init_git_repo();
+    let root = temp.path();
+    write_file(root, "note.txt", before);
+    commit_all(root, "initial note");
+    let input = serde_json::json!([{
+        "path": "note.txt",
+        "find": find,
+        "replace": replacement,
+    }])
+    .to_string();
+
+    let replace = run_workspace_with_stdin(root, &["replace", "--stdin", "--json"], &input);
+    assert_eq!(fs::read(root.join("note.txt")).unwrap(), after.as_bytes());
+    assert_eq!(
+        replace["data"]["files_changed"],
+        serde_json::json!(["note.txt"])
+    );
+
+    let transaction_id = replace["data"]["transaction_id"].as_str().unwrap();
+    run_workspace(root, &["rollback", transaction_id, "--json"]);
+    assert_eq!(fs::read(root.join("note.txt")).unwrap(), before.as_bytes());
+}
+
+#[test]
+fn replace_rejects_empty_matches_and_missing_final_newlines_without_mutation() {
+    for (before, find, replacement, error) in [
+        ("", "", "good\n", "find string for note.txt is empty"),
+        ("", "hello", "good", "expected exactly one match, found 0"),
+        (
+            "hello",
+            "hello",
+            "good\n",
+            "before content for note.txt has no final newline",
+        ),
+        (
+            "hello\n",
+            "hello\n",
+            "good",
+            "after content for note.txt has no final newline",
+        ),
+    ] {
+        let temp = init_git_repo();
+        let root = temp.path();
+        write_file(root, "note.txt", before);
+        commit_all(root, "initial note");
+        let input = serde_json::json!([{
+            "path": "note.txt",
+            "find": find,
+            "replace": replacement,
+        }])
+        .to_string();
+
+        let stderr =
+            run_workspace_failure_with_stdin(root, &["replace", "--stdin", "--json"], &input);
+        assert!(stderr.contains(error), "unexpected stderr: {stderr}");
+        assert_eq!(fs::read(root.join("note.txt")).unwrap(), before.as_bytes());
+        assert!(!root.join(".workspace/transactions").exists());
+        assert!(!root.join(".workspace/log.jsonl").exists());
+    }
+}
+
+#[test]
 fn replace_requires_unique_match_unless_occurrence_is_given() {
     let temp = init_git_repo();
     let root = temp.path();

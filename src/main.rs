@@ -2085,7 +2085,8 @@ fn patch_lines(path: &str, content: &str, label: &str) -> Result<Vec<String>> {
         );
     }
     Ok(content
-        .trim_end_matches('\n')
+        .strip_suffix('\n')
+        .expect("nonempty replacement content should end with a newline")
         .split('\n')
         .map(ToOwned::to_owned)
         .collect())
