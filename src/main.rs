@@ -2080,7 +2080,7 @@ fn configure_snapshot_apply(
     let mut attributes = fs::OpenOptions::new()
         .append(true)
         .open(image.join(".git/info/attributes"))?;
-    for entry in fields.chunks_exact(3) {
+    for entry in fields.as_chunks::<3>().0 {
         let attribute = match entry[2] {
             "unspecified" => "!whitespace".to_string(),
             "unset" => "-whitespace".to_string(),
