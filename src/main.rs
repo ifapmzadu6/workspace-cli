@@ -1793,18 +1793,81 @@ fn apply_patch_transaction_from_path(
     patch_path: &Path,
     patch_file: String,
 ) -> Result<AppliedPatchTransaction> {
-    let files_changed = extract_patch_files_from_path(patch_path)
+    let initial = extract_patch_metadata_from_path(patch_path)
         .with_context(|| format!("failed to read patch {}", patch_path.display()))?;
-    validate_patch_targets(&files_changed)?;
+    validate_patch_targets(&initial.files)?;
     run_git_apply(workspace, patch_path, ["--check"])?;
     ensure_log_writable(workspace)?;
 
     let transaction_id = new_id("tx");
     let stored_patch = store_transaction_patch_for_id(workspace, &transaction_id, patch_path)?;
-    if let Err(error) = run_git_apply(workspace, &stored_patch, []) {
-        let _ = fs::remove_file(&stored_patch);
+    // Prepare and validate against the same stored bytes that Git will apply.
+    let preparation = (|| {
+        let metadata = extract_patch_metadata_from_path(&stored_patch)?;
+        validate_patch_targets(&metadata.files)?;
+        if metadata.has_copies {
+            let rollback = prepare_copy_rollback(workspace, &stored_patch, &metadata.files)?;
+            store_transaction_patch(
+                &rollback.patch,
+                &stored_patch.with_extension("rollback.patch"),
+            )?;
+            store_transaction_patch(
+                &rollback.guard,
+                &stored_patch.with_extension("rollback.json"),
+            )?;
+            validate_snapshot_files(
+                workspace,
+                &rollback.before,
+                &rollback.directory.path().join("image"),
+            )?;
+        }
+        Ok::<_, anyhow::Error>(metadata.files)
+    })();
+    let files_changed = match preparation {
+        Ok(files) => files,
+        Err(error) => {
+            remove_failed_transaction_files(&stored_patch);
+            return Err(error);
+        }
+    };
+    // Persist uncertainty before Git can modify files, including interrupted applies.
+    let apply_state = stored_patch.with_extension("apply-failed.json");
+    if let Err(error) = store_apply_state(
+        workspace,
+        &transaction_id,
+        &patch_file,
+        &stored_patch,
+        &files_changed,
+        None,
+    ) {
+        remove_failed_transaction_files(&stored_patch);
         return Err(error);
     }
+    if let Err(error) = run_git_apply(workspace, &stored_patch, []) {
+        let record_result = store_apply_state(
+            workspace,
+            &transaction_id,
+            &patch_file,
+            &stored_patch,
+            &files_changed,
+            Some(&error),
+        );
+        let mut context = format!(
+            "transaction {transaction_id} apply failed; workspace may be partially modified; transaction files preserved at {}; automatic rollback refused; inspect {} for manual recovery",
+            workspace.relative(&stored_patch),
+            workspace.relative(&apply_state),
+        );
+        if let Err(record_error) = record_result {
+            context.push_str(&format!("; failed to update apply state: {record_error:#}"));
+        }
+        return Err(error.context(context));
+    }
+    fs::remove_file(&apply_state).with_context(|| {
+        format!(
+            "transaction {transaction_id} was applied, but its apply state could not be cleared; transaction files preserved; automatic rollback refused; inspect {} for manual recovery",
+            workspace.relative(&apply_state),
+        )
+    })?;
 
     Ok(AppliedPatchTransaction {
         transaction_id,
@@ -1812,6 +1875,489 @@ fn apply_patch_transaction_from_path(
         stored_patch,
         files_changed,
     })
+}
+
+fn store_apply_state(
+    workspace: &Workspace,
+    transaction_id: &str,
+    patch_file: &str,
+    stored_patch: &Path,
+    target_files: &[String],
+    error: Option<&anyhow::Error>,
+) -> Result<()> {
+    let path = stored_patch.with_extension("apply-failed.json");
+    let state = serde_json::json!({
+        "version": 1,
+        "transaction_id": transaction_id,
+        "status": if error.is_some() { "apply_failed" } else { "apply_in_progress" },
+        "worktree_state": "unknown",
+        "automatic_rollback_allowed": false,
+        "patch_file": patch_file,
+        "stored_patch": workspace.relative(stored_patch),
+        "target_files": target_files,
+        "error": error.map(|error| format!("{error:#}")),
+    });
+    let content = serde_json::to_vec(&state)?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(error.is_none())
+        .truncate(error.is_some())
+        .open(&path)
+        .with_context(|| format!("failed to open transaction apply state {}", path.display()))?;
+    file.write_all(&content)
+        .with_context(|| format!("failed to write transaction apply state {}", path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync transaction apply state {}", path.display()))?;
+    Ok(())
+}
+
+fn remove_failed_transaction_files(stored_patch: &Path) {
+    for path in [
+        stored_patch.to_path_buf(),
+        stored_patch.with_extension("rollback.patch"),
+        stored_patch.with_extension("rollback.json"),
+        stored_patch.with_extension("apply-failed.json"),
+    ] {
+        let _ = fs::remove_file(path);
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+struct SnapshotFileState {
+    mode: u32,
+    blob: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SnapshotFile {
+    path: String,
+    state: Option<SnapshotFileState>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CopyRollbackSnapshot {
+    version: u32,
+    object_format: String,
+    original_blob: String,
+    rollback_blob: String,
+    files: Vec<SnapshotFile>,
+}
+
+struct PreparedCopyRollback {
+    directory: tempfile::TempDir,
+    patch: PathBuf,
+    guard: PathBuf,
+    before: Vec<SnapshotFile>,
+}
+
+fn isolated_snapshot_git(root: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
+        .current_dir(root)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_ATTR_NOSYSTEM", "1");
+    for variable in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+    ] {
+        command.env_remove(variable);
+    }
+    command
+}
+
+fn snapshot_git_output(mut command: Command) -> Result<String> {
+    let child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to run snapshot git")?;
+    let output = wait_for_captured_command(
+        child,
+        "snapshot git",
+        MAX_CAPTURED_OUTPUT,
+        MAX_CAPTURED_OUTPUT,
+    )?;
+    if !output.status.success() || output.stdout.truncated {
+        bail!("snapshot git failed: {}", output.stderr.text.trim());
+    }
+    Ok(output.stdout.text)
+}
+
+fn snapshot_object_format(workspace: &Workspace) -> Result<String> {
+    if !workspace.is_git_repo {
+        return Ok("sha1".to_string());
+    }
+    let mut command = Command::new("git");
+    command
+        .current_dir(&workspace.root)
+        .args(["rev-parse", "--show-object-format"]);
+    let format = snapshot_git_output(command)?.trim().to_string();
+    if !matches!(format.as_str(), "sha1" | "sha256") {
+        bail!("unsupported copy snapshot object format");
+    }
+    Ok(format)
+}
+
+fn initialize_snapshot_repo(root: &Path, object_format: &str) -> Result<()> {
+    let mut command = isolated_snapshot_git(root);
+    command
+        .args(["init", "-q", "--template="])
+        .arg(format!("--object-format={object_format}"));
+    snapshot_git_output(command)?;
+    fs::create_dir_all(root.join(".git/info"))?;
+    fs::write(
+        root.join(".git/info/attributes"),
+        "* -text -eol -filter -ident -working-tree-encoding\n",
+    )?;
+    Ok(())
+}
+
+fn configure_snapshot_apply(
+    workspace: &Workspace,
+    image: &Path,
+    files: &[String],
+) -> Result<Vec<String>> {
+    let child = Command::new("git")
+        .current_dir(&workspace.root)
+        .args([
+            "config",
+            "--null",
+            "--get-regexp",
+            "^(apply\\.(whitespace|ignorewhitespace)|core\\.(whitespace|symlinks|filemode))$",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let output = wait_for_captured_command(
+        child,
+        "copy apply config",
+        MAX_CAPTURED_OUTPUT,
+        MAX_CAPTURED_OUTPUT,
+    )?;
+    if !matches!(output.status.code(), Some(0 | 1)) || output.stdout.truncated {
+        bail!(
+            "failed to read copy apply configuration: {}",
+            output.stderr.text.trim()
+        );
+    }
+    let configuration = output
+        .stdout
+        .text
+        .split_terminator('\0')
+        .map(|entry| {
+            entry
+                .split_once('\n')
+                .map(|(key, value)| format!("{key}={value}"))
+                .context("invalid copy apply configuration")
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut command = Command::new("git");
+    command.current_dir(&workspace.root);
+    if !workspace.is_git_repo {
+        command
+            .arg("--git-dir")
+            .arg(image.join(".git"))
+            .arg("--work-tree")
+            .arg(&workspace.root);
+    }
+    command
+        .args(["check-attr", "-z", "whitespace", "--"])
+        .args(files);
+    let output = snapshot_git_output(command)?;
+    let fields = output.split_terminator('\0').collect::<Vec<_>>();
+    if fields.len() != files.len() * 3 {
+        bail!("invalid copy whitespace attributes");
+    }
+    let mut attributes = fs::OpenOptions::new()
+        .append(true)
+        .open(image.join(".git/info/attributes"))?;
+    for entry in fields.as_chunks::<3>().0 {
+        let attribute = match entry[2] {
+            "unspecified" => "!whitespace".to_string(),
+            "unset" => "-whitespace".to_string(),
+            "set" => "whitespace".to_string(),
+            value => format!("whitespace={value}"),
+        };
+        if attribute.contains(['\n', '\r']) {
+            bail!("invalid copy whitespace attribute");
+        }
+        writeln!(
+            attributes,
+            "{} {attribute}",
+            quoted_attribute_path(entry[0])
+        )?;
+    }
+    Ok(configuration)
+}
+
+fn quoted_attribute_path(path: &str) -> String {
+    let mut quoted = String::from("\"/");
+    for byte in path.bytes() {
+        match byte {
+            b'\\' | b'"' => {
+                quoted.push('\\');
+                quoted.push(byte as char);
+            }
+            b'*' | b'?' | b'[' | b']' => {
+                quoted.push_str("\\\\");
+                quoted.push(byte as char);
+            }
+            0..=31 | 127..=255 => quoted.push_str(&format!("\\{byte:03o}")),
+            _ => quoted.push(byte as char),
+        }
+    }
+    quoted.push('"');
+    quoted
+}
+
+fn prepare_copy_rollback(
+    workspace: &Workspace,
+    patch_path: &Path,
+    files: &[String],
+) -> Result<PreparedCopyRollback> {
+    let directory = tempfile::Builder::new()
+        .prefix("workspace-copy-rollback-")
+        .tempdir()?;
+    let image = directory.path().join("image");
+    fs::create_dir(&image)?;
+    let object_format = snapshot_object_format(workspace)?;
+    initialize_snapshot_repo(&image, &object_format)?;
+    let configuration = configure_snapshot_apply(workspace, &image, files)?;
+    let before = snapshot_files(&workspace.root, files, &image)?;
+    for file in &before {
+        if file.state.is_none() {
+            continue;
+        }
+        let source = workspace.root.join(&file.path);
+        let target = image.join(&file.path);
+        fs::create_dir_all(target.parent().expect("snapshot file should have a parent"))?;
+        if fs::symlink_metadata(&source)?.is_symlink() {
+            copy_snapshot_symlink(&source, &target)?;
+        } else {
+            fs::copy(source, target)?;
+        }
+    }
+    let mut command = isolated_snapshot_git(&image);
+    command.args(["add", "-f", "-A", "--", "."]);
+    snapshot_git_output(command)?;
+    let mut command = isolated_snapshot_git(&image);
+    command.arg("write-tree");
+    let before_tree = snapshot_git_output(command)?;
+    let mut command = isolated_snapshot_git(&image);
+    for option in configuration {
+        command.arg("-c").arg(option);
+    }
+    command
+        .args(["apply", "-p1", "--"])
+        .arg(patch_path.canonicalize()?);
+    snapshot_git_output(command)?;
+    let after = snapshot_files(&image, files, &image)?;
+    let mut command = isolated_snapshot_git(&image);
+    command.args(["add", "-f", "-A", "--", "."]);
+    snapshot_git_output(command)?;
+
+    let patch = directory.path().join("rollback.patch");
+    let mut command = isolated_snapshot_git(&image);
+    command
+        .args([
+            "diff",
+            "--cached",
+            "--binary",
+            "--full-index",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            before_tree.trim(),
+            "--",
+        ])
+        .stdout(fs::File::create(&patch)?)
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .context("failed to generate copy rollback patch")?;
+    let stderr =
+        capture_child_stderr(&mut child, "copy rollback diff stderr", MAX_CAPTURED_OUTPUT)?;
+    let status = child.wait()?;
+    let stderr = join_captured_output_reader(stderr, "copy rollback diff stderr")?;
+    if !status.success() {
+        bail!(
+            "failed to generate copy rollback patch: {}",
+            stderr.text.trim()
+        );
+    }
+    let guard = directory.path().join("rollback.json");
+    let snapshot = CopyRollbackSnapshot {
+        version: 1,
+        object_format,
+        original_blob: hash_snapshot_contents(
+            patch_path,
+            &fs::symlink_metadata(patch_path)?,
+            &image,
+        )?,
+        rollback_blob: hash_snapshot_contents(&patch, &fs::symlink_metadata(&patch)?, &image)?,
+        files: after,
+    };
+    write_string_to_file_sync(
+        fs::File::create(&guard)?,
+        &serde_json::to_string(&snapshot)?,
+        &guard,
+    )?;
+    // Hashing and pre-apply validation use the isolated repository.
+    Ok(PreparedCopyRollback {
+        directory,
+        patch,
+        guard,
+        before,
+    })
+}
+
+#[cfg(unix)]
+fn copy_snapshot_symlink(source: &Path, target: &Path) -> Result<()> {
+    std::os::unix::fs::symlink(fs::read_link(source)?, target)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn copy_snapshot_symlink(source: &Path, target: &Path) -> Result<()> {
+    std::os::windows::fs::symlink_file(fs::read_link(source)?, target)?;
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn copy_snapshot_symlink(_source: &Path, _target: &Path) -> Result<()> {
+    bail!("copy rollback snapshots do not support symlinks on this platform")
+}
+
+fn snapshot_files(root: &Path, files: &[String], hash_repo: &Path) -> Result<Vec<SnapshotFile>> {
+    files
+        .iter()
+        .map(|path| {
+            Ok(SnapshotFile {
+                path: path.clone(),
+                state: snapshot_file_state(root, path, hash_repo)?,
+            })
+        })
+        .collect()
+}
+
+fn snapshot_file_state(
+    root: &Path,
+    relative: &str,
+    hash_repo: &Path,
+) -> Result<Option<SnapshotFileState>> {
+    let path = root.join(relative);
+    // Never follow an intermediate symlink while reading snapshot data.
+    let mut ancestor = path.parent();
+    while let Some(parent) = ancestor {
+        if parent == root {
+            break;
+        }
+        if let Ok(metadata) = fs::symlink_metadata(parent)
+            && metadata.is_symlink()
+        {
+            bail!("snapshot path {relative:?} has a symlink parent");
+        }
+        ancestor = parent.parent();
+    }
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mode = if metadata.is_symlink() {
+        0o120000
+    } else if metadata.is_file() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if metadata.permissions().mode() & 0o111 == 0 {
+                0o100644
+            } else {
+                0o100755
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            0o100644
+        }
+    } else {
+        bail!("snapshot path {relative:?} is not a file");
+    };
+    let blob = hash_snapshot_contents(&path, &metadata, hash_repo)?;
+    Ok(Some(SnapshotFileState { mode, blob }))
+}
+
+fn hash_snapshot_contents(
+    path: &Path,
+    metadata: &fs::Metadata,
+    hash_repo: &Path,
+) -> Result<String> {
+    let mut command = isolated_snapshot_git(hash_repo);
+    command.args(["hash-object", "--no-filters", "--stdin"]);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let result = (|| {
+        let mut stdin = child
+            .stdin
+            .take()
+            .expect("snapshot hash stdin should be piped");
+        if metadata.is_symlink() {
+            stdin.write_all(fs::read_link(path)?.as_os_str().as_encoded_bytes())?;
+        } else {
+            std::io::copy(&mut fs::File::open(path)?, &mut stdin)?;
+        }
+        Ok::<_, anyhow::Error>(())
+    })();
+    if let Err(error) = result {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    let output = wait_for_captured_command(child, "snapshot hash", 128, MAX_CAPTURED_OUTPUT)?;
+    let blob = output.stdout.text.trim().to_string();
+    if !output.status.success()
+        || !matches!(blob.len(), 40 | 64)
+        || !blob.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        bail!(
+            "failed to hash snapshot file {}: {}",
+            path.display(),
+            output.stderr.text.trim()
+        );
+    }
+    Ok(blob)
+}
+
+fn validate_snapshot_files(
+    workspace: &Workspace,
+    expected: &[SnapshotFile],
+    hash_repo: &Path,
+) -> Result<()> {
+    for file in expected {
+        let current = snapshot_file_state(&workspace.root, &file.path, hash_repo)
+            .with_context(|| format!("rollback conflict at {:?}", file.path))?;
+        if current != file.state {
+            bail!(
+                "rollback conflict at {:?}: file differs from the transaction snapshot",
+                file.path
+            );
+        }
+    }
+    Ok(())
 }
 
 fn store_transaction_patch_for_id(
@@ -2085,7 +2631,8 @@ fn patch_lines(path: &str, content: &str, label: &str) -> Result<Vec<String>> {
         );
     }
     Ok(content
-        .trim_end_matches('\n')
+        .strip_suffix('\n')
+        .expect("nonempty replacement content should end with a newline")
         .split('\n')
         .map(ToOwned::to_owned)
         .collect())
@@ -2188,6 +2735,22 @@ fn apply_rollback_transaction(
     transaction_id: &str,
 ) -> Result<AppliedRollbackTransaction> {
     let stored_patch = transaction_patch_path(workspace, transaction_id)?;
+    let apply_state = stored_patch.with_extension("apply-failed.json");
+    match fs::symlink_metadata(&apply_state) {
+        Ok(_) => bail!(
+            "transaction {transaction_id} has a recorded apply failure or incomplete apply; workspace may be partially modified; automatic rollback refused; inspect {} and the preserved transaction files for manual recovery",
+            workspace.relative(&apply_state),
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to inspect transaction apply state {}",
+                    apply_state.display()
+                )
+            });
+        }
+    }
     if !stored_patch.exists() {
         bail!(
             "transaction patch not found: {}",
@@ -2195,17 +2758,91 @@ fn apply_rollback_transaction(
         );
     }
 
-    let files_changed = extract_patch_files_from_path(&stored_patch)
+    let metadata = extract_patch_metadata_from_path(&stored_patch)
         .with_context(|| format!("failed to read stored patch {}", stored_patch.display()))?;
-    run_git_apply(workspace, &stored_patch, ["--reverse", "--check"])?;
+    let files_changed = metadata.files;
+    validate_patch_targets(&files_changed)?;
+    let has_copy_snapshot = metadata.has_copies
+        || stored_patch.with_extension("rollback.json").exists()
+        || stored_patch.with_extension("rollback.patch").exists();
+    let rollback_patch = if has_copy_snapshot {
+        validate_copy_rollback(workspace, &stored_patch, &files_changed)?
+    } else {
+        stored_patch.clone()
+    };
+    if has_copy_snapshot {
+        run_git_apply(
+            workspace,
+            &rollback_patch,
+            ["--whitespace=nowarn", "--reverse", "--check"],
+        )?;
+    } else {
+        run_git_apply(workspace, &rollback_patch, ["--reverse", "--check"])?;
+    }
     ensure_log_writable(workspace)?;
-    run_git_apply(workspace, &stored_patch, ["--reverse"])?;
+    if has_copy_snapshot {
+        run_git_apply(
+            workspace,
+            &rollback_patch,
+            ["--whitespace=nowarn", "--reverse"],
+        )?;
+    } else {
+        run_git_apply(workspace, &rollback_patch, ["--reverse"])?;
+    }
 
     Ok(AppliedRollbackTransaction {
         rollback_transaction_id: new_id("rb"),
         stored_patch,
         files_changed,
     })
+}
+
+fn validate_copy_rollback(
+    workspace: &Workspace,
+    original: &Path,
+    files: &[String],
+) -> Result<PathBuf> {
+    let guard = original.with_extension("rollback.json");
+    let rollback = original.with_extension("rollback.patch");
+    if !guard.is_file() || !rollback.is_file() {
+        bail!(
+            "copy transaction rollback snapshot is missing; refusing to remove files without the recorded postimage"
+        );
+    }
+    let snapshot: CopyRollbackSnapshot = serde_json::from_reader(fs::File::open(&guard)?)
+        .context("invalid copy rollback snapshot")?;
+    if snapshot.version != 1
+        || snapshot.object_format != snapshot_object_format(workspace)?
+        || snapshot
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>()
+            != files.iter().map(String::as_str).collect::<Vec<_>>()
+    {
+        bail!("copy rollback snapshot does not match transaction targets");
+    }
+    let hash_repo = tempfile::Builder::new()
+        .prefix("workspace-rollback-check-")
+        .tempdir()?;
+    initialize_snapshot_repo(hash_repo.path(), &snapshot.object_format)?;
+    if hash_snapshot_contents(original, &fs::symlink_metadata(original)?, hash_repo.path())?
+        != snapshot.original_blob
+        || hash_snapshot_contents(
+            &rollback,
+            &fs::symlink_metadata(&rollback)?,
+            hash_repo.path(),
+        )? != snapshot.rollback_blob
+    {
+        bail!("copy rollback snapshot patch contents have changed");
+    }
+    let metadata = extract_patch_metadata_from_path(&rollback)?;
+    validate_patch_targets(&metadata.files)?;
+    if metadata.files.iter().any(|path| !files.contains(path)) || metadata.has_copies {
+        bail!("copy rollback patch does not match transaction targets");
+    }
+    validate_snapshot_files(workspace, &snapshot.files, hash_repo.path())?;
+    Ok(rollback)
 }
 
 struct ObservedChangedFiles {
@@ -6373,6 +7010,7 @@ fn should_include_repo_file(path: &str) -> bool {
         && !has_windows_drive_prefix(path)
         && path != LOG_DIR
         && !path.starts_with(&format!("{LOG_DIR}/"))
+        && path != ".git"
         && !path.starts_with(".git/")
         && path
             .split('/')
@@ -7389,28 +8027,107 @@ fn ensure_no_pending_utf8(pending_utf8: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 fn extract_patch_files(patch_content: &str) -> Vec<String> {
-    let mut files = BTreeSet::new();
-    for line in patch_content.lines() {
-        collect_patch_file_line(line, &mut files);
+    extract_patch_files_from_reader(std::io::Cursor::new(patch_content))
+        .expect("test patch headers should parse")
+}
+
+#[derive(Default)]
+struct PatchHeaderState {
+    old_lines: usize,
+    new_lines: usize,
+    binary_body: bool,
+}
+
+impl PatchHeaderState {
+    fn is_file_header(&mut self, line: &[u8]) -> Result<bool> {
+        if self.old_lines != 0 || self.new_lines != 0 {
+            let (old, new) = match line.first() {
+                Some(b'-') => (1, 0),
+                Some(b'+') => (0, 1),
+                Some(b' ') | None => (1, 1),
+                Some(b'\\') => (0, 0),
+                _ => bail!("invalid patch hunk body"),
+            };
+            self.old_lines = self
+                .old_lines
+                .checked_sub(old)
+                .context("patch hunk has too many old lines")?;
+            self.new_lines = self
+                .new_lines
+                .checked_sub(new)
+                .context("patch hunk has too many new lines")?;
+            return Ok(false);
+        }
+        if line.starts_with(b"diff --git ") {
+            self.binary_body = false;
+        }
+        if self.binary_body {
+            if !patch_line_has_file_header_prefix(line) {
+                return Ok(false);
+            }
+            self.binary_body = false;
+        }
+        if line.starts_with(b"GIT binary patch") {
+            self.binary_body = true;
+            return Ok(false);
+        }
+        if line.starts_with(b"@@ ") {
+            // Only the range tokens are ASCII; function context can be arbitrary bytes.
+            let mut fields = line
+                .split(|byte| byte.is_ascii_whitespace())
+                .filter(|field| !field.is_empty());
+            fields.next();
+            self.old_lines = patch_hunk_count(fields.next(), b'-')?;
+            self.new_lines = patch_hunk_count(fields.next(), b'+')?;
+            if fields.next() != Some(b"@@".as_slice()) {
+                bail!("invalid patch hunk header");
+            }
+            return Ok(false);
+        }
+        Ok(patch_line_has_file_header_prefix(line))
     }
-    files.into_iter().collect()
 }
 
-fn extract_patch_files_from_path(path: &Path) -> Result<Vec<String>> {
+fn patch_hunk_count(field: Option<&[u8]>, prefix: u8) -> Result<usize> {
+    let range = field
+        .and_then(|field| field.strip_prefix(&[prefix]))
+        .context("invalid patch hunk range")?;
+    let range = std::str::from_utf8(range).context("invalid patch hunk range")?;
+    let (start, count) = range.split_once(',').unwrap_or((range, "1"));
+    start.parse::<usize>().context("invalid patch hunk start")?;
+    count.parse().context("invalid patch hunk count")
+}
+
+struct PatchMetadata {
+    files: Vec<String>,
+    has_copies: bool,
+}
+
+fn extract_patch_metadata_from_path(path: &Path) -> Result<PatchMetadata> {
     let file = fs::File::open(path)?;
-    extract_patch_files_from_reader(file)
+    extract_patch_metadata_from_reader(file)
 }
 
+#[cfg(test)]
 fn extract_patch_files_from_reader<R: Read>(reader: R) -> Result<Vec<String>> {
+    Ok(extract_patch_metadata_from_reader(reader)?.files)
+}
+
+fn extract_patch_metadata_from_reader<R: Read>(reader: R) -> Result<PatchMetadata> {
     let mut reader = BufReader::new(reader);
     let mut files = BTreeSet::new();
     let mut line_number = 1usize;
+    let mut state = PatchHeaderState::default();
+    let mut has_copies = false;
 
     while let Some(line) =
         read_bounded_output_line(&mut reader, line_number, MAX_PATCH_LINE_BYTES, "patch")?
     {
         line_number += 1;
-        if !patch_line_has_file_header_prefix(&line.bytes) {
+        if !state
+            .is_file_header(&line.bytes)
+            .with_context(|| format!("invalid patch structure at line {}", line.line_number))?
+        {
             continue;
         }
         if line.exceeded {
@@ -7424,9 +8141,13 @@ fn extract_patch_files_from_reader<R: Read>(reader: R) -> Result<Vec<String>> {
             format!("patch header line {} is not valid UTF-8", line.line_number)
         })?;
         collect_patch_file_line(line, &mut files);
+        has_copies |= line.starts_with("copy from ") || line.starts_with("copy to ");
     }
 
-    Ok(files.into_iter().collect())
+    Ok(PatchMetadata {
+        files: files.into_iter().collect(),
+        has_copies,
+    })
 }
 
 fn patch_line_has_file_header_prefix(line: &[u8]) -> bool {
@@ -7434,6 +8155,10 @@ fn patch_line_has_file_header_prefix(line: &[u8]) -> bool {
         || line.starts_with(b"--- ")
         || line.starts_with(b"rename from ")
         || line.starts_with(b"rename to ")
+        || line.starts_with(b"rename old ")
+        || line.starts_with(b"rename new ")
+        || line.starts_with(b"copy from ")
+        || line.starts_with(b"copy to ")
         || line.starts_with(b"diff --git ")
 }
 
@@ -7442,9 +8167,19 @@ fn collect_patch_file_line(line: &str, files: &mut BTreeSet<String>) {
         files.insert(path);
     } else if let Some(path) = line.strip_prefix("--- ").and_then(clean_patch_path) {
         files.insert(path);
-    } else if let Some(path) = line.strip_prefix("rename from ").and_then(clean_patch_path) {
-        files.insert(path);
-    } else if let Some(path) = line.strip_prefix("rename to ").and_then(clean_patch_path) {
+    } else if let Some(path) = [
+        "rename from ",
+        "rename to ",
+        "rename old ",
+        "rename new ",
+        "copy from ",
+        "copy to ",
+    ]
+    .iter()
+    .find_map(|prefix| line.strip_prefix(prefix))
+    .and_then(decode_patch_path)
+    {
+        // Rename/copy headers are already repository-relative, unlike ---/+++.
         files.insert(path);
     } else if let Some((old_path, new_path)) = diff_git_paths(line) {
         if let Some(path) = clean_diff_git_path(&old_path) {
@@ -7470,39 +8205,94 @@ fn diff_git_paths(line: &str) -> Option<(String, String)> {
     let rest = line.strip_prefix("diff --git ")?;
     if rest.starts_with('"') {
         let (old_path, rest) = unquote_git_path(rest)?;
-        let (new_path, rest) = unquote_git_path(rest.trim_start())?;
-        if rest.trim().is_empty() {
+        let rest = rest.trim_start();
+        if !rest.starts_with('"') {
+            return Some((old_path, rest.to_string()));
+        }
+        let (new_path, rest) = unquote_git_path(rest)?;
+        if rest.is_empty() {
             return Some((old_path, new_path));
         }
         return None;
     }
 
+    // Git obtains diff-only targets by finding the same name on both sides
+    // after -p1. Spaces in unquoted names are not necessarily separators.
+    let old_name_start = if rest.starts_with('/') {
+        0
+    } else {
+        rest.find('/')? + 1
+    };
+    let mut next_slash = rest.find('/');
+    for (index, separator) in rest.char_indices() {
+        if index < old_name_start || !matches!(separator, ' ' | '\t') {
+            continue;
+        }
+        let old_path = &rest[..index];
+        let new_path = &rest[index + 1..];
+        let old_name = &rest[old_name_start..index];
+        if new_path.starts_with('"') {
+            if let Some((new_path, tail)) = unquote_git_path(new_path)
+                && tail.is_empty()
+                && old_name == strip_patch_path_prefix(&new_path)
+            {
+                return Some((old_path.to_string(), new_path));
+            }
+        } else {
+            // Advance once through slashes instead of rescanning each candidate.
+            while let Some(slash) = next_slash
+                && slash <= index
+            {
+                next_slash = rest[slash + 1..].find('/').map(|offset| slash + 1 + offset);
+            }
+            let new_name = if new_path.starts_with('/') {
+                new_path
+            } else if let Some(slash) = next_slash {
+                &rest[slash + 1..]
+            } else {
+                new_path
+            };
+            if old_name == new_name {
+                return Some((old_path.to_string(), new_path.to_string()));
+            }
+        }
+    }
     let rest = rest.strip_prefix("a/")?;
     let (old_path, new_path) = rest.rsplit_once(" b/")?;
-    Some((old_path.to_string(), new_path.to_string()))
+    Some((format!("a/{old_path}"), format!("b/{new_path}")))
 }
 
 fn clean_patch_path(raw: &str) -> Option<String> {
-    let raw = raw.trim();
-    let path = if raw.starts_with('"') {
-        unquote_git_path(raw)?.0
+    clean_diff_git_path(&decode_patch_path(raw)?)
+}
+
+fn decode_patch_path(raw: &str) -> Option<String> {
+    if raw.starts_with('"') {
+        Some(unquote_git_path(raw)?.0)
     } else {
-        raw.split_once('\t')
-            .map_or(raw, |(path, _)| path)
-            .to_string()
-    };
-    clean_diff_git_path(&path)
+        Some(
+            raw.split_once('\t')
+                .map_or(raw, |(path, _)| path)
+                .to_string(),
+        )
+    }
 }
 
 fn clean_diff_git_path(raw: &str) -> Option<String> {
-    let path = raw
-        .strip_prefix("a/")
-        .or_else(|| raw.strip_prefix("b/"))
-        .unwrap_or(raw);
-    if path.is_empty() || path == "/dev/null" {
+    if raw.is_empty() || raw == "/dev/null" {
         None
     } else {
-        Some(path.to_string())
+        Some(strip_patch_path_prefix(raw).to_string())
+    }
+}
+
+fn strip_patch_path_prefix(raw: &str) -> &str {
+    // Match the explicit git apply -p1 for every traditional/diff header prefix.
+    // Keep absolute paths intact so validation can reject them.
+    if raw.starts_with('/') {
+        raw
+    } else {
+        raw.split_once('/').map_or(raw, |(_, path)| path)
     }
 }
 
@@ -7563,7 +8353,7 @@ fn run_git_apply<const N: usize>(
     extra_args: [&str; N],
 ) -> Result<()> {
     let mut command = Command::new("git");
-    command.current_dir(&workspace.root).arg("apply");
+    command.current_dir(&workspace.root).args(["apply", "-p1"]);
     for arg in extra_args {
         command.arg(arg);
     }
@@ -8732,6 +9522,114 @@ diff --git a/src/main.rs b/src/main.rs
 +new
 ";
         assert_eq!(extract_patch_files(patch), vec!["src/main.rs"]);
+    }
+
+    #[test]
+    fn patch_hunk_context_bytes_are_opaque() {
+        let patch = b"diff --git a/note.txt b/note.txt\n--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@ function caf\xe9 \xff\n-old\n+new\n";
+        assert_eq!(
+            extract_patch_files_from_reader(patch.as_slice()).unwrap(),
+            vec!["note.txt"]
+        );
+        let malformed = b"--- a/note.txt\n+++ b/note.txt\n@@ -\xff +1 @@\n-old\n+new\n";
+        assert!(extract_patch_files_from_reader(malformed.as_slice()).is_err());
+    }
+
+    #[test]
+    fn patch_hunks_do_not_contribute_file_headers() {
+        let patch = "--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@\n--- nested/.workspace/config\n+++ nested/.git/config\n--- a/next.txt\n+++ b/next.txt\n@@ -1,2 +1,2 @@\n context\n-old\n+new\n\\ No newline at end of file\n";
+        assert_eq!(extract_patch_files(patch), vec!["next.txt", "note.txt"]);
+        let patch = format!(
+            "diff --git a/note.txt b/note.txt\n--- a/note.txt\n+++ b/note.txt\n@@ -1 +1 @@\n--- nested/.workspace/{}\n+ordinary\n",
+            "x".repeat(MAX_PATCH_LINE_BYTES)
+        );
+        assert_eq!(extract_patch_files(&patch), vec!["note.txt"]);
+    }
+
+    #[test]
+    fn extracts_custom_prefix_patch_targets_like_git_p1() {
+        for (old_prefix, new_prefix) in [("old", "new"), ("i", "w")] {
+            let patch = format!(
+                "diff --git {old_prefix}/src/note.txt {new_prefix}/src/note.txt\n--- {old_prefix}/src/note.txt\n+++ {new_prefix}/src/note.txt\n@@ -1 +1 @@\n-old\n+new\n"
+            );
+            assert_eq!(extract_patch_files(&patch), vec!["src/note.txt"]);
+        }
+    }
+
+    #[test]
+    fn extracts_custom_prefix_diff_only_and_quoted_targets() {
+        for (header, expected) in [
+            ("old/space name.txt new/space name.txt", "space name.txt"),
+            ("old/src/a.txt new/src/a.txt", "src/a.txt"),
+            (
+                "\"old/src/tab\\tname.txt\" \"new/src/tab\\tname.txt\"",
+                "src/tab\tname.txt",
+            ),
+            (
+                "\"old/space name.txt\" new/space name.txt",
+                "space name.txt",
+            ),
+            (
+                "old/space name.txt \"new/space name.txt\"",
+                "space name.txt",
+            ),
+            ("a/has b/name.txt \"b/has b/name.txt\"", "has b/name.txt"),
+        ] {
+            let patch = format!("diff --git {header}\nold mode 100644\nnew mode 100755\n");
+            let files = extract_patch_files(&patch);
+            assert_eq!(files, vec![expected], "header: {header}");
+        }
+    }
+
+    #[test]
+    fn rename_and_copy_headers_keep_repository_relative_components() {
+        for operation in ["rename", "copy"] {
+            let patch = format!(
+                "diff --git old/a/old name.txt new/b/new name.txt\nsimilarity index 100%\n{operation} from a/old name.txt\n{operation} to b/new name.txt\n"
+            );
+            assert_eq!(
+                extract_patch_files(&patch),
+                vec!["a/old name.txt", "b/new name.txt"]
+            );
+        }
+    }
+
+    #[test]
+    fn custom_prefix_patch_targets_reject_metadata_and_unsafe_paths() {
+        for path in [
+            ".workspace/transactions/sentinel.patch",
+            ".git/config",
+            ".git",
+            "/tmp/outside.txt",
+            "../outside.txt",
+            "src/../outside.txt",
+            "src//note.txt",
+        ] {
+            let patch = format!(
+                "diff --git old/{path} new/{path}\n--- old/{path}\n+++ new/{path}\n@@ -1 +1 @@\n-old\n+new\n"
+            );
+            let files = extract_patch_files(&patch);
+            assert!(
+                validate_patch_targets(&files).is_err(),
+                "target should be rejected: {path}, extracted: {files:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_prefix_diff_only_and_relative_headers_reject_metadata() {
+        for patch in [
+            "diff --git old/.workspace/log.jsonl new/.workspace/log.jsonl\nold mode 100644\nnew mode 100755\n",
+            "diff --git \"old/\\056workspace/log.jsonl\" \"new/.workspace/log.jsonl\"\nold mode 100644\nnew mode 100755\n",
+            "diff --git old/.workspace/log.jsonl new/safe.txt\nsimilarity index 100%\nrename from .workspace/log.jsonl\nrename to safe.txt\n",
+            "diff --git old/safe.txt new/.workspace/log.jsonl\nsimilarity index 100%\ncopy from safe.txt\ncopy to .workspace/log.jsonl\n",
+        ] {
+            let files = extract_patch_files_from_reader(std::io::Cursor::new(patch)).unwrap();
+            assert!(
+                validate_patch_targets(&files).is_err(),
+                "should reject protected target: {files:?}"
+            );
+        }
     }
 
     #[test]
